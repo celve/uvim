@@ -19,7 +19,7 @@ ifneq ($(and $(SIGN),$(filter dist publish,$(MAKECMDGOALS))),)
 $(error SIGN is for local builds: installs keep their grants only under project.yml's identity)
 endif
 
-.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs
+.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs
 
 all: build
 
@@ -49,6 +49,12 @@ test-beliefs:
 	@mkdir -p $(DERIVED)
 	@swiftc -o $(DERIVED)/beliefs-test $(VIM_PURE) $(CORE_PURE) Sources/Vim/Runtime/Beliefs.swift Tests/BeliefsTests/main.swift
 	@$(DERIVED)/beliefs-test
+
+# The Normal Mode Key's default and stored choices, with the argument domain as the store: nothing is written, no grant.
+test-prefs:
+	@mkdir -p $(DERIVED)
+	@swiftc -o $(DERIVED)/prefs-test Sources/Core/Prefs.swift Tests/PrefsTests/main.swift
+	@$(DERIVED)/prefs-test
 
 gen:
 	xcodegen generate

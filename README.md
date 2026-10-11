@@ -25,12 +25,11 @@
 
 <p align="center">
   <sub><b>Fix every typo.</b> Each step is what uvim's engine does with these keys, in its simulation of a
-  native Mac text field. Esc enters Normal mode once you choose it in the menu.
-  The home page has <a href="https://uvim.app">more demos</a>.</sub>
+  native Mac text field. The home page has <a href="https://uvim.app">more demos</a>.</sub>
 </p>
 
 uvim reads and edits the focused field through Accessibility, and takes the keys it needs with a keyboard
-event tap. Type as usual, and press **⌃[** for Normal mode, or **Esc** if you choose it in the menu.
+event tap. Type as usual, and press **Esc** for Normal mode.
 
 - **Vim's grammar, not only `hjkl`.** Operators with motions and word objects, counts, registers, marks,
   search, Visual mode and `.` ([What works](#what-works)).
@@ -51,7 +50,6 @@ event tap. Type as usual, and press **⌃[** for Normal mode, or **Esc** if you 
    **Accessibility: not granted** in its menu and switch uvim on there.
 3. Quit uvim and open it again, since it creates its keyboard tap only at launch. The menu should now read
    `Input tap: running`, `Accessibility: granted` and `Input Monitoring: granted`.
-4. To enter Normal mode with Esc, choose **Esc** under **Normal Mode Key** in the menu.
 
 A release is signed with a Developer ID certificate and notarized by Apple. It [updates](#updates) itself: on
 its second launch uvim asks whether to check once a day. You can also
@@ -142,12 +140,12 @@ and copy the app again; the permissions carry over while the same identity signs
 A field starts in Insert mode. Moving between the blocks of one document, as in Notion, keeps the mode you
 were in.
 
-**⌃[** enters Normal mode, leaves Visual mode and cancels a half-typed command. It is Control and the key to
-the right of P, whatever the keyboard layout.
+**Esc** enters Normal mode, leaves Visual mode and cancels a half-typed command. In Normal mode with nothing
+half-typed it still goes to the app: press Esc twice to close a dialog, a popup or Spotlight from a field.
 
-**Esc stays the app's** by default, for its own cancels and dialogs. Choose **Esc** under **Normal Mode Key**
-and Esc does what ⌃[ does, except in Normal mode with nothing half-typed, where it still goes to the app:
-press Esc twice to close a dialog, a popup or Spotlight from a field. ⌃[ keeps working either way.
+**⌃[** does the same, except that uvim keeps it in Normal mode too. It is Control and the key to the right of
+P, whatever the keyboard layout, and it works whichever key you choose. To leave Esc to the apps, for their own
+cancels and dialogs, choose **⌃[** under **Normal Mode Key**.
 
 The menu-bar icon shows the mode as a letter in a square:
 
@@ -162,16 +160,16 @@ The menu-bar icon shows the mode as a letter in a square:
 Where uvim can set the selection, Normal mode also draws a block cursor. Nothing shows a half-typed command,
 or a `/` search as you type it. A click cancels either, and so does a key the app keeps.
 
-In Insert mode uvim takes only ⌃[, and Esc if you chose it. In Normal and Visual mode apps still keep every ⌘
-and ⌥ combination, Esc unless you chose it, Home, End, Page Up and Page Down, the function keys, and every ⌃
-combination but ⌃[, ⌃R and ⌃V, and ⌃F and ⌃B while
+In Insert mode uvim takes only Esc and ⌃[, or only ⌃[ if you chose it. In Normal and Visual mode apps still
+keep every ⌘ and ⌥ combination, Esc if you chose ⌃[, Home, End, Page Up and Page Down, the function keys, and
+every ⌃ combination but ⌃[, ⌃R and ⌃V, and ⌃F and ⌃B while
 [the app's own page keys](#native-word-paragraph-and-page-keys) are on. So ⌃A, ⌃E and ⌃K work
 as in any Mac text field, and a key uvim does not know beeps instead of typing.
 
 The menu is uvim's whole interface:
 
 - **Vim Mode** turns uvim off everywhere until you turn it back on or uvim starts again.
-- **Normal Mode Key** chooses ⌃[ or Esc for every app.
+- **Normal Mode Key** is Esc until you choose ⌃[, and applies to every app.
 - **Vim in _App_** chooses, per app:
   - **Auto**: uvim works in text fields, text areas and combo boxes, but never in password fields.
   - **Off**: uvim leaves the app alone. Terminals and code editors start Off: Terminal, iTerm2, kitty,
@@ -362,6 +360,7 @@ The Xcode project is generated from [`project.yml`](project.yml) by XcodeGen and
 | `make test`      | Run the pure engine's tests: no Xcode project, no permissions        |
 | `make test-pasteboard` | Run the pasteboard loan's tests on a private pasteboard: no permissions |
 | `make test-beliefs` | Run the beliefs file's tests in a temporary directory: no permissions |
+| `make test-prefs` | Run the Normal Mode Key's tests, which store nothing: no permissions |
 | `make release`   | Build Release, copy it to `.release/uvim.app`                        |
 | `make dist`      | `release`, then notarize it and stage its update in `dist/`          |
 | `make publish`   | `release`, then notarize it, stage its update and release it on GitHub |
@@ -419,7 +418,8 @@ uvim/
 ├── Tests/
 │   ├── VimEngineTests/         # `make test`: the engine driven through Sim, as preconditions
 │   ├── PasteboardTests/        # `make test-pasteboard`: the paste's loan on a private pasteboard
-│   └── BeliefsTests/           # `make test-beliefs`: the beliefs file in a temporary directory
+│   ├── BeliefsTests/           # `make test-beliefs`: the beliefs file in a temporary directory
+│   └── PrefsTests/             # `make test-prefs`: the Normal Mode Key's default and stored choices
 └── Resources/
     ├── AppIcon.icon/           # App icon: an Icon Composer document, edited in Icon Composer
     └── Assets.xcassets         # Accent color (still empty)

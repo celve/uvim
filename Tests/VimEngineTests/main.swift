@@ -1649,7 +1649,7 @@ expectToken(38, [.shift], "J", "J")
 expectToken(123, [], "", "<Left>")
 expectToken(36, [], "\r", "<CR>")
 expectToken(48, [], "\t", "\t")          // bare Tab stays vim's — deliberate scope
-expectToken(53, [], "\u{1B}", nil)       // physical Esc is the app's unless chosen
+expectToken(53, [], "\u{1B}", nil)       // physical Esc is the app's under the ⌃[ setting
 expectToken(38, [.command], "j", nil)
 
 expectToken(53, [], "\u{1B}", "<Esc>", escapeEngages: true)
