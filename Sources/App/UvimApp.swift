@@ -15,8 +15,8 @@ struct UvimApp: App {
         MenuBarExtra {
             Toggle("Vim Mode", isOn: $model.vimEnabled)
             Picker("Normal Mode Key", selection: $model.normalModeKey) {
-                Text("⌃[").tag(NormalModeKey.controlBracket)
                 Text("Esc").tag(NormalModeKey.escape)
+                Text("⌃[").tag(NormalModeKey.controlBracket)
             }
             if let front = model.frontApp {
                 Picker("Vim in \(front.name)", selection: Binding(

@@ -57,7 +57,7 @@ public enum Prefs {
     public static var normalModeKey: NormalModeKey {
         get {
             UserDefaults.standard.string(forKey: normalModeKeyKey).flatMap(NormalModeKey.init(rawValue:))
-                ?? .controlBracket
+                ?? .escape
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: normalModeKeyKey) }
     }

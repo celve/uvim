@@ -61,7 +61,7 @@ public enum KeyNotation {
         // character path, never after.
         if chord.contains(.option) { return nil }
 
-        // Physical Esc is vim's only when the user chose it; apps keep it for their cancels otherwise.
+        // Physical Esc is vim's under the Esc setting; under ⌃[ apps keep it for their cancels.
         if keyCode == escape { return escapeEngages ? "<Esc>" : nil }
 
         // Keys with no character identity of their own. They must be decided
