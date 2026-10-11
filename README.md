@@ -17,15 +17,12 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/demo-dark.gif">
-    <img src="docs/images/demo-light.gif" width="760" alt="Fix every typo: Esc enters Normal mode; /teh ⏎ finds the typo; ciw fixes it; n finds the next one, and . fixes it too; leaving “Check the draft and the slides before Friday.”">
-  </picture>
+  <img src="docs/images/demo.gif" width="760" alt="A screen recording of uvim in three apps. In Notes, dw deletes a word and . repeats it. In TextEdit, 2dd deletes two lines. In Chrome, F3 jumps back to “3pm” and ct, changes it to “noon”. Back in Notes, Esc enters Normal mode, /teh ⏎ finds a typo, ciw fixes it, n finds the next one, and . fixes it too.">
 </p>
 
 <p align="center">
-  <sub><b>Fix every typo.</b> Each step is what uvim's engine does with these keys, in its simulation of a
-  native Mac text field. The home page has <a href="https://uvim.app">more demos</a>.</sub>
+  <sub><b>Notes, TextEdit and Chrome.</b> A screen recording of uvim, with each key shown as it is pressed.
+  The home page has <a href="https://uvim.app">more demos</a>.</sub>
 </p>
 
 uvim reads and edits the focused field through Accessibility, and takes the keys it needs with a keyboard
