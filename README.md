@@ -183,6 +183,9 @@ The menu is uvim's whole interface:
   panes.
 - [**Start at Login**](#start-at-login) and, below it, **Open Beliefs File**, which opens the
   file that keeps your choices and what uvim has learned.
+- **Check for Updates…** checks for a newer release now; while one that a daily check found is waiting,
+  it reads **Update to uvim _X_…** instead. **Check for Updates Automatically** switches the daily check
+  on or off. A Debug build has neither row ([Updates](#updates)).
 
 uvim also stands aside while macOS has Secure Event Input on, as it does in a password field.
 
