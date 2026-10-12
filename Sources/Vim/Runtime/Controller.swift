@@ -84,6 +84,10 @@ public final class Controller {
         tracker.onPointerAction = { [weak self] in self?.pointerActed() }
         // Force the recorder's one store read off the tap callback's first command.
         _ = Diag.recordsText
+    }
+
+    /// Starts focus tracking, once. Only with Accessibility granted: its click monitor costs a process without it its tap.
+    public func start() {
         tracker.start()
     }
 

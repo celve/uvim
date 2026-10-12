@@ -14,7 +14,7 @@ import Foundation
 /// (non-self) event in priority order, and the event is consumed iff ANY
 /// handler returns true. uvim registers a single editor handler today; the
 /// shape is kept because its teardown-on-empty keeps a handler-less app from
-/// holding a tap (and from triggering an Input-Monitoring prompt).
+/// holding a tap.
 @MainActor
 public final class InputHub {
     public static let shared = InputHub()
@@ -31,20 +31,19 @@ public final class InputHub {
     private var nextID: UInt64 = 0
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var refused = false
 
     private init() {}
 
-    public var isTapInstalled: Bool { tap != nil }
+    public var tapStanding: TapStanding { tap != nil ? .installed : refused ? .refused : .waiting }
 
-    /// Register a keystroke handler. Creates the shared tap on the first
-    /// registration (prompting for Input Monitoring if needed). See the type
-    /// doc for the handler contract.
+    /// Registers a keystroke handler, and creates the shared tap if Accessibility is granted; the type doc has the contract.
     @discardableResult
     public func register(_ priority: Priority, _ handler: @escaping (KeyEvent) -> Bool) -> Token {
         let token = Token(id: nextID); nextID &+= 1
         entries.append(Entry(token: token, priority: priority, handler: handler))
         entries.sort { $0.priority.rawValue > $1.priority.rawValue }
-        ensureTap()
+        installTap()
         return token
     }
 
@@ -55,11 +54,14 @@ public final class InputHub {
         if entries.isEmpty { teardownTap() }
     }
 
-    // MARK: - tap lifecycle (one tap, one run-loop source, one re-enable, one permission request)
+    // MARK: - tap lifecycle (one tap, one run-loop source, one re-enable, one attempt)
 
-    private func ensureTap() {
-        guard tap == nil else { return }
-        if !CGPreflightListenEventAccess() { _ = CGRequestListenEventAccess() }   // register uvim + prompt
+    /// Creates the tap once a handler wants it and Accessibility is granted, which may be after launch: the app polls this.
+    @discardableResult
+    public func installTap() -> TapStanding {
+        guard tapStanding.attempts(wanted: !entries.isEmpty, trusted: AX.ensureTrusted(prompt: false)) else {
+            return tapStanding
+        }
         // keyDown only: vim consumes key-downs. flagsChanged and keyUp are
         // deliberately not observed — uvim has no consumer for either.
         let mask = CGEventMask(1) << CGEventType.keyDown.rawValue
@@ -67,13 +69,15 @@ public final class InputHub {
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                           options: .defaultTap, eventsOfInterest: mask,
                                           callback: inputHubCallback, userInfo: selfPtr) else {
-            Log.system.error("tapCreate failed — Input Monitoring not granted?")
-            return
+            Log.system.error("tapCreate refused with Accessibility granted")
+            refused = true
+            return .refused
         }
         self.tap = tap
         source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        return .installed
     }
 
     private func teardownTap() {

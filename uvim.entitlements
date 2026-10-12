@@ -5,8 +5,8 @@
 	<!--
 	  Intentionally empty: uvim runs NON-sandboxed. A sandboxed app cannot
 	  drive other apps via the Accessibility API or post CGEvents, which the
-	  vim execution path requires. Accessibility and Input Monitoring are
-	  runtime trust grants, not entitlements.
+	  vim execution path requires. Accessibility is a runtime trust grant,
+	  not an entitlement.
 	-->
 </dict>
 </plist>
