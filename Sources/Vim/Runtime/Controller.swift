@@ -24,9 +24,7 @@ public final class Controller {
     /// Physical Esc engages Normal mode alongside ⌃[: the menu's Normal Mode Key.
     public var escapeEngages = false
 
-    /// Mode channel for the menu-bar indicator; nil = unbound. Setting the
-    /// callback publishes immediately — the tracker may have bound during
-    /// init, before the app model could wire in.
+    /// Mode channel for the menu-bar indicator, nil while unbound; setting it publishes the current mode.
     public var onModeChange: ((VimState.Mode?) -> Void)? {
         didSet {
             publishedMode = currentIndicatorMode

@@ -651,7 +651,10 @@ macOS 14, 15 and 26, that is why uvim behaves as it does:
 - **When the grant arrives**, which a 2 s poll sees, uvim attempts its tap. On its first launch ever,
   when macOS had no entry for it as it started, the tap comes in place. On any later launch that
   process was already turned down, so uvim starts a new uvim and quits. This handover takes a second
-  or two and happens once: the new uvim never hands over again.
+  or two and happens once: the new uvim never hands over again. It keeps **Vim Mode** as you left it,
+  and a release asks its question about checking for updates again if you left it unanswered, as
+  every launch does. Where uvim cannot start the new one, as when `uvim.app` was moved while it
+  waited, the menu reads **Input tap: not installed — quit and reopen uvim**.
 - **A uvim that had the grant at launch and is still refused** has Input Monitoring switched off for
   it, which overrides Accessibility for a tap. Only then does the menu show the **Input Monitoring**
   row. Switching uvim on there counts from the next launch, which is yours to make.

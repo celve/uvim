@@ -2,11 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	  Intentionally empty: uvim runs NON-sandboxed. A sandboxed app cannot
-	  drive other apps via the Accessibility API or post CGEvents, which the
-	  vim execution path requires. Accessibility is a runtime trust grant,
-	  not an entitlement.
-	-->
+	<!-- Empty on purpose: a sandboxed app cannot drive others through Accessibility, which is a grant, not an entitlement. -->
 </dict>
 </plist>

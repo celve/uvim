@@ -1,20 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The single system-wide keystroke monitor. Owns ONE consuming `CGEventTap`
-/// and fans each event out to an ordered set of registered handlers.
-///
-/// Handler contract (READ THIS): a handler runs SYNCHRONOUSLY on the main run
-/// loop for EVERY keystroke system-wide, and its return value is the consume
-/// verdict. It MUST return promptly and DEFER any real work (AX / settle
-/// waits) off the callback — a blocking handler freezes all keyboard input
-/// until the OS disables the tap on timeout.
-///
-/// Dispatch is OBSERVE-ALL / CONSUME-IF-ANY: every handler sees every
-/// (non-self) event in priority order, and the event is consumed iff ANY
-/// handler returns true. uvim registers a single editor handler today; the
-/// shape is kept because its teardown-on-empty keeps a handler-less app from
-/// holding a tap.
+/// The one keyboard tap: every handler sees every key on the main run loop, must return at once, and any `true` consumes it.
 @MainActor
 public final class InputHub {
     public static let shared = InputHub()

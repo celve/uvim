@@ -33,7 +33,8 @@ struct UvimApp: App {
                 )
             }
             Divider()
-            Text(model.tap == .installed ? "Input tap: running" : "Input tap: not installed")
+            Text(model.tap == .installed ? "Input tap: running"
+                : model.handoverFailed ? "Input tap: not installed — quit and reopen uvim" : "Input tap: not installed")
                 .onAppear { model.refresh() }
             Button(model.accessibilityTrusted ? "Accessibility: granted" : "Accessibility: not granted") {
                 model.openPrivacyPane("Privacy_Accessibility")
@@ -283,6 +284,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var accessibilityTrusted = false
     @Published private(set) var inputMonitoringGranted = false
     @Published private(set) var tap = TapStanding.waiting
+    @Published private(set) var handoverFailed = false
     /// The tracker unbinds under Secure Input only when it next resolves; the icon need not wait.
     @Published private(set) var secureInput = false
     @Published private(set) var frontApp: FrontApp?
@@ -314,6 +316,7 @@ final class AppModel: ObservableObject {
     private let startedTrusted: Bool
     private var handingOver = false
     private static let handedOverArgument = "--handed-over"
+    private static let vimOffArgument = "--vim-off"
 
     init() {
         // Before any AX or binding work: seed the disable list, and bound
@@ -325,6 +328,10 @@ final class AppModel: ObservableObject {
 
         let controller = Controller()
         self.controller = controller
+        if CommandLine.arguments.contains(Self.vimOffArgument) {
+            vimEnabled = false
+            controller.enabled = false
+        }
         controller.escapeEngages = normalModeKey == .escape
         controller.onModeChange = { [weak self] mode in self?.mode = mode }
         // Its own channel, deliberately: mode changes do NOT ride every rebind
@@ -377,13 +384,19 @@ final class AppModel: ObservableObject {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.activates = false
-        configuration.arguments = [Self.handedOverArgument]
+        configuration.arguments = [Self.handedOverArgument] + (vimEnabled ? [] : [Self.vimOffArgument])
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
-            guard app != nil else {
-                Log.system.error("handover failed — \(error?.localizedDescription ?? "no app", privacy: .public)")
-                return
+            let failure = app == nil ? error?.localizedDescription ?? "no app" : nil
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    guard let failure else {
+                        NSApplication.shared.terminate(nil)
+                        return
+                    }
+                    Log.system.error("handover failed — \(failure, privacy: .public)")
+                    self?.handoverFailed = true
+                }
             }
-            DispatchQueue.main.async { NSApplication.shared.terminate(nil) }
         }
     }
 
