@@ -9,6 +9,8 @@ RELAPP  := $(RELEASE)/$(PROJECT).app
 SPARKLE := $(DERIVED)/SourcePackages/artifacts/sparkle/Sparkle/bin
 # Sparkle orders updates by CFBundleVersion, which the commit count only ever raises along main.
 BUILD   := $(shell git rev-list --count HEAD 2>/dev/null)
+# The Homebrew tap `make publish` writes each release's cask to; empty stages and writes no cask.
+TAP     := celve/homebrew-tap
 # Empty signs as project.yml says; `-` signs ad-hoc, and any other value names a keychain identity.
 SIGN    :=
 # SIGN builds stay unhardened: without a team, the hardened runtime refuses the app's own frameworks.
@@ -87,13 +89,13 @@ release: gen
 	codesign --verify --deep --strict $(RELAPP)
 	@echo "Release app: $(RELAPP)"
 
-# Stages an update in dist/ without publishing it: the zipped app and the appcast pointing at it.
+# Stages an update in dist/ without publishing it: the zipped app, the appcast pointing at it and the cask.
 dist: release
-	scripts/sparkle-release.sh dist $(RELAPP) $(SPARKLE) $(DIST)
+	scripts/sparkle-release.sh dist $(RELAPP) $(SPARKLE) $(DIST) $(TAP)
 
-# Stages as dist does, then releases it on GitHub, where every installed copy's feed looks.
+# Stages as dist does, then releases it on GitHub, where every installed copy's feed looks, and writes the cask to $(TAP).
 publish: release
-	scripts/sparkle-release.sh publish $(RELAPP) $(SPARKLE) $(DIST)
+	scripts/sparkle-release.sh publish $(RELAPP) $(SPARKLE) $(DIST) $(TAP)
 
 # Spares $(RELEASE): SMAppService records the path of the bundle its login item was registered from.
 clean:

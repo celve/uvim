@@ -40,21 +40,29 @@ event tap. Type as usual, and press **Esc** for Normal mode.
 
 ## Install
 
-1. Download the [latest release](https://github.com/celve/uvim/releases/latest), unzip it, and move `uvim.app`
-   to `/Applications` before you open it for the first time: Sparkle, which updates uvim, cannot update a copy
-   run from Downloads or from a disk image, and by default it does not say so.
+1. Install it with [Homebrew](https://brew.sh):
+
+   ```sh
+   brew install --cask celve/tap/uvim
+   ```
+
+   Or download the [latest release](https://github.com/celve/uvim/releases/latest), unzip it, and move
+   `uvim.app` to `/Applications` before you open it for the first time: Sparkle, which updates uvim, cannot
+   update a copy run from Downloads or from a disk image, and by default it does not say so.
 2. Open uvim and allow **Input Monitoring** when macOS asks. uvim does not ask for **Accessibility**: choose
    **Accessibility: not granted** in its menu and switch uvim on there.
 3. Quit uvim and open it again, since it creates its keyboard tap only at launch. The menu should now read
    `Input tap: running`, `Accessibility: granted` and `Input Monitoring: granted`.
 
 A release is signed with a Developer ID certificate and notarized by Apple. It [updates](#updates) itself: on
-its second launch uvim asks whether to check once a day. You can also
-[build uvim from source](#building-from-source).
+its second launch uvim asks whether to check once a day, and `brew upgrade` updates a Homebrew install as
+well. You can also [build uvim from source](#building-from-source).
 
 To uninstall, switch **Start at Login** off, quit and delete the app, remove it from Accessibility and Input
 Monitoring in System Settings → Privacy & Security, run `defaults delete io.github.celve.uvim`, and delete
-`~/Library/Application Support/uvim`.
+`~/Library/Application Support/uvim`. For a Homebrew install, `brew uninstall --zap --cask uvim` stands in
+for the quitting, the app, the settings and the folder; **Start at Login** and the two permissions are still
+yours to clear.
 
 <details>
 <summary><h3>Upgrading from mvim</h3></summary>
@@ -518,6 +526,9 @@ GitHub releases: the feed is the `appcast.xml` attached to the latest one.
   and stage nothing else.
 - **Sparkle updates only a copy it can replace.** One run from Downloads or from a disk image it
   cannot, and by default it does not say so: keep uvim in `/Applications` ([Install](#install)).
+- **Homebrew updates its own install too.** `brew upgrade` installs the release its cask names when
+  the uvim it finds is older, quitting uvim and opening it again, and leaves alone a uvim that
+  Sparkle has already updated. Both install the same notarized app.
 - **What goes out:** a request to github.com for the feed, and the download when you install.
   Sparkle's anonymous system profiling stays off.
 
@@ -550,6 +561,10 @@ Once, on the Mac you will publish from:
 5. Back the private key up — `generate_keys -x <file>`, then store the file somewhere safe.
    Installed copies check every update against that key, and `make publish` releases under no other.
 6. `gh auth login`: the release is created with the GitHub CLI.
+7. Check that the same login can push to the Homebrew tap, the repository `TAP` names in the
+   `Makefile`: `make publish` writes each release's cask there as `Casks/uvim.rb`, filled in from
+   `scripts/cask.rb`, and that file is never edited in the tap. A fork names a tap of its own and
+   edits `scripts/cask.rb`, which names this repository, or empties `TAP` to publish no cask.
 
 For each release, from a clean checkout of `main` on that Mac:
 
@@ -557,10 +572,12 @@ For each release, from a clean checkout of `main` on that Mac:
 2. `NOTARY_PROFILE=uvim-notary make dist` builds the app, sends it to the notary service and waits
    for the answer, which Apple says typically comes within an hour, staples the ticket to
    `.release/uvim.app`, and stages `dist/uvim-<version>.zip`, its notes (GitHub's, from the merged
-   pull requests, below `docs/release-notes/<version>.md` when that file exists) and `appcast.xml`
-   without publishing anything. Allow the keychain prompts the first time.
+   pull requests, below `docs/release-notes/<version>.md` when that file exists), `appcast.xml` and
+   `uvim.rb`, the cask naming that zip's checksum, without publishing anything. Allow the keychain
+   prompts the first time.
 3. `NOTARY_PROFILE=uvim-notary make publish` does all of that again, then creates release
-   `v<version>` holding the zip and the appcast. Installed copies find it at their next check.
+   `v<version>` holding the zip and the appcast, and writes the cask to the tap. Installed copies
+   find the release at their next check, and Homebrew at its next `brew update`.
 
 Both notarize the app as a zip, staple the ticket to the app, which a zip cannot carry, and zip it
 again, so Sparkle signs the archive that ships. `make dist` and `make publish` both stop when:
@@ -574,7 +591,8 @@ again, so Sparkle signs the archive that ships. `make dist` and `make publish` b
   which names each file it objects to;
 - the ticket cannot be stapled, or the app unpacked from the finished zip lacks its ticket or does
   not pass Gatekeeper as a notarized Developer ID app: the zip reaches `dist/` only after that;
-- the appcast item came out unsigned because the key is not the one `SUPublicEDKey` names.
+- the appcast item came out unsigned because the key is not the one `SUPublicEDKey` names;
+- `scripts/cask.rb` has lost the `@VERSION@` or the `@SHA256@` that a release fills in.
 
 `make publish` also refuses to release when:
 
@@ -592,9 +610,15 @@ again, so Sparkle signs the archive that ships. `make dist` and `make publish` b
   `project.yml`;
 - the tree has uncommitted changes, `HEAD` is not on `main`, `v<version>` exists, or the build
   number does not exceed the one the latest release offers, which installs would ignore;
+- `gh` cannot push to the tap, asked before anything is notarized: once the release exists, a cask
+  that cannot be written leaves Homebrew offering the version before it;
 - GitHub cannot answer any of those questions: a failed read refuses rather than guesses.
 
 The first release skips the checks against the latest release.
+
+The cask is written last, after the release exists, so Homebrew never names a zip that is not there
+yet. If that write fails, `make publish` says so and exits 1 with the release already made: commit
+`dist/uvim.rb` to the tap as `Casks/uvim.rb` by hand.
 
 `SPARKLE_KEY_FILE=<file>` signs with a key file instead of the keychain.
 

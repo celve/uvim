@@ -2,10 +2,11 @@
 # Notarizes a built app and stages its Sparkle update in DIR; `publish` also releases it on GitHub.
 # Notarizes with the keychain profile $NOTARY_PROFILE names, made by `notarytool store-credentials`.
 # Signs the update with the login keychain's Sparkle key, or the key file in $SPARKLE_KEY_FILE.
-# Usage: sparkle-release.sh dist|publish APP SPARKLE_BIN DIR
+# With TAP, a GitHub repository, it stages the release's Homebrew cask too, and `publish` writes it there.
+# Usage: sparkle-release.sh dist|publish APP SPARKLE_BIN DIR [TAP]
 set -euo pipefail
 
-mode=$1 app=$2 bin=$3 dir=$4
+mode=$1 app=$2 bin=$3 dir=$4 tap=${5:-}
 name=$(basename "$app" .app)
 die() { echo "error: $*" >&2; exit 1; }
 info() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist"; }
@@ -87,6 +88,26 @@ require_notarized() {
         die "Gatekeeper does not take the zipped app as a notarized Developer ID app: $assessment"
 }
 
+# Homebrew checks the download against the cask's checksum, so the cask is filled in from the staged zip.
+stage_cask() {
+    local cask sum
+    sum=$(shasum -a 256 "$zip" | cut -d' ' -f1)
+    cask=$(<"$(dirname "$0")/cask.rb")
+    cask=${cask//@VERSION@/$version}
+    cask=${cask//@SHA256@/$sum}
+    printf '%s\n' "$cask" >"$dir/$name.rb"
+    grep -qF "version \"$version\"" "$dir/$name.rb" && grep -qF "sha256 \"$sum\"" "$dir/$name.rb" ||
+        die "scripts/cask.rb has no @VERSION@ or no @SHA256@ to fill in"
+}
+
+# GitHub replaces a file only when told which blob it replaces, and creates one when told none.
+write_cask() {
+    local path=repos/$tap/contents/Casks/$name.rb blob
+    blob=$(gh api "$path" --jq .sha 2>/dev/null) || blob=
+    gh api --method PUT "$path" -f message="$name $version" -f content="$(base64 <"$dir/$name.rb")" \
+        ${blob:+-f sha="$blob"} >/dev/null
+}
+
 # Apple's marks on a Developer ID Application certificate and on the authority that issues it.
 developer_id='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists'
 developer_id+=' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
@@ -110,6 +131,9 @@ if [ "$mode" = publish ]; then
         200) check_latest ;;
         *) die "could not read $repo's latest release" ;;
     esac
+    # Asked before the release exists: afterwards a cask that cannot be written leaves the tap a version behind.
+    [ -z "$tap" ] || [ "$(gh api "repos/$tap" --jq .permissions.push 2>/dev/null)" = true ] ||
+        die "cannot push to $tap, the Homebrew tap this release's cask goes to (README, Publishing an update)"
 fi
 
 rm -rf "$dir"
@@ -139,6 +163,7 @@ appcast=(--download-url-prefix "https://github.com/$repo/releases/download/$tag/
 # generate_appcast only warns when the key is not SUPublicEDKey's, and leaves the item unsigned.
 grep -q 'sparkle:edSignature=' "$dir/appcast.xml" ||
     die "the update is unsigned: this signing key is not the one SUPublicEDKey names"
+[ -z "$tap" ] || stage_cask
 
 if [ "$mode" = dist ]; then
     echo "Staged $name $version ($build) in $dir/ — make publish releases it as $tag."
@@ -149,3 +174,6 @@ fi
 gh release create "$tag" "$zip" "$dir/appcast.xml" --repo "$repo" --target "$sha" \
     --title "$name $version" --notes-file "$notes" --latest
 echo "Released $tag: https://github.com/$repo/releases/tag/$tag"
+[ -n "$tap" ] || exit 0
+write_cask || die "$tag is released, but its cask did not reach $tap: commit $dir/$name.rb there as Casks/$name.rb"
+echo "Wrote its cask to $tap: https://github.com/$tap/blob/HEAD/Casks/$name.rb"
