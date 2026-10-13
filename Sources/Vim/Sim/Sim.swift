@@ -439,7 +439,6 @@ private extension Sim {
     mutating func execute(_ steps: [PhysicalStep], generated: Bool = false) -> Int? {
         var kept: [Int: Int] = [:]
         var generated = generated
-        var last: (selection: Range<Int>?, length: Int?) = (nil, nil)
         attribution = RunAttribution()
         for (index, step) in steps.enumerated() {
             if case .settle = step {} else { attribution.record(step) }
@@ -492,7 +491,6 @@ private extension Sim {
                 let expectation = planned.resolving(kept)
                 let (passed, observed, length) = settles(expectation, generated: generated)
                 generated = !passed || expectation.metByEmptyField
-                last = Self.asRead(expectation, observed, length)
                 attribution.record(.settle(expectation), passed: passed, selection: observed, length: length,
                                    selectedText: readSelectedText)
                 if !passed {
@@ -507,15 +505,13 @@ private extension Sim {
                 // A miss proceeds, as the blind step before it may be an unsupported no-op here, but an ignored ⌫ fails.
                 let (passed, observed, length) = settles(expectation, generated: generated)
                 let read = Self.asRead(expectation, observed, length)
-                if !passed, expectation.ignored(selection: read.selection, length: read.length, before: last.selection,
-                                                beforeLength: last.length) {
+                if !passed, expectation.ignored(selection: read.selection, length: read.length) {
                     settleFailures += 1
                     drainResidency(of: steps, after: index)
                     return index
                 }
                 if !passed { softMisses += 1 }
                 generated = !passed || expectation.metByEmptyField
-                last = read
 
             case .commit(let effect):
                 state = VimReducer.reduce(state, effect, captures: captures)

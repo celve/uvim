@@ -295,9 +295,10 @@ let blockProfile = CapabilityProfile(available: [
 let noInsertProfile = CapabilityProfile(available: [
     .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .wholeDocument,
 ])
-func deleting(_ expectation: Expectation) -> Expectation {
+func deleting(_ expectation: Expectation, _ selection: Range<Int>, before length: Int?) -> Expectation {
     var deleting = expectation
-    deleting.deletes = true
+    deleting.deletes = selection
+    deleting.lengthBefore = length
     return deleting
 }
 func checkingWrite(_ expectation: Expectation) -> Expectation {
@@ -344,7 +345,7 @@ precondition(ciwB.steps == [
     .press(.deleteBack, count: 1),
     // Blind DELETE is soft: a mismatch here must NOT abort the setMode below —
     // this is the ChatGPT "ciw won't enter insert" bug.
-    .softSettle(deleting(Expectation(selection: 4..<4, length: 10))),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)),
     .commit(.deleted(into: nil, content: .literal("hello"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(4)),
@@ -372,7 +373,7 @@ precondition(ciwNoInsert.steps == [
     .settle(Expectation(selection: 4..<9, length: 15)),
     .settle(Expectation(selection: 4..<9, length: 15, selectedText: "hello")),
     .press(.deleteBack, count: 1),
-    .softSettle(deleting(Expectation(selection: 4..<4, length: 10))),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)),
     .commit(.deleted(into: nil, content: .literal("hello"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(4)),
@@ -1257,7 +1258,7 @@ precondition(physical("ciw", text: "say hello world", selection: 5..<15, profile
     .settle(Expectation(selection: 4..<9, length: 15)),
     .settle(Expectation(selection: 4..<9, length: 15, selectedText: "hello")),
     .press(.deleteBack, count: 1),
-    .softSettle(deleting(Expectation(selection: 4..<4, length: 10))),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)),
     .commit(.deleted(into: nil, content: .literal("hello"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(4)),
@@ -1319,7 +1320,7 @@ precondition(PhysicalPlanner.plan(
     .settle(Expectation(selection: 1..<2, length: 3)),
     .settle(Expectation(selection: 1..<2, length: 3, selectedText: "b")),
     .press(.deleteBack, count: 1),
-    .softSettle(deleting(Expectation(selection: 1..<1, length: 2))),
+    .softSettle(deleting(Expectation(selection: 1..<1, length: 2), 1..<2, before: 3)),
     .commit(.deleted(into: nil, content: .literal("b"), wise: .character)),
     .commit(.setCursor(nil)),
 ])
@@ -1504,7 +1505,7 @@ precondition(paragraphPlanning("ciw", text: threeParagraphs, caret: 7, profile: 
     .settle(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd)),
     .settle(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd, selectedText: "ef")),
     .press(.deleteBack, count: 1),
-    .softSettle(deleting(Expectation(selection: 5..<5, length: 9, edge: .paragraphEnd))),
+    .softSettle(deleting(Expectation(selection: 5..<5, length: 9, edge: .paragraphEnd), 5..<7, before: 11)),
     .commit(.deleted(into: nil, content: .literal("ef"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(6)),
@@ -6626,16 +6627,16 @@ precondition(!proseMirror.profile.has(.lineEndKey) && proseMirror.text == "one\n
 proseMirror.type("dd")
 precondition(proseMirror.text == "one\nthree" && proseMirror.settleFailures == Strikes.limit, "then counted ⇧→ select the line")
 
-let afterBackspace = deleting(Expectation(selection: 4..<4, length: 10))
-precondition(afterBackspace.ignored(selection: 4..<9, length: 15, before: 4..<9, beforeLength: 15))
-precondition(afterBackspace.ignored(selection: 4..<9, length: 15, before: 4..<9, beforeLength: nil))
-precondition(!afterBackspace.ignored(selection: 4..<9, length: 14, before: 4..<9, beforeLength: 15))
-precondition(!afterBackspace.ignored(selection: 4..<8, length: 15, before: 4..<9, beforeLength: 15))
-precondition(!afterBackspace.ignored(selection: 4..<4, length: 15, before: 4..<4, beforeLength: 15))
-precondition(!afterBackspace.ignored(selection: nil, length: 15, before: 4..<9, beforeLength: 15))
-precondition(!Expectation(selection: 4..<4, length: 10).ignored(selection: 4..<9, length: 15, before: 4..<9, beforeLength: 15))
+let afterBackspace = deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)
+precondition(afterBackspace.ignored(selection: 4..<9, length: 15) && afterBackspace.ignored(selection: 4..<9, length: nil))
+precondition(deleting(Expectation(selection: 4..<4), 4..<9, before: nil).ignored(selection: 4..<9, length: 14))
+precondition(!afterBackspace.ignored(selection: 4..<9, length: 14) && !afterBackspace.ignored(selection: 4..<8, length: 15))
+precondition(!afterBackspace.ignored(selection: 4..<4, length: 15) && !afterBackspace.ignored(selection: nil, length: 15))
+precondition(!deleting(Expectation(selection: 4..<4), 4..<4, before: 15).ignored(selection: 4..<4, length: 15),
+             "paragraph breaks alone read as a caret either way")
+precondition(!Expectation(selection: 4..<4, length: 10).ignored(selection: 4..<9, length: 15))
 precondition(!physical("ciw", text: "say hello world", caret: 6, profile: noCursorProfile).steps.contains {
-    if case .settle(let expectation) = $0 { expectation.deletes } else { false }
+    if case .settle(let expectation) = $0 { expectation.deletes != nil } else { false }
 }, "a text write keeps its own rule")
 var ignoresBackspace = Sim(text: "one\ntwo", caret: 5, profile: readProfile)
 ignoresBackspace.ignoredChords = [.deleteBack]
@@ -6650,5 +6651,15 @@ var collapsedOnly = Sim(text: "one two", caret: 5, profile: readProfile)
 collapsedOnly.reboundChords = [.deleteBack: .left]
 collapsedOnly.type("x")
 precondition(collapsedOnly.text == "one two" && collapsedOnly.softMisses == 1 && collapsedOnly.settleFailures == 0)
+// A Visual selection deleted where the selected text cannot be read has no settle before its ⌫.
+let unreadText = CapabilityProfile(available: [.readText, .readLength, .readCaret, .wholeDocument])
+for (keys, after) in [("vld", "one\ntwo"), ("vlcX", "Xne\ntwo")] {
+    var visual = Sim(text: "one\ntwo", caret: 0, profile: unreadText)
+    visual.emulatesKeys = true
+    visual.ignoredChords = [.deleteBack]
+    visual.type(keys)
+    precondition(visual.text == after && visual.settleFailures == 1 && visual.softMisses == 0, keys)
+    precondition(visual.state.session.register("\"") == nil, keys)
+}
 
 print("Vim engine tests passed")

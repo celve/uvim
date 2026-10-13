@@ -282,9 +282,8 @@ public final class Executor {
             let outcome = Self.settle(expectation, on: element, paragraphs: paragraphs, presses: pressed, generated: generated)
             pressed = 0
             generated = !outcome.converged || expectation.metByEmptyField
-            let ignored = !outcome.converged && expectation.ignored(
-                selection: outcome.observedSelection, length: outcome.observedLength, before: lastObserved, beforeLength: lastLength
-            )
+            let ignored = !outcome.converged
+                && expectation.ignored(selection: outcome.observedSelection, length: outcome.observedLength)
             lastObserved = outcome.observedSelection
             lastLength = outcome.observedLength
             confirmPaste(outcome, expectation, at: index)

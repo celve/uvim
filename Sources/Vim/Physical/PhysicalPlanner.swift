@@ -476,12 +476,13 @@ private extension PhysicalPlanner {
     /// did), so it proceeds instead of aborting the mode change behind it.
     static func settle(
         _ context: Context, profile: CapabilityProfile, hard: Bool = true,
-        blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil, deletes: Bool = false
+        blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil, deleting held: Expectation? = nil
     ) -> [PhysicalStep] {
         guard profile.has(.readCaret), let selection = context.selection else { return [] }
         var expectation = context.expectation(.exact(selection), blame: blame, selectedText: selectedText, profile: profile)
         expectation.route = route
-        expectation.deletes = deletes
+        expectation.deletes = held?.selection
+        expectation.lengthBefore = held?.length
         return [hard ? .settle(expectation) : .softSettle(expectation)]
     }
 
@@ -1795,10 +1796,12 @@ private extension PhysicalPlanner {
             let text = model.substring(selection)
             let content = context.content(selection, text)
             var steps = checkSelectedText(text, context: context, profile: profile)
+            let held = context.expectation(.exact(selection), profile: profile)
             steps.append(profile.has(.insertText) ? .replaceSelection("") : .press(.deleteBack, count: 1))
             context.applyEdit(range: selection, replacement: "")
             // A rich editor's ⌫ lands inexactly, so its settle is soft, unless the field reads as if ⌫ were ignored.
-            steps += settle(context, profile: profile, hard: profile.has(.insertText), deletes: !profile.has(.insertText))
+            steps += settle(context, profile: profile, hard: profile.has(.insertText),
+                            deleting: profile.has(.insertText) ? nil : held)
             if !blackhole {
                 steps.append(.commit(.deleted(into: register, content: .literal(content), wise: wise)))
             }

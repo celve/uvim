@@ -227,8 +227,11 @@ public struct Expectation: Equatable, Sendable {
     /// The keys before this settle finish the selection write before them, so it checks that write.
     public var checksWrite = false
 
-    /// The ⌫ before this soft settle deletes the selection the settle before it read, so reading that again fails it.
-    public var deletes = false
+    /// The selection the ⌫ before this soft settle deletes, which the field still reads if the key did nothing.
+    public var deletes: Range<Int>?
+
+    /// The length the field had before that ⌫, where a settle there would have read one.
+    public var lengthBefore: Int?
 
     /// Demotes `capability` for `unmoved`, a `leavesCaret` key's selection, a `selects` key's caret, or `offTarget` landings.
     public struct Blame: Equatable, Sendable {
@@ -326,12 +329,10 @@ public struct Expectation: Equatable, Sendable {
         length == 0 && converged(selection: 0..<0, length: 0, selectedText: "", side: nil)
     }
 
-    /// Whether a soft settle that `deletes` reads the selection the settle before it read, and its length where both have one.
-    public func ignored(
-        selection observed: Range<Int>?, length observedLength: Int?, before: Range<Int>?, beforeLength: Int?
-    ) -> Bool {
-        guard deletes, let observed, !observed.isEmpty, observed == before else { return false }
-        return observedLength == nil || beforeLength == nil || observedLength == beforeLength
+    /// Whether a soft settle after a ⌫ reads the selection it `deletes`, at `lengthBefore` where both are known.
+    public func ignored(selection observed: Range<Int>?, length observedLength: Int?) -> Bool {
+        guard let deletes, !deletes.isEmpty, observed == deletes else { return false }
+        return lengthBefore == nil || observedLength == nil || observedLength == lengthBefore
     }
 
     /// Chromium's `AXSelectedText` has a U+FFFC per text-less element, which `AXValue` leaves out.
@@ -364,6 +365,7 @@ public struct Expectation: Equatable, Sendable {
         resolved.route = route
         resolved.checksWrite = checksWrite
         resolved.deletes = deletes
+        resolved.lengthBefore = lengthBefore
         return resolved
     }
 }
