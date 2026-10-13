@@ -439,6 +439,7 @@ private extension Sim {
     mutating func execute(_ steps: [PhysicalStep], generated: Bool = false) -> Int? {
         var kept: [Int: Int] = [:]
         var generated = generated
+        var last: (selection: Range<Int>?, length: Int?) = (nil, nil)
         attribution = RunAttribution()
         for (index, step) in steps.enumerated() {
             if case .settle = step {} else { attribution.record(step) }
@@ -491,6 +492,7 @@ private extension Sim {
                 let expectation = planned.resolving(kept)
                 let (passed, observed, length) = settles(expectation, generated: generated)
                 generated = !passed || expectation.metByEmptyField
+                last = Self.asRead(expectation, observed, length)
                 attribution.record(.settle(expectation), passed: passed, selection: observed, length: length,
                                    selectedText: readSelectedText)
                 if !passed {
@@ -502,13 +504,18 @@ private extension Sim {
                 if let slot = expectation.keeps, let caret = observed?.lowerBound { kept[slot] = caret }
 
             case .softSettle(let expectation):
-                // Best-effort barrier: never aborts. In this synchronous host
-                // there is nothing async to wait for, and the blind step it
-                // follows may be an unsupported no-op, so the field need not match
-                // the prediction — which is exactly why a soft settle must proceed.
-                let passed = settles(expectation, generated: generated).passed
+                // A miss proceeds, as the blind step before it may be an unsupported no-op here, but an ignored ⌫ fails.
+                let (passed, observed, length) = settles(expectation, generated: generated)
+                let read = Self.asRead(expectation, observed, length)
+                if !passed, expectation.ignored(selection: read.selection, length: read.length, before: last.selection,
+                                                beforeLength: last.length) {
+                    settleFailures += 1
+                    drainResidency(of: steps, after: index)
+                    return index
+                }
                 if !passed { softMisses += 1 }
                 generated = !passed || expectation.metByEmptyField
+                last = read
 
             case .commit(let effect):
                 state = VimReducer.reduce(state, effect, captures: captures)
@@ -518,6 +525,13 @@ private extension Sim {
             }
         }
         return nil
+    }
+
+    /// A settle's read as the executor's: an attribute its expectation does not ask for is not read.
+    static func asRead(
+        _ expectation: Expectation, _ selection: Range<Int>?, _ length: Int
+    ) -> (selection: Range<Int>?, length: Int?) {
+        (expectation.landing == nil ? nil : selection, expectation.length == nil ? nil : length)
     }
 
     /// In `reads`' coordinates a boundary offset lands at the next paragraph's start.

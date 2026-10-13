@@ -277,17 +277,20 @@ public final class Executor {
             return false
 
         case .softSettle(let expectation):
-            // Same poll — a following AX read still sees the blind action land
-            // — but a timeout is not a failure: proceed, no bell, never abort.
+            // The same poll, so a later AX read sees the blind action land; a timeout proceeds silently unless ⌫ was ignored.
             awaitPaste(expectation, at: index, on: element)
             let outcome = Self.settle(expectation, on: element, paragraphs: paragraphs, presses: pressed, generated: generated)
             pressed = 0
             generated = !outcome.converged || expectation.metByEmptyField
+            let ignored = !outcome.converged && expectation.ignored(
+                selection: outcome.observedSelection, length: outcome.observedLength, before: lastObserved, beforeLength: lastLength
+            )
             lastObserved = outcome.observedSelection
             lastLength = outcome.observedLength
             confirmPaste(outcome, expectation, at: index)
-            _ = record(outcome, expectation, at: index, hard: false)
-            return true
+            _ = record(outcome, expectation, at: index, hard: ignored)
+            if ignored { NSSound.beep() }
+            return !ignored
 
         case .commit(let effect):
             commit(effect, state: &state)

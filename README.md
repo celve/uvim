@@ -229,8 +229,9 @@ does not answer as planned, it beeps and stops rather than edit the wrong text.
 three commands in a row, uvim switches that capability off for fields like the one it failed in until the app
 updates; the app's own word and paragraph keys go off after one failure, and so does a text write the field
 accepts without an error and then ignores. Some failures only stop the command:
-a key landing elsewhere in Chromium's rich text, a word key doing nothing in web content, anything under
-**Force**, and any capability you set yourself. **Capabilities** lists what was switched off first, under
+a key landing elsewhere in Chromium's rich text (one that was to select and left only a caret still counts),
+a word key doing nothing in web content, a Backspace the field ignores, anything under **Force**, and any
+capability you set yourself. **Capabilities** lists what was switched off first, under
 **Learned for …** with the day it failed, and **Try Again** forgets it so uvim tries it afresh. **On …** and
 **Off …** override what uvim detected or learned, for one field, fields like it, a site or the whole app, and
 [a file you can edit](#the-beliefs-file) keeps those choices and what uvim learned.
@@ -303,8 +304,9 @@ after one failure too when the write returned no error and the check after it re
 before it read: uvim takes that as a field that ignores text writes, so the first `dd`, `x` or `ciw` that
 fails there is the last, and the next one presses Backspace. **Capabilities** then lists it first, under
 **Learned for …** with the day it failed, and **Try Again** forgets it so uvim tries it afresh.
-Some failures only stop the command: a key landing elsewhere in Chromium's rich text, a word key
-doing nothing in web content, anything under **Force**, and any capability you set yourself. uvim
+Some failures only stop the command: a key landing elsewhere in Chromium's rich text (one that was
+to select and left only a caret still counts), a word key doing nothing in web content, a Backspace
+the field ignores, anything under **Force**, and any capability you set yourself. uvim
 also learns how a field counts caret positions: where the field's reads stop agreeing with it, it
 stops trusting the caret (**Read caret** shows under **Learned for …** as Off) and treats the field
 as one it cannot read, and a capability switched off while uvim misread a field comes back once it
@@ -705,10 +707,18 @@ X clipboardCut   Y clipboardCopy      V clipboardInsert            G captureSele
 
 Order is the diagnostic — a `!` directly after a counted arrow `P` is a hard settle verifying
 a blind keypress, which can never name the capability it failed, so it rings without teaching
-the learner anything. A `!` after a native key names that key, and a failure blames it
-(`fail=lineStartKey`) when a caret key left a selection, when the field still reads as it did
-before the key although the key had somewhere to go, or when the key landed somewhere else. In
-Chromium's rich text a landing somewhere else aborts without learning. Where a key's lane exempts a
+the learner anything. The exception is `WP!`: Chromium lands a write at a paragraph's end on the
+next paragraph, so uvim brings the selection back with ⇧← (or a caret with ⇧← ←), and that `!`
+checks the write, which a failure blames (`fail=writeSelection`), except in a field whose plan
+leaves out text no caret reaches, such as Linear's list markers and chips, where the keys after a
+write work around the app's own lines. A `!` after a native key names that key, and a failure blames it
+(`fail=lineStartKey`) when a caret key left a selection, when a key that was to select left only a
+caret, when the field still reads as it did before the key although the key had somewhere to go,
+or when the key landed somewhere else. In Chromium's rich text a landing somewhere else aborts
+without learning when it is what the key leaves anyway, a caret for a caret key or a selection for a
+selecting one. A `?` after ⌫ (`P?`, where the field takes no text writes) that reads the selection
+and length the `!` before it read means the field ignored the key: it rings and stops the command as
+a `!` would, and blames nothing, since nothing else deletes there. Where a key's lane exempts a
 failure from blame, a `learn` line says so: `evidence q=lineStartKey neutral why=paragraph-lines
 seen=settle@1` (a line key off target in Chromium's rich text), `why=empty-paragraph` (a key from a
 caret in an empty paragraph uvim could not give a line) or `why=web-content` (a word or paragraph key that stayed put in web
@@ -840,10 +850,12 @@ section has the stop too and is not marked, nor is one between blocks inside a q
 Each key is a row in the Capabilities menu — **Line start key (⌃A)**, **Line end key (⌃E)**,
 **Document start key (⌘↑)**, **Document end key (⌘↓)** — claimed for every field whose text
 and caret uvim can read. A key that lands anywhere but where it
-should, including a caret key that leaves a selection (as a select-all binding would) or a key that does
+should, including a caret key that leaves a selection (as a select-all binding would), a key that was to
+select and leaves only a caret (as an editor that takes ⇧⌃E for ⌃E does) or a key that does
 nothing where it had somewhere to go, is learned off for that surface after three such misses in a row,
 like a write that lies, and uvim counts arrows there again; **Try Again** in the menu lets it try the key afresh. In Chromium's rich
-text a key that lands somewhere else only aborts the command, because one paragraph can be several
+text a key that lands somewhere else, but not a selecting key that leaves only a caret, only aborts
+the command, because one paragraph can be several
 `AXValue` lines there (a mention chip) and a working key lands off the model's line; its `learn` line
 says `why=paragraph-lines`, and you can turn such a key off from the menu.
 
@@ -929,7 +941,7 @@ the outcome is `supports`, `refutes` or `neutral`, and `seen` is `snapshot` or `
 step. A failed settle's line is logged; passes and snapshot reads only at debug level. A struck
 write says why: `unanswered`, `length`, `moved` (the selection read back elsewhere), `edge` (the
 offsets held but not the paragraph side) or `unchanged` (above). A struck key says `unmoved`,
-`left-selection`, `too-long` or
+`left-selection`, `left-caret` (a key that was to select left only a caret), `too-long` or
 `off-target`, and the `commit` line that sets it off repeats the reason; a failure short of the third
 logs `strike <n>/3 q=<question> why=<reason> rung=<rung>` instead.
 

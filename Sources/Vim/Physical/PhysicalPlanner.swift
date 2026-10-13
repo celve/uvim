@@ -94,9 +94,12 @@ public enum PhysicalPlanner {
             let caret = context.unmoved ? context.caret : nil
             // An AX write would overtake keys still queued, so a write after them waits for them to settle.
             let barrier = foldedWrites && context.keysQueued ? settle(context, profile: profile) : []
+            let folded = context.folded
             guard var lowered = lower(step, context: &context, profile: profile) else {
                 return Planning(plan: .rejected, rejection: Rejection(index: index, step: step), operand: nil)
             }
+            // A folded write's keys work around the app's own line edges, whose misses say nothing of the write (LIN-1979).
+            if !folded { lowered = checkingWrites(lowered) }
             // ⇧→ and ⇧⌃E do nothing from inside a code span's start, which a caret uvim did not place may be (LIN-1683).
             if let caret, let first = lowered.firstIndex(where: moves), case .press(let chord, _) = lowered[first],
                let prefix = outside(before: chord, at: caret, context: context, profile: profile) {
@@ -118,6 +121,27 @@ public enum PhysicalPlanner {
             uncover = []
         }
         return Planning(plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand)
+    }
+
+    /// Marks the first settle after a selection write and the keys `write` added to finish it, which checks that write.
+    static func checkingWrites(_ steps: [PhysicalStep]) -> [PhysicalStep] {
+        var written = false
+        var pressed = false
+        return steps.map { step in
+            switch step {
+            case .setSelection:
+                (written, pressed) = (true, false)
+            case .press:
+                pressed = written
+            case .settle(var expectation) where pressed:
+                expectation.checksWrite = true
+                (written, pressed) = (false, false)
+                return .settle(expectation)
+            default:
+                (written, pressed) = (false, false)
+            }
+            return step
+        }
     }
 
     static func isWrite(_ step: PhysicalStep) -> Bool {
@@ -452,11 +476,12 @@ private extension PhysicalPlanner {
     /// did), so it proceeds instead of aborting the mode change behind it.
     static func settle(
         _ context: Context, profile: CapabilityProfile, hard: Bool = true,
-        blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil
+        blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil, deletes: Bool = false
     ) -> [PhysicalStep] {
         guard profile.has(.readCaret), let selection = context.selection else { return [] }
         var expectation = context.expectation(.exact(selection), blame: blame, selectedText: selectedText, profile: profile)
         expectation.route = route
+        expectation.deletes = deletes
         return [hard ? .settle(expectation) : .softSettle(expectation)]
     }
 
@@ -1166,9 +1191,11 @@ private extension PhysicalPlanner {
             var exemptions: [Expectation.Exemption] = []
             if emptyParagraph { exemptions.append(.init(.emptyParagraph, unmoved: [context.field(before)])) }
             if !offTarget { exemptions.append(.init(.paragraphLines, offTarget: true)) }
-            guard !unmoved.isEmpty || leavesCaret || offTarget || !exemptions.isEmpty else { return nil }
+            let selects = !leavesCaret && !emptyParagraph && !context.field(landing).isEmpty
+            guard !unmoved.isEmpty || leavesCaret || selects || offTarget || !exemptions.isEmpty else { return nil }
             return Expectation.Blame(
-                capability: atom, unmoved: unmoved, leavesCaret: leavesCaret, offTarget: offTarget, exemptions: exemptions
+                capability: atom, unmoved: unmoved, leavesCaret: leavesCaret, selects: selects, offTarget: offTarget,
+                exemptions: exemptions
             )
         }
         return counted(chords) + settle(context, profile: profile, blame: blame, route: route)
@@ -1232,7 +1259,7 @@ private extension PhysicalPlanner {
     static func wordBlame(_ blame: Expectation.Blame?, context: Context) -> Expectation.Blame? {
         guard context.webContent, let blame else { return blame }
         return Expectation.Blame(capability: blame.capability, unmoved: blame.unmoved, leavesCaret: blame.leavesCaret,
-                                 offTarget: blame.offTarget, exemptions: [.init(.webContent, all: true)])
+                                 selects: blame.selects, offTarget: blame.offTarget, exemptions: [.init(.webContent, all: true)])
     }
 
     /// `j`/`k` press ↓/↑ only where neither a write nor ⌃E/⌃A can land a line.
@@ -1770,9 +1797,8 @@ private extension PhysicalPlanner {
             var steps = checkSelectedText(text, context: context, profile: profile)
             steps.append(profile.has(.insertText) ? .replaceSelection("") : .press(.deleteBack, count: 1))
             context.applyEdit(range: selection, replacement: "")
-            // Blind (press) delete: soft — a mismatch must not abort the
-            // `setMode(.insert)` that follows a `ciw`/`s`/`cc`.
-            steps += settle(context, profile: profile, hard: profile.has(.insertText))
+            // A rich editor's ⌫ lands inexactly, so its settle is soft, unless the field reads as if ⌫ were ignored.
+            steps += settle(context, profile: profile, hard: profile.has(.insertText), deletes: !profile.has(.insertText))
             if !blackhole {
                 steps.append(.commit(.deleted(into: register, content: .literal(content), wise: wise)))
             }

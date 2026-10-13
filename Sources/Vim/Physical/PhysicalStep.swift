@@ -224,24 +224,32 @@ public struct Expectation: Equatable, Sendable {
     /// The optional route this settle checks, which a miss ends.
     public var route: Route?
 
-    /// A failed settle demotes `capability` when the field still reads as one of `unmoved` (the key did
-    /// nothing), when a key that only ever leaves a caret left a selection, or with `offTarget` when it landed elsewhere.
+    /// The keys before this settle finish the selection write before them, so it checks that write.
+    public var checksWrite = false
+
+    /// The ⌫ before this soft settle deletes the selection the settle before it read, so reading that again fails it.
+    public var deletes = false
+
+    /// Demotes `capability` for `unmoved`, a `leavesCaret` key's selection, a `selects` key's caret, or `offTarget` landings.
     public struct Blame: Equatable, Sendable {
         public let capability: Capability
         public let unmoved: [Range<Int>]
         public let leavesCaret: Bool
+        /// A ⇧ key planned to select: a caret after it is its failure, whatever the field's lines.
+        public let selects: Bool
         /// A landing anywhere but the prediction is the key's too, where the field's lines are the model's.
         public let offTarget: Bool
         /// Failures left unblamed on purpose, logged as neutral evidence.
         public let exemptions: [Exemption]
 
         public init(
-            capability: Capability, unmoved: [Range<Int>], leavesCaret: Bool = false, offTarget: Bool = false,
-            exemptions: [Exemption] = []
+            capability: Capability, unmoved: [Range<Int>], leavesCaret: Bool = false, selects: Bool = false,
+            offTarget: Bool = false, exemptions: [Exemption] = []
         ) {
             self.capability = capability
             self.unmoved = unmoved
             self.leavesCaret = leavesCaret
+            self.selects = selects
             self.offTarget = offTarget
             self.exemptions = exemptions
         }
@@ -318,6 +326,14 @@ public struct Expectation: Equatable, Sendable {
         length == 0 && converged(selection: 0..<0, length: 0, selectedText: "", side: nil)
     }
 
+    /// Whether a soft settle that `deletes` reads the selection the settle before it read, and its length where both have one.
+    public func ignored(
+        selection observed: Range<Int>?, length observedLength: Int?, before: Range<Int>?, beforeLength: Int?
+    ) -> Bool {
+        guard deletes, let observed, !observed.isEmpty, observed == before else { return false }
+        return observedLength == nil || beforeLength == nil || observedLength == beforeLength
+    }
+
     /// Chromium's `AXSelectedText` has a U+FFFC per text-less element, which `AXValue` leaves out.
     static func sameText(_ expected: String, _ observed: String?) -> Bool {
         guard let observed else { return false }
@@ -339,13 +355,15 @@ public struct Expectation: Equatable, Sendable {
         }
         let widened = blame.map {
             Blame(capability: $0.capability, unmoved: $0.unmoved + [lower..<lower, upper..<upper], leavesCaret: $0.leavesCaret,
-                  exemptions: $0.exemptions)
+                  selects: $0.selects, exemptions: $0.exemptions)
         }
         var resolved = Expectation(landing: .exact(lower..<upper), length: length, edge: edge, blame: widened, selectedText: selectedText)
         resolved.longest = longest
         resolved.keeps = keeps
         resolved.within = within
         resolved.route = route
+        resolved.checksWrite = checksWrite
+        resolved.deletes = deletes
         return resolved
     }
 }
