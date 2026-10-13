@@ -716,9 +716,9 @@ write work around the app's own lines. A `!` after a native key names that key, 
 caret, when the field still reads as it did before the key although the key had somewhere to go,
 or when the key landed somewhere else. In Chromium's rich text a landing somewhere else aborts
 without learning when it is what the key leaves anyway, a caret for a caret key or a selection for a
-selecting one. A `?` after ⌫ (`P?`, where the field takes no text writes) that reads the selection
-and length the `!` before it read means the field ignored the key: it rings and stops the command as
-a `!` would, and blames nothing, since nothing else deletes there. Where a key's lane exempts a
+selecting one. A `?` after ⌫ (`P?`, where the field takes no text writes) that still reads the
+selection ⌫ was to delete, at the length the field had before it, means the field ignored the key: it
+rings and stops the command as a `!` would, and blames nothing, since nothing else deletes there. Where a key's lane exempts a
 failure from blame, a `learn` line says so: `evidence q=lineStartKey neutral why=paragraph-lines
 seen=settle@1` (a line key off target in Chromium's rich text), `why=empty-paragraph` (a key from a
 caret in an empty paragraph uvim could not give a line) or `why=web-content` (a word or paragraph key that stayed put in web
