@@ -207,7 +207,9 @@ public extension ParagraphBreaks {
     }
 
     /// The breaks after an edit, a typed `\n` a new paragraph; `keepingCovered` moves the last marker it covers to its start.
-    func replacing(_ range: Range<Int>, with replacement: String, keepingCovered: Bool = false) -> ParagraphBreaks {
+    func replacing(
+        _ range: Range<Int>, with replacement: String, keepingCovered: Bool = false, endsLine: Bool = false
+    ) -> ParagraphBreaks {
         let delta = replacement.utf16.count - range.count
         var result = offsets.filter { $0 < range.lowerBound }
         for (index, unit) in replacement.utf16.enumerated() where unit == 10 {
@@ -220,7 +222,10 @@ public extension ParagraphBreaks {
         // A chip's `<br>` goes with the chip.
         let chips = Set(hidden.filter { $0.kind == .atom && covered($0, by: range) }.map(\.at))
         for run in hidden {
-            if covered(run, by: range) || run.kind == .trailingBreak && chips.contains(run.at) {
+            // A chip that still ends its line where the edit starts, as when the lines after it go, keeps its `<br>`.
+            if endsLine, run.kind == .trailingBreak, run.at == range.lowerBound, !chips.contains(run.at) {
+                kept.append(run)
+            } else if covered(run, by: range) || run.kind == .trailingBreak && chips.contains(run.at) {
                 if run.isMarker { marker = run }
             } else if run.at < range.lowerBound || run.at == range.lowerBound && run.kind != .trailingBreak {
                 kept.append(run)

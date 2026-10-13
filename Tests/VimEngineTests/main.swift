@@ -106,12 +106,12 @@ precondition(plan("ciw").steps == [
 
 // dd takes whole lines; cc keeps the line it empties.
 precondition(plan("dd").steps == [
-    .select(.lines(count: 1, interior: false)),
+    .select(.lines(count: 1, extent: .removed)),
     .deleteSelection(into: nil),
     .renderCursor
 ])
 precondition(plan("cc").steps == [
-    .select(.lines(count: 1, interior: true)),
+    .select(.lines(count: 1, extent: .interior)),
     .deleteSelection(into: nil),
     .setMode(.insert)
 ])
@@ -127,7 +127,7 @@ precondition(plan("\"a2d3w").steps == [
 precondition(plan("de").steps.first ==
     .select(.span(to: .motion(.word(.forward, end: true, bigWord: false), count: 1), inclusive: true)))
 precondition(plan("dj").steps.first ==
-    .select(.lineSpan(to: .motion(.line(.down, firstNonBlank: false), count: 1), interior: false)))
+    .select(.lineSpan(to: .motion(.line(.down, firstNonBlank: false), count: 1), extent: .removed)))
 precondition(plan("cw").steps.first ==
     .select(.span(to: .motion(.word(.forward, end: true, bigWord: false), count: 1), inclusive: true)))
 
@@ -266,7 +266,7 @@ precondition(sample.wordObject(at: 6, around: false, big: false) == 4..<9)
 precondition(sample.wordObject(at: 6, around: true, big: false) == 4..<10)
 precondition(sample.findCharacter("w", from: 0, forward: true, before: false, count: 1) == 10)
 precondition(TextModel("one\ntwo").verticalMove(from: 1, by: 1, firstNonBlank: false) == 5)
-precondition(TextModel("one\ntwo").lines(from: 1, count: 1, includingTerminator: true) == 0..<4)
+precondition(TextModel("one\ntwo").lines(from: 1, count: 1, extent: .whole) == 0..<4)
 
 // MARK: - PhysicalPlanner
 
@@ -6324,7 +6324,7 @@ do {
     let after = PutAction(position: .after)
     precondition(lowered(.moveCaret(.motion(down, count: limit))) == PhysicalPlan(.press(.down, count: limit)))
     precondition(lowered(.moveCaret(.motion(.lineEnd, count: .max))) == PhysicalPlan(.press(.lineEnd, count: 1)))
-    precondition(lowered(.select(.lineSpan(to: .motion(down, count: limit), interior: false)))
+    precondition(lowered(.select(.lineSpan(to: .motion(down, count: limit), extent: .whole)))
         == PhysicalPlan(.press(.lineStart, count: 1), .press(.selectDown, count: limit + 1)))
     precondition(lowered(.put(.content(twice), after, count: limit), text: "x", profile: axProfile).steps
         .contains(.replaceSelection(String(repeating: "ab", count: limit))))
@@ -6332,8 +6332,8 @@ do {
         for step: LogicalStep in [
             .moveCaret(.motion(down, count: count)), .extendSelection(.motion(.character(.right), count: count)),
             .select(.span(to: .motion(nextWord, count: count), inclusive: false)),
-            .select(.lines(count: count, interior: false)), .select(.lines(count: count, interior: true)),
-            .select(.lineSpan(to: .motion(down, count: count), interior: false)),
+            .select(.lines(count: count, extent: .whole)), .select(.lines(count: count, extent: .interior)),
+            .select(.lineSpan(to: .motion(down, count: count), extent: .whole)),
             .put(.pasteboard(wise: .character), after, count: count), .put(.content(twice), after, count: count),
         ] {
             precondition(lowered(step) == .rejected, "\(step)")
@@ -6360,9 +6360,9 @@ do {
     }
     for step: LogicalStep in [
         .moveCaret(.motion(nextWord, count: .max)), .moveCaret(.motion(.lineEnd, count: .max)),
-        .select(.lines(count: .max, interior: false)), .joinLines(count: .max, keepWhitespace: false),
-        .select(.lineSpan(to: .motion(down, count: .max), interior: false)),
-        .select(.lineSpan(to: .motion(.line(.up, firstNonBlank: false), count: .max), interior: false)),
+        .select(.lines(count: .max, extent: .whole)), .joinLines(count: .max, keepWhitespace: false),
+        .select(.lineSpan(to: .motion(down, count: .max), extent: .whole)),
+        .select(.lineSpan(to: .motion(.line(.up, firstNonBlank: false), count: .max), extent: .whole)),
         .select(.span(to: .motion(.lineEnd, count: .max), inclusive: false)),
         .select(.textObject(TextObject(scope: .around, kind: .word(bigWord: false)), count: .max)),
     ] {
@@ -6550,5 +6550,115 @@ stuck.ignoredChords = [.deleteBack]
 stuck.feed("<C-[>")
 stuck.type("x")
 precondition(stuck.text == "x" && stuck.softMisses == 1, "the page's own text still misses")
+
+// MARK: - Deleting the text's last lines
+
+let lastThree = "one\ntwo\nthree"
+let lastModel = TextModel(lastThree)
+precondition(lastModel.lines(from: 10, count: 1, extent: .removed) == 7..<13 && lastModel.lines(from: 5, count: 1, extent: .removed) == 4..<8)
+precondition(lastModel.lines(from: 5, count: 9, extent: .removed) == 3..<13 && lastModel.lines(from: 1, count: 3, extent: .removed) == 0..<13)
+precondition(lastModel.lines(from: 10, count: 1, extent: .whole) == 8..<13 && lastModel.lines(from: 10, count: 1, extent: .interior) == 8..<13)
+precondition(TextModel("one\ntwo\n").lines(from: 8, count: 1, extent: .removed) == 7..<8)
+precondition(TextModel("one\ntwo\n").lines(from: 4, count: 1, extent: .removed) == 4..<8)
+precondition(TextModel("one\ntwo\n").lineSpan(from: 4, to: 8, extent: .removed) == 3..<8)
+precondition(plan("yy").steps.first == .select(.lines(count: 1, extent: .whole)))
+precondition(plan("dk").steps.first == .select(.lineSpan(to: .motion(.line(.up, firstNonBlank: false), count: 1), extent: .removed)))
+precondition(plan("cj").steps.first == .select(.lineSpan(to: .motion(.line(.down, firstNonBlank: false), count: 1), extent: .interior)))
+
+precondition(physical("dd", text: "one\ntwo", caret: 5, profile: axProfile).steps == [
+    .setSelection(3..<7),
+    .settle(Expectation(selection: 3..<7, length: 7)),
+    .settle(Expectation(selection: 3..<7, length: 7, selectedText: "\ntwo")),
+    .replaceSelection(""),
+    .settle(Expectation(selection: 3..<3, length: 3)),
+    .commit(.deleted(into: nil, content: .literal("two\n"), wise: .line)),
+    .setSelection(0..<0),
+    .settle(Expectation(selection: 0..<0, length: 3)),
+    .setSelection(0..<1),
+    .commit(.setCursor(0..<1)),
+])
+for (keys, caret, expected) in [
+    ("dd", 10, [Chord.paragraphStart, .left, .selectRight, Chord.paragraphEnd.shifted, .deleteBack, .paragraphStart]),
+    ("2dd", 5, [.paragraphStart, .left, .selectRight, Chord.paragraphEnd.shifted, .selectRight, Chord.paragraphEnd.shifted,
+                .deleteBack, .paragraphStart]),
+    ("dk", 10, [.paragraphEnd, .right, .selectLeft, Chord.paragraphStart.shifted, .selectLeft, Chord.paragraphStart.shifted,
+                .selectLeft, .deleteBack, .paragraphStart]),
+    ("dG", 5, [.paragraphStart, .left, Chord.documentEnd.shifted, .deleteBack, .paragraphStart]),
+] {
+    precondition(chords(physical(keys, text: lastThree, caret: caret, profile: keyProfile)) == expected, keys)
+}
+let longAbove = String(repeating: "word ", count: 40) + "\nlast"
+precondition(chords(physical("dd", text: longAbove, caret: 202, profile: readProfile)).prefix(8)
+    == [.left, .left, .selectRight, .selectRight, .selectRight, .selectRight, .selectRight, .deleteBack])
+
+for profile in [axProfile, keyProfile, readProfile, noInsertProfile] {
+    for (text, caret, keys, after, cursor, register) in [
+        ("one\ntwo", 5, "dd", "one", 0, "two\n"), ("one\ntwo\n", 8, "dd", "one\ntwo", 4, "\n"),
+        ("one\n  two\nthree", 13, "dd", "one\n  two", 6, "three\n"), (lastThree, 5, "2dd", "one", 0, "two\nthree\n"),
+        (lastThree, 5, "dj", "one", 0, "two\nthree\n"), (lastThree, 10, "dk", "one", 0, "two\nthree\n"),
+        (lastThree, 5, "dG", "one", 0, "two\nthree\n"), ("one\ntwo\n", 4, "dG", "one", 0, "two\n\n"),
+        ("one\n\n", 5, "dd", "one\n", 4, "\n"), ("one", 1, "dd", "", 0, "one"), (lastThree, 10, "dd.", "one", 0, "two\n"),
+        (lastThree, 10, "ddp", lastThree, 13, "three\n"), (lastThree, 10, "ddP", "one\nthree\ntwo", 10, "three\n"),
+        ("one\ntwo", 5, "yy", "one\ntwo", 4, "two"),
+    ] {
+        var sim = Sim(text: text, caret: caret, profile: profile)
+        sim.emulatesKeys = true
+        sim.type(keys)
+        let context = "\(keys) in \(text.debugDescription)"
+        precondition(sim.text == after && sim.caret == cursor && sim.settleFailures == 0 && sim.softMisses == 0, context)
+        precondition(sim.state.session.register("\"") == .content(RegisterContent(text: register, wise: .line)), context)
+    }
+    var blackHole = Sim(text: lastThree, caret: 10, profile: profile)
+    blackHole.emulatesKeys = true
+    blackHole.type("\"_dd")
+    precondition(blackHole.text == "one\ntwo" && blackHole.state.session.register("\"") == nil)
+    var changed = Sim(text: "one\ntwo", caret: 5, profile: profile)
+    changed.emulatesKeys = true
+    changed.type("ccX")
+    changed.feed("<Esc>")
+    precondition(changed.text == "one\nX")
+}
+
+// A text write the field ignores fails the first dd, which leaves the caret on the line it was for.
+for mode in ["plain", "markers", "emptyParagraphs"] {
+    let profile = adding([.lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey], to: axProfile)
+    var refused = Sim(text: lastThree, caret: 10, profile: profile)
+    refused.swallowsReplace = true
+    refused.emulatesKeys = true
+    if mode == "markers" {
+        refused.reads = omitsBreaks
+        refused.writesInReadOffsets = true
+        refused.markers = true
+    } else if mode == "emptyParagraphs" {
+        refused.emptyParagraphs = true
+        refused.readModel = .textContent
+    }
+    refused.learn(with: Sim.Learner(chromium: mode != "plain", probed: profile))
+    refused.type("dd")
+    precondition(refused.text == lastThree && refused.settleFailures == 1 && refused.caret == 8, mode)
+    refused.type("dd")
+    precondition(refused.text == "one\ntwo" && refused.caret == 4 && refused.settleFailures == 1, mode)
+}
+var refusedEmpty = Sim(text: "one\ntwo\n", caret: 8, profile: adding([.lineStartKey, .lineEndKey], to: axProfile))
+refusedEmpty.swallowsReplace = true
+refusedEmpty.emulatesKeys = true
+refusedEmpty.emptyParagraphs = true
+refusedEmpty.readModel = .textContent
+refusedEmpty.type("dd")
+precondition(refusedEmpty.text == "one\ntwo" && refusedEmpty.caret == 4 && refusedEmpty.settleFailures == 0,
+             "breaks alone read as a caret, so Backspace deletes them")
+
+let chipEnds = ParagraphBreaks(hidden: [.init(at: 7, text: " LIN-1 chip", kind: .atom), .init(at: 7, text: "\n", kind: .trailingBreak)])
+precondition(chipEnds.replacing(7..<17, with: "", endsLine: true) == chipEnds)
+precondition(chipEnds.replacing(7..<8, with: "").hidden == [.init(at: 7, text: " LIN-1 chip", kind: .atom)])
+for profile in [writeKeys, keyProfile] {
+    var chipAbove = Sim(text: "Intro \u{2060}\nlast line", caret: 12, profile: profile)
+    chipAbove.emptyParagraphs = true
+    chipAbove.listLines = [Sim.ListLine(), Sim.ListLine()]
+    chipAbove.emulatesKeys = true
+    chipAbove.readModel = .textContent
+    chipAbove.type("dd")
+    precondition(chipAbove.text == "Intro \u{2060}" && chipAbove.caret == 0 && chipAbove.settleFailures == 0 && chipAbove.softMisses == 0)
+}
 
 print("Vim engine tests passed")

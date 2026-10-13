@@ -800,7 +800,8 @@ does not stop a uvim that is already running.
 When a field can be read but not written, uvim moves by line and document with the standard
 Cocoa bindings instead of counting arrow presses: ⌃A/⌃E to the start and end of the caret's
 paragraph, which is uvim's line, ⇧⌃A/⇧⌃E to select there, and ⌘↑/⌘↓ (⇧ to select) for the
-document. `dd` is ⌃A, ⇧⌃E, ⇧→; `j` is ⌃E, → and then the column counted on the new line; `0`,
+document. `dd` is ⌃A, ⇧⌃E, ⇧→, and on the last line ⌃A, ←, ⇧→, ⇧⌃E, which takes the line break
+above it as Vim does; `j` is ⌃E, → and then the column counted on the new line; `0`,
 `$`, `gg`, `G`, `D`, `C`, `cc`, `yy`, `o`, `O`, `J` and linewise puts follow the same pattern.
 `x` and `X` still select one character and check it before deleting, because ⌦ and ⌫ would
 delete first and join lines at a line end. Where a field is written but a write cannot land a line's

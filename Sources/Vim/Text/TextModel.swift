@@ -106,26 +106,27 @@ public struct TextModel: Equatable, Sendable {
         return offset(i)
     }
 
-    /// Whole lines from the line containing `a` through the line containing
-    /// `b`, in either order.
-    public func lineSpan(from a: Int, to b: Int, includingTerminator: Bool) -> Range<Int> {
-        let start = lineStart(of: min(a, b))
-        var end = lineEnd(of: max(a, b))
-        if includingTerminator, end < length { end += 1 }
-        return start..<end
+    /// Whole lines from the line containing `a` through the line containing `b`, in either order.
+    public func lineSpan(from a: Int, to b: Int, extent: LineExtent) -> Range<Int> {
+        lines(lineStart(of: min(a, b)), through: lineEnd(of: max(a, b)), extent)
     }
 
     /// N whole lines starting at the line containing `o`.
-    public func lines(from o: Int, count: Int, includingTerminator: Bool) -> Range<Int> {
-        let start = lineStart(of: o)
+    public func lines(from o: Int, count: Int, extent: LineExtent) -> Range<Int> {
         var end = lineEnd(of: o)
         var remaining = count - 1
         while remaining > 0, end < length {
             end = lineEnd(of: end + 1)
             remaining -= 1
         }
-        if includingTerminator, end < length { end += 1 }
-        return start..<end
+        return lines(lineStart(of: o), through: end, extent)
+    }
+
+    /// The lines from `start` through the line ending at `end`, with the newline `extent` takes.
+    private func lines(_ start: Int, through end: Int, _ extent: LineExtent) -> Range<Int> {
+        guard extent != .interior else { return start..<end }
+        if end < length { return start..<end + 1 }
+        return extent == .removed && start > 0 ? start - 1..<end : start..<end
     }
 
     /// `j`/`k`: move whole lines, preserving the grapheme column, clamped to

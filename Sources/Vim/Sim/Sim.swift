@@ -325,7 +325,8 @@ private extension Sim {
                 if state.field.mode.isInserting {
                     state = VimReducer.reduce(state, .setMode(before.nonVisual))
                 }
-            } else if !repairStrandedSelection(operand: planned.operand, snapshot: snapshot, value: value),
+            } else if !repairStrandedSelection(operand: planned.operand, breakAbove: planned.breakAbove, snapshot: snapshot,
+                                               value: value),
                       state.field.mode.isInserting {
                 state = VimReducer.reduce(state, .setMode(before.nonVisual))
             }
@@ -345,7 +346,9 @@ private extension Sim {
     }
 
     /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.
-    mutating func repairStrandedSelection(operand: Range<Int>?, snapshot: FieldSnapshot, value: String?) -> Bool {
+    mutating func repairStrandedSelection(
+        operand: Range<Int>?, breakAbove: Bool, snapshot: FieldSnapshot, value: String?
+    ) -> Bool {
         guard !unreadableSelection else { return false }   // unknown is not empty
         guard !readSelection.isEmpty else { return true }
         if state.field.mode.isInserting, readSelection == operand { return true }
@@ -353,12 +356,13 @@ private extension Sim {
         let read = readSelection
         // As the Controller: the markers answer for the side, and the field is read again once `AXValue` has changed.
         let marked = paragraphs && (markers || emptyParagraphs)
+        let past = breakAbove && read == operand
         let collapse = PhysicalPlanner.collapse(
             read, side: marked ? chromium.side(selection.lowerBound) : nil, paragraphs: paragraphs,
-            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, profile: profile
+            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, past: past, profile: profile
         )
         if !executeAside(collapse), profile.has(.writeSelection) {
-            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, profile: profile))
+            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, past: past, profile: profile))
         }
         return readSelection.isEmpty
     }
