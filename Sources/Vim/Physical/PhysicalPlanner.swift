@@ -2179,8 +2179,7 @@ private extension PhysicalPlanner {
         case .replace:
             return [.commit(.setMode(.replace)), .commit(.setInsertStart(context.caret))]
         case .visual(let kind):
-            guard let position = context.position else { return nil }   // no anchor, no Visual
-            let anchor = context.model?.visibleOffset(position) ?? position
+            guard let anchor = context.position else { return nil }   // no anchor, no Visual
             return [.commit(.setMode(.visual(VimState.VisualContext(kind: kind, anchor: anchor))))]
         }
     }
