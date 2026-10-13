@@ -229,7 +229,7 @@ does not answer as planned, it beeps and stops rather than edit the wrong text.
 three commands in a row, uvim switches that capability off for fields like the one it failed in until the app
 updates; the app's own word and paragraph keys go off after one failure, and so does a text write the field
 accepts without an error and then ignores. Some failures only stop the command:
-a key landing elsewhere in Chromium's rich text (one that was to select and left only a caret still counts),
+a key landing elsewhere in Chromium's rich text (other than a key that was to select and left only a caret),
 a word key doing nothing in web content, a Backspace the field ignores, anything under **Force**, and any
 capability you set yourself. **Capabilities** lists what was switched off first, under
 **Learned for …** with the day it failed, and **Try Again** forgets it so uvim tries it afresh. **On …** and
@@ -304,8 +304,8 @@ after one failure too when the write returned no error and the check after it re
 before it read: uvim takes that as a field that ignores text writes, so the first `dd`, `x` or `ciw` that
 fails there is the last, and the next one presses Backspace. **Capabilities** then lists it first, under
 **Learned for …** with the day it failed, and **Try Again** forgets it so uvim tries it afresh.
-Some failures only stop the command: a key landing elsewhere in Chromium's rich text (one that was
-to select and left only a caret still counts), a word key doing nothing in web content, a Backspace
+Some failures only stop the command: a key landing elsewhere in Chromium's rich text (other than a
+key that was to select and left only a caret), a word key doing nothing in web content, a Backspace
 the field ignores, anything under **Force**, and any capability you set yourself. uvim
 also learns how a field counts caret positions: where the field's reads stop agreeing with it, it
 stops trusting the caret (**Read caret** shows under **Learned for …** as Off) and treats the field
