@@ -21,7 +21,7 @@ ifneq ($(and $(SIGN),$(filter dist publish,$(MAKECMDGOALS))),)
 $(error SIGN is for local builds: installs keep their grants only under project.yml's identity)
 endif
 
-.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs
+.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs test-tap
 
 all: build
 
@@ -57,6 +57,12 @@ test-prefs:
 	@mkdir -p $(DERIVED)
 	@swiftc -o $(DERIVED)/prefs-test Sources/Core/Prefs.swift Tests/PrefsTests/main.swift
 	@$(DERIVED)/prefs-test
+
+# When the keyboard tap may be attempted, as a rule apart from the calls: no tap is created, no grant.
+test-tap:
+	@mkdir -p $(DERIVED)
+	@swiftc -o $(DERIVED)/tap-test Sources/Core/TapStanding.swift Tests/TapStandingTests/main.swift
+	@$(DERIVED)/tap-test
 
 gen:
 	xcodegen generate

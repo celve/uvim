@@ -49,20 +49,21 @@ event tap. Type as usual, and press **Esc** for Normal mode.
    Or download the [latest release](https://github.com/celve/uvim/releases/latest), unzip it, and move
    `uvim.app` to `/Applications` before you open it for the first time: Sparkle, which updates uvim, cannot
    update a copy run from Downloads or from a disk image, and by default it does not say so.
-2. Open uvim and allow **Input Monitoring** when macOS asks. uvim does not ask for **Accessibility**: choose
-   **Accessibility: not granted** in its menu and switch uvim on there.
-3. Quit uvim and open it again, since it creates its keyboard tap only at launch. The menu should now read
-   `Input tap: running`, `Accessibility: granted` and `Input Monitoring: granted`.
+2. Open uvim. macOS asks to let it control this computer using accessibility features: choose **Open System
+   Settings** and switch uvim on under **Accessibility**, the one permission it needs. If the prompt is gone,
+   **Accessibility: not granted** in uvim's menu opens the same list.
+3. uvim starts within a few seconds of the switch, restarting itself if it has to: the **!** leaves its
+   menu-bar icon, and the menu reads `Input tap: running` and `Accessibility: granted`.
 
 A release is signed with a Developer ID certificate and notarized by Apple. It [updates](#updates) itself: on
 its second launch uvim asks whether to check once a day, and `brew upgrade` updates a Homebrew install as
 well. You can also [build uvim from source](#building-from-source).
 
-To uninstall, switch **Start at Login** off, quit and delete the app, remove it from Accessibility and Input
-Monitoring in System Settings → Privacy & Security, run `defaults delete io.github.celve.uvim`, and delete
-`~/Library/Application Support/uvim`. For a Homebrew install, `brew uninstall --zap --cask uvim` stands in
-for the quitting, the app, the settings and the folder; **Start at Login** and the two permissions are still
-yours to clear.
+To uninstall, switch **Start at Login** off, quit and delete the app, remove it from Accessibility in System
+Settings → Privacy & Security, and from Input Monitoring if it is listed there, run
+`defaults delete io.github.celve.uvim`, and delete `~/Library/Application Support/uvim`. For a Homebrew
+install, `brew uninstall --zap --cask uvim` stands in for the quitting, the app, the settings and the folder;
+**Start at Login** and the permission are still yours to clear.
 
 <details>
 <summary><h3>Upgrading from mvim</h3></summary>
@@ -92,8 +93,8 @@ defaults read /Applications/mvim.app/Contents/Info CFBundleIdentifier
    ```
 
    Text recording does not carry over: its setting is now `recordText` ([Diagnostics](#diagnostics)).
-5. Install uvim as above, or [build it from source](#building-from-source), and grant both
-   permissions as on a first install. **Start at Login** can go back on.
+5. Install uvim as above, or [build it from source](#building-from-source), and grant
+   Accessibility as on a first install. **Start at Login** can go back on.
 6. Delete `mvim.app` and `~/Library/Application Support/mvim`, and run `defaults delete` with the old
    identifier.
 7. If the old identifier was `com.loom.mvim` and you run Vibe, rebuild Vibe from a checkout whose
@@ -184,8 +185,9 @@ The menu is uvim's whole interface:
     reading it, with arrow keys and ⌘Z, ⌘X, ⌘C and ⌘V, and a click returns to Insert mode.
 - **Capabilities in _App_** shows what uvim can do in the current field, starting with what it learned to
   switch off in fields like it, and lets you override it; a badge on it counts what is off here.
-- The status rows report the input tap and both permissions; the permission rows open their System Settings
-  panes.
+- The status rows report the input tap and Accessibility, and the Accessibility row opens its System Settings
+  pane. An **Input Monitoring** row joins them only where macOS refuses uvim its tap
+  ([Accessibility and the keyboard tap](#accessibility-and-the-keyboard-tap)).
 - [**Start at Login**](#start-at-login) and, below it, **Open Beliefs File**, which opens the
   file that keeps your choices and what uvim has learned.
 - **Check for Updates…** checks for a newer release now; while one that a daily check found is waiting,
@@ -317,9 +319,12 @@ app's own keys: see [Native word, paragraph and page keys](#native-word-paragrap
 
 ## Privacy
 
-uvim needs **Accessibility**, to read and edit the focused field and to post keys, and **Input Monitoring**,
-for its keyboard tap. The tap sees every key you press, but uvim acts only on keys typed into a field it is
-working in.
+uvim needs one permission, **Accessibility**: it reads and edits the focused field, posts keys and runs its
+keyboard tap under it. The tap sees every key you press, but uvim acts only on keys typed into a field it is
+working in. uvim never asks for **Input Monitoring**. Where that is switched off for uvim, though, macOS
+refuses the tap even with Accessibility granted: the menu then shows an **Input Monitoring** row that opens
+its list, and uvim starts once it is switched on there and uvim is quit and opened again
+([Accessibility and the keyboard tap](#accessibility-and-the-keyboard-tap)).
 
 - **Network.** uvim has no microphone, keychain or networking code of its own; a release build's only traffic
   is [Sparkle](#updates)'s update check, which asks first.
@@ -369,6 +374,7 @@ The Xcode project is generated from [`project.yml`](project.yml) by XcodeGen and
 | `make test-pasteboard` | Run the pasteboard loan's tests on a private pasteboard: no permissions |
 | `make test-beliefs` | Run the beliefs file's tests in a temporary directory: no permissions |
 | `make test-prefs` | Run the Normal Mode Key's tests, which store nothing: no permissions |
+| `make test-tap` | Run the tests of when the keyboard tap may be created, which create none: no permissions |
 | `make release`   | Build Release, copy it to `.release/uvim.app`                        |
 | `make dist`      | `release`, then notarize it and stage its update in `dist/`          |
 | `make publish`   | `release`, then notarize it, stage its update and release it on GitHub |
@@ -408,7 +414,8 @@ uvim/
 │   └── sparkle-release.sh      # notarizes, stages and publishes updates (make dist / publish)
 ├── Sources/
 │   ├── Core/                   # Core framework — what the engine stands on: InputHub
-│   │                           #   (one shared CGEventTap), KeyEvent/Mods, field reads
+│   │                           #   (one shared CGEventTap) and TapStanding (when it may be
+│   │                           #   created), KeyEvent/Mods, field reads
 │   │                           #   (AX, MarkerText, WebAreaWalk), Synth (posted keys), Prefs,
 │   │                           #   capability config (Surface, CapabilityConfig,
 │   │                           #   CapabilitySeeds), SecureInput, LoginItem, Log.
@@ -427,7 +434,8 @@ uvim/
 │   ├── VimEngineTests/         # `make test`: the engine driven through Sim, as preconditions
 │   ├── PasteboardTests/        # `make test-pasteboard`: the paste's loan on a private pasteboard
 │   ├── BeliefsTests/           # `make test-beliefs`: the beliefs file in a temporary directory
-│   └── PrefsTests/             # `make test-prefs`: the Normal Mode Key's default and stored choices
+│   ├── PrefsTests/             # `make test-prefs`: the Normal Mode Key's default and stored choices
+│   └── TapStandingTests/       # `make test-tap`: when the keyboard tap may be attempted
 └── Resources/
     ├── AppIcon.icon/           # App icon: an Icon Composer document, edited in Icon Composer
     └── Assets.xcassets         # Accent color (still empty)
@@ -451,19 +459,17 @@ links [Sparkle](https://sparkle-project.org), pinned to an exact version in `pro
 `project.yml` signs the two configurations differently, both under the team it names:
 
 - **Debug** (`make build`, `make run`) signs with a stable **Apple Development** identity
-  (`CODE_SIGN_STYLE: Automatic`) so the Accessibility / Input Monitoring grants persist across
-  rebuilds — an ad-hoc signature would change every build and macOS would revoke the grants each
-  time.
+  (`CODE_SIGN_STYLE: Automatic`) so the Accessibility grant persists across rebuilds — an ad-hoc
+  signature would change every build and macOS would revoke the grant each time.
 - **Release** (`make release`, `make dist`, `make publish`) signs with the team's **Developer ID
   Application** certificate, which is what Apple's notary service takes: under the hardened runtime,
   with a secure timestamp, and without `get-task-allow`, the entitlement that lets other processes
   attach a debugger. That holds for the app, both frameworks and Sparkle's helpers. The style is
   `Manual` because Xcode's automatic signing cannot use Developer ID.
 
-[`uvim.entitlements`](uvim.entitlements) stays empty under the hardened runtime too: Accessibility and
-Input Monitoring are grants, not entitlements. The two configurations share one bundle identifier and
-differ in signature, so going from a Debug build to a Release one on the same Mac, or back, costs the
-grants each time.
+[`uvim.entitlements`](uvim.entitlements) stays empty under the hardened runtime too: Accessibility is a
+grant, not an entitlement. The two configurations share one bundle identifier and differ in signature,
+so going from a Debug build to a Release one on the same Mac, or back, costs the grant each time.
 
 To build under a different team, change `DEVELOPMENT_TEAM` in `project.yml`: every `make build` and
 `make release` regenerates the Xcode project from it, so a team picked in Xcode does not stick. Keep
@@ -471,13 +477,13 @@ that change out of pull requests.
 
 Without those certificates, `SIGN` signs one `make build`, `make run` or `make release` another way,
 leaving `project.yml` alone. `make run SIGN=-` signs ad-hoc: it builds anywhere, but macOS revokes
-the grants at every build. `SIGN="<name>"` signs with another code-signing identity in the keychain,
+the grant at every build. `SIGN="<name>"` signs with another code-signing identity in the keychain,
 such as your own Apple Development certificate or a self-signed one, named in full as
-`security find-identity -v -p codesigning` prints it; switching to or from it costs the grants once,
-and they persist across its builds. A `SIGN` build is not hardened: the hardened runtime loads an
+`security find-identity -v -p codesigning` prints it; switching to or from it costs the grant once,
+and it persists across its builds. A `SIGN` build is not hardened: the hardened runtime loads an
 app's frameworks only when they carry its team, and an ad-hoc or self-signed signature has none.
 `make dist` and `make publish` refuse `SIGN`, since only `project.yml`'s Developer ID signature can be
-notarized, and installs keep their grants only while updates keep it.
+notarized, and installs keep their grant only while updates keep it.
 
 </details>
 
@@ -500,8 +506,7 @@ Three consequences worth knowing:
   and `register()` cannot clear it. The menu shows the toggle unchecked and grows an **Approve uvim
   in Login Items Settings** row.
 
-A login-launched uvim keeps its Accessibility and Input Monitoring grants: same bundle, same
-signature.
+A login-launched uvim keeps its Accessibility grant: same bundle, same signature.
 
 </details>
 
@@ -597,7 +602,7 @@ again, so Sparkle signs the archive that ships. `make dist` and `make publish` b
 `make publish` also refuses to release when:
 
 - the app does not satisfy the designated requirement of the latest release's app — TCC holds
-  Accessibility and Input Monitoring against that requirement, so every install would lose both. A
+  the Accessibility grant against that requirement, so every install would lose it. A
   Developer ID requirement names the team, not the certificate, so any Developer ID Application
   certificate of the same team satisfies it; for a deliberate change, such as moving to another
   team or a new identifier, `SPARKLE_NEW_IDENTITY=1 make publish` publishes anyway. Under a new
@@ -628,6 +633,34 @@ downloaded in a browser, and macOS opens it after its one confirmation for an ap
 </details>
 
 **How it works**
+
+<details>
+<summary><h3>Accessibility and the keyboard tap</h3></summary>
+
+Everything uvim does runs under Accessibility: reading and editing the focused field, posting keys,
+and the tap that takes them. macOS decides once per process whether it may have such a tap, the first
+time it looks while uvim is listed under Accessibility: at an attempt to create the tap, at a launch
+that finds uvim listed and switched off, or when a process listed as off starts watching clicks. A
+process turned down then gets no tap for as long as it runs, whatever is granted later; one launched
+with Input Monitoring switched on for uvim is not turned down. Measured on macOS 14, 15 and 26, that
+is why uvim behaves as it does:
+
+- **At every launch without the grant, uvim asks**, with macOS's own prompt. Left to itself macOS asks
+  only the first time an app ever uses Accessibility.
+- **Until the grant, uvim does nothing else.** It makes no tap attempt and tracks no focus, and its
+  icon shows **!**.
+- **When the grant arrives**, which a 2 s poll sees, uvim attempts its tap. On its first launch ever,
+  when macOS had no entry for it as it started, the tap comes in place, and so it does with Input
+  Monitoring on. On any other launch that process was already turned down, so uvim starts a new uvim
+  and quits. This handover takes a second or two and happens once: the new uvim never hands over
+  again. It keeps **Vim Mode** as you left it, and a release asks its question about checking for
+  updates again if you left it unanswered, as every launch does. Where uvim cannot start the new one,
+  the menu reads **Input tap: not installed — quit and reopen uvim**.
+- **A uvim that had the grant at launch and is still refused** has Input Monitoring switched off for
+  it, which overrides Accessibility for a tap. Only then does the menu show the **Input Monitoring**
+  row. Switching uvim on there counts from the next launch, which is yours to make.
+
+</details>
 
 <details>
 <summary><h3>Diagnostics</h3></summary>

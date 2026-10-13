@@ -262,6 +262,8 @@ public final class FocusTracker {
     // MARK: - The resolve (the moved rebind body)
 
     private func resolveAndPublish(revalidateGate: Bool) {
+        // A menu choice can ask before `start`, which waits for Accessibility.
+        guard started else { return }
         guard enabled else {
             publish(nil)
             return

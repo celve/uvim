@@ -24,9 +24,7 @@ public final class Controller {
     /// Physical Esc engages Normal mode alongside ⌃[: the menu's Normal Mode Key.
     public var escapeEngages = false
 
-    /// Mode channel for the menu-bar indicator; nil = unbound. Setting the
-    /// callback publishes immediately — the tracker may have bound during
-    /// init, before the app model could wire in.
+    /// Mode channel for the menu-bar indicator, nil while unbound; setting it publishes the current mode.
     public var onModeChange: ((VimState.Mode?) -> Void)? {
         didSet {
             publishedMode = currentIndicatorMode
@@ -84,6 +82,10 @@ public final class Controller {
         tracker.onPointerAction = { [weak self] in self?.pointerActed() }
         // Force the recorder's one store read off the tap callback's first command.
         _ = Diag.recordsText
+    }
+
+    /// Starts focus tracking, once. Only with Accessibility granted: its click monitor costs a process without it its tap.
+    public func start() {
         tracker.start()
     }
 

@@ -33,15 +33,18 @@ struct UvimApp: App {
                 )
             }
             Divider()
-            Text(model.tapInstalled ? "Input tap: running" : "Input tap: not installed")
+            Text(model.tap == .installed ? "Input tap: running"
+                : model.handoverFailed ? "Input tap: not installed — quit and reopen uvim" : "Input tap: not installed")
                 .onAppear { model.refresh() }
             Button(model.accessibilityTrusted ? "Accessibility: granted" : "Accessibility: not granted") {
                 model.openPrivacyPane("Privacy_Accessibility")
             }
-            Button(model.inputMonitoringGranted
-                ? "Input Monitoring: granted"
-                : "Input Monitoring: not granted — grant, then relaunch") {
-                model.openPrivacyPane("Privacy_ListenEvent")
+            if model.tap == .refused {
+                Button(model.inputMonitoringGranted
+                    ? "Input Monitoring: granted"
+                    : "Input Monitoring: not granted — grant, then relaunch") {
+                    model.openPrivacyPane("Privacy_ListenEvent")
+                }
             }
             Divider()
             // Checked answers "will uvim start at login?" — a revoked item is not.
@@ -280,7 +283,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var mode: VimState.Mode?
     @Published private(set) var accessibilityTrusted = false
     @Published private(set) var inputMonitoringGranted = false
-    @Published private(set) var tapInstalled = false
+    @Published private(set) var tap = TapStanding.waiting
+    @Published private(set) var handoverFailed = false
     /// The tracker unbinds under Secure Input only when it next resolves; the icon need not wait.
     @Published private(set) var secureInput = false
     @Published private(set) var frontApp: FrontApp?
@@ -300,7 +304,7 @@ final class AppModel: ObservableObject {
 
     var icon: Icon {
         Icon(
-            vimEnabled: vimEnabled, permitted: accessibilityTrusted && tapInstalled,
+            vimEnabled: vimEnabled, permitted: accessibilityTrusted && tap == .installed,
             secureInput: secureInput, mode: mode
         )
     }
@@ -308,6 +312,11 @@ final class AppModel: ObservableObject {
     private let controller: Controller
     private var token: InputHub.Token?
     private var workspaceToken: NSObjectProtocol?
+    /// False where macOS may have turned this process down at launch; a handover's own uvim reads true, so none repeats.
+    private let startedTrusted: Bool
+    private var handingOver = false
+    private static let handedOverArgument = "--handed-over"
+    private static let vimOffArgument = "--vim-off"
 
     init() {
         // Before any AX or binding work: seed the disable list, and bound
@@ -315,9 +324,14 @@ final class AppModel: ObservableObject {
         // long enough for one busy app to freeze the tap).
         Prefs.registerDefaults()
         AX.setGlobalMessagingTimeout(0.15)
+        startedTrusted = AX.ensureTrusted(prompt: false) || CommandLine.arguments.contains(Self.handedOverArgument)
 
         let controller = Controller()
         self.controller = controller
+        if CommandLine.arguments.contains(Self.vimOffArgument) {
+            vimEnabled = false
+            controller.enabled = false
+        }
         controller.escapeEngages = normalModeKey == .escape
         controller.onModeChange = { [weak self] mode in self?.mode = mode }
         // Its own channel, deliberately: mode changes do NOT ride every rebind
@@ -330,6 +344,8 @@ final class AppModel: ObservableObject {
         token = InputHub.shared.register(.editor) { event in
             MainActor.assumeIsolated { controller.handle(event) }
         }
+        // macOS asks by itself only the first time an app is ever launched; this asks at every launch without the grant.
+        AX.ensureTrusted()
         // The menu's "Vim in <app>" row must be current BEFORE the menu is
         // built — MenuBarExtra builds content eagerly, so .onAppear cannot
         // be trusted to re-fire per open. Track activation continuously.
@@ -339,7 +355,7 @@ final class AppModel: ObservableObject {
         ) { note in
             MainActor.assumeIsolated { [weak self] in self?.frontAppChanged(note) }
         }
-        // Nothing documented announces an Accessibility change or Secure Input, so the icon polls both.
+        // Nothing documented announces an Accessibility change or Secure Input, so a timer re-reads both for the icon and the tap.
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             MainActor.assumeIsolated { [weak self] in self?.recheckSystemState() }
         }.tolerance = 1
@@ -350,8 +366,38 @@ final class AppModel: ObservableObject {
     private func recheckSystemState() {
         let trusted = AX.ensureTrusted(prompt: false)
         if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
+        let standing = InputHub.shared.installTap()
+        if standing.handsOver(startedTrusted: startedTrusted) {
+            handOver()
+        } else {
+            if standing != tap { tap = standing }
+            if trusted { controller.start() }
+        }
         let secure = SecureInput.isActive
         if secure != secureInput { secureInput = secure }
+    }
+
+    /// Starts a new uvim, which macOS judges afresh, and quits this one once that is up.
+    private func handOver() {
+        guard !handingOver else { return }
+        handingOver = true
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        configuration.activates = false
+        configuration.arguments = [Self.handedOverArgument] + (vimEnabled ? [] : [Self.vimOffArgument])
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
+            let failure = app == nil ? error?.localizedDescription ?? "no app" : nil
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    guard let failure else {
+                        NSApplication.shared.terminate(nil)
+                        return
+                    }
+                    Log.system.error("handover failed — \(failure, privacy: .public)")
+                    self?.handoverFailed = true
+                }
+            }
+        }
     }
 
     private func frontAppChanged(_ note: Notification) {
@@ -366,7 +412,6 @@ final class AppModel: ObservableObject {
     func refresh() {
         recheckSystemState()
         inputMonitoringGranted = CGPreflightListenEventAccess()
-        tapInstalled = InputHub.shared.isTapInstalled
         loginItem = LoginItem.state
         // uvim is LSUIElement, so opening the menu keeps the target app
         // frontmost; if frontmost somehow IS uvim, keep the last snapshot.
