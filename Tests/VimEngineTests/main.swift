@@ -6622,6 +6622,31 @@ for (text, keys, after) in [
     hostCaret.type(keys)
     precondition(hostCaret.text == after && hostCaret.settleFailures == 0, "\(keys) from after the run: \(hostCaret.text.debugDescription)")
 }
+for profile in [axProfile, readProfile, keyProfile, nativeRead] {
+    for (caret, keys, after, landing) in [(6, "vjhd", "hellod\u{200B}\nthird", 5), (5, "vjhd", "hellod\u{200B}\nthird", 5),
+                                          (6, "vj", "hello\u{200B}\nworld\u{200B}\nthird", 12)] {
+        var visualAnchor = Sim(text: "hello\u{200B}\nworld\u{200B}\nthird", caret: caret, profile: profile)
+        visualAnchor.emulatesKeys = true
+        visualAnchor.type(keys)
+        visualAnchor.feed("<Esc>")
+        precondition(visualAnchor.text == after && visualAnchor.caret == landing && visualAnchor.settleFailures == 0,
+                     "\(keys) from \(caret) under \(profile): \(visualAnchor.text.debugDescription) at \(visualAnchor.caret)")
+    }
+}
+for (keys, after, landing) in [("j", "abcdefghijk\u{200B}\nshort\u{200B}", 15),
+                               ("yyjp", "abcdefghijk\u{200B}\nshort\nabcdefghijk\u{200B}", 30)] {
+    var wrapped = Sim(text: "abcdefghijk\u{200B}\nshort\u{200B}", caret: 2, profile: keyProfile)
+    wrapped.emulatesKeys = true
+    wrapped.wrapWidth = 4
+    wrapped.type(keys)
+    precondition(wrapped.text == after && wrapped.caret == landing && wrapped.settleFailures == 0 && wrapped.softMisses == 0,
+                 "\(keys) by paragraph keys in a wrapped field: \(wrapped.text.debugDescription) at \(wrapped.caret)")
+}
+var displayRows = Sim(text: "alpha beta gamma\u{200B}\nnext", caret: 0, profile: nativeRead)
+displayRows.emulatesKeys = true
+displayRows.wrapWidth = 6
+displayRows.type("gj")
+precondition(displayRows.caret == 6 && displayRows.bells == 0 && displayRows.settleFailures == 0, "the model has no display rows, so the app's keep them")
 var insertedAfterRun = Sim(text: "hello\u{200B}\nworld", caret: 6, profile: axProfile)
 insertedAfterRun.type("i")
 insertedAfterRun.feed("<Esc>")
@@ -6666,6 +6691,31 @@ for text in ["hello\u{200B}", "hi there\u{200B}\nworld\u{200B}", "a\u{200B}\u{20
                     if case .press(.deleteBack, _) = step { break }
                     precondition(ends.allSatisfy { model.visibleOffset($0) == $0 },
                                  "\(keys) from \(caret) in \(text.debugDescription) under \(profile): \(step)")
+                }
+            }
+        }
+    }
+}
+// Visual from a host's caret among a line's end run runs as from the line's visible end, and never selects into the run.
+for text in ["hello\u{200B}\nworld\u{200B}\nthird", "a\u{200B}\u{2060}\nb c", "one two\u{200B}\n\u{200B}\nthree\u{200B}"] {
+    let model = TextModel(text)
+    for profile in [axProfile, readProfile, keyProfile, nativeRead] {
+        for caret in 0...model.length where model.visibleOffset(caret) < caret {
+            for motions in ["h", "l", "j", "k", "$", "0", "w", "b", "e", "G"].flatMap({ m in ["", "h", "l", "j", "k", "$"].map { m + $0 } }) {
+                for op in ["d", "y", "<Esc>"] {
+                    var results: [String] = []
+                    for start in [caret, model.visibleOffset(caret)] {
+                        var sim = Sim(text: text, caret: start, profile: profile)
+                        sim.emulatesKeys = true
+                        sim.type("v" + motions)
+                        let shown = TextModel(sim.text)
+                        precondition([sim.selection.lowerBound, sim.selection.upperBound].allSatisfy { shown.visibleOffset($0) == $0 },
+                                     "v\(motions) from \(start) in \(text.debugDescription) under \(profile): \(sim.selection)")
+                        if op == "<Esc>" { sim.feed(op) } else { sim.type(op) }
+                        results.append("\(sim.text.debugDescription) \(sim.caret) \(String(describing: sim.state.session.register("\""))) \(sim.bells)")
+                        precondition(sim.settleFailures == 0 && sim.softMisses == 0, "v\(motions)\(op) from \(start) in \(text.debugDescription)")
+                    }
+                    precondition(results[0] == results[1], "v\(motions)\(op) from \(caret) in \(text.debugDescription) under \(profile): \(results)")
                 }
             }
         }

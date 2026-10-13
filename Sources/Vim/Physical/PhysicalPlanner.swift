@@ -1132,17 +1132,22 @@ private extension PhysicalPlanner {
         // One model throughout: which end of a selection moves is state the keys build up.
         var model = KeyModel(text: text, anchor: position, focus: position, atoms: original.atoms, gaps: original.gaps)
         let shown = original.model
+        var pending: KeyGroup = ([], nil)
         for group in groups where !group.chords.isEmpty {
             for chord in group.chords {
                 guard model.press(chord) else { return .next }
             }
-            // Hosts differ on where a key lands beside invisible characters ending a line, so none is planned to stop there.
-            guard let shown, [model.selection.lowerBound, model.selection.upperBound].allSatisfy({ shown.visibleOffset($0) == $0 })
-            else { return .next }
-            steps += keys(group.chords, blaming: group.blame, to: model.selection, context: &context, profile: profile,
-                          route: group.blame == nil ? route : nil)
+            let merged: KeyGroup = (pending.chords + group.chords, pending.blame ?? group.blame)
+            // Hosts differ on where a key lands among invisible characters ending a line, so the keys after it are checked with it.
+            if let shown, [model.selection.lowerBound, model.selection.upperBound].contains(where: { shown.visibleOffset($0) != $0 }) {
+                pending = merged
+                continue
+            }
+            pending = ([], nil)
+            steps += keys(merged.chords, blaming: merged.blame, to: model.selection, context: &context, profile: profile,
+                          route: merged.blame == nil ? route : nil)
         }
-        guard model.selection == target else { return .next }
+        guard pending.chords.isEmpty, model.selection == target else { return .next }
         original = context
         return .steps(steps)
     }
@@ -1443,8 +1448,8 @@ private extension PhysicalPlanner {
             context.selectionOpaque = false
             return .steps([.press(key.chord, count: count)])
         }
-        // The app's own keys land past invisible characters ending a line, where the model's lanes stop.
-        if model.endsLinesInvisibly { return .next }
+        // The app's own keys land past invisible characters ending a line, so the model's lanes take every motion they compute.
+        if model.endsLinesInvisibly, resolve(destination, model: model, from: selection.lowerBound) != nil { return .next }
         // Exact fields keep vim's words.
         if key.atom == .wordKeys, profile.has(.writeSelection) { return .next }
         if case .line = motion, !movesByRow(motion, profile: profile) { return .next }
@@ -1697,7 +1702,7 @@ private extension PhysicalPlanner {
         if let model = context.model(for: destination, profile), let selection = context.selection, let anchor = context.anchor,
            profile.has(.writeSelection) || profile.has(.readCaret) && model.endsLinesInvisibly {
             let start = model.visibleOffset(anchor)
-            let head = model.visibleOffset(selection.lowerBound == anchor ? selection.upperBound : selection.lowerBound)
+            let head = model.visibleOffset(selection.lowerBound == start ? selection.upperBound : selection.lowerBound)
             guard let target = resolve(destination, model: model, from: head) else { return nil }
             let range = min(start, target)..<max(start, target)
             context.selection = range
@@ -1738,7 +1743,8 @@ private extension PhysicalPlanner {
                 target = selection.upperBound
             case .head:
                 // With no anchor the app owns the selection and nothing reads its direction, so its start stands in.
-                target = context.anchor == selection.lowerBound ? selection.upperBound : selection.lowerBound
+                let anchor = context.anchor.map { context.model?.visibleOffset($0) ?? $0 }
+                target = anchor == selection.lowerBound ? selection.upperBound : selection.lowerBound
             }
             let towardStart = target == selection.lowerBound
             context.selection = target..<target
@@ -2173,7 +2179,8 @@ private extension PhysicalPlanner {
         case .replace:
             return [.commit(.setMode(.replace)), .commit(.setInsertStart(context.caret))]
         case .visual(let kind):
-            guard let anchor = context.position else { return nil }   // no anchor, no Visual
+            guard let position = context.position else { return nil }   // no anchor, no Visual
+            let anchor = context.model?.visibleOffset(position) ?? position
             return [.commit(.setMode(.visual(VimState.VisualContext(kind: kind, anchor: anchor))))]
         }
     }
