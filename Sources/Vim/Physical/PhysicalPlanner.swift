@@ -453,10 +453,11 @@ private extension PhysicalPlanner {
     /// did), so it proceeds instead of aborting the mode change behind it.
     static func settle(
         _ context: Context, profile: CapabilityProfile, hard: Bool = true,
-        blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil
+        blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil, landing: Landing? = nil
     ) -> [PhysicalStep] {
         guard profile.has(.readCaret), let selection = context.selection else { return [] }
-        var expectation = context.expectation(.exact(selection), blame: blame, selectedText: selectedText, profile: profile)
+        var expectation = context.expectation(landing ?? .exact(selection), blame: blame, selectedText: selectedText,
+                                              profile: profile)
         expectation.route = route
         return [hard ? .settle(expectation) : .softSettle(expectation)]
     }
@@ -1137,15 +1138,23 @@ private extension PhysicalPlanner {
             for chord in group.chords {
                 guard model.press(chord) else { return .next }
             }
+            // A merged check names one key, so keys that blame different ones are not merged.
+            guard pending.blame == nil || group.blame == nil || pending.blame == group.blame else { return .next }
             let merged: KeyGroup = (pending.chords + group.chords, pending.blame ?? group.blame)
-            // Hosts differ on where a key lands among invisible characters ending a line, so the keys after it are checked with it.
-            if let shown, [model.selection.lowerBound, model.selection.upperBound].contains(where: { shown.visibleOffset($0) != $0 }) {
-                pending = merged
-                continue
+            // Hosts differ on where a key lands among invisible characters ending a line: a caret there is checked
+            // anywhere from the line's visible end on, and a selection together with the keys after it.
+            var checking: Landing?
+            let ends = [model.selection.lowerBound, model.selection.upperBound]
+            if let shown, let end = ends.first(where: { shown.visibleOffset($0) != $0 }) {
+                guard model.selection.isEmpty else {
+                    pending = merged
+                    continue
+                }
+                checking = .caretAfter(shown.visibleOffset(end), strict: false)
             }
             pending = ([], nil)
-            steps += keys(merged.chords, blaming: merged.blame, to: model.selection, context: &context, profile: profile,
-                          route: group.blame == nil ? route : nil)
+            steps += keys(merged.chords, blaming: merged.blame, to: model.selection, checking: checking, context: &context,
+                          profile: profile, route: group.blame == nil ? route : nil)
         }
         guard pending.chords.isEmpty, model.selection == target else { return .next }
         original = context
@@ -1159,7 +1168,7 @@ private extension PhysicalPlanner {
     /// Presses `chords`, then settles on `landing`; a named key is blamed if it left a selection where it leaves a caret,
     /// if the field reads as before where it had somewhere to go, or if it landed elsewhere where lines are the model's.
     static func keys(
-        _ chords: [Chord], blaming atom: Capability?, to landing: Range<Int>,
+        _ chords: [Chord], blaming atom: Capability?, to landing: Range<Int>, checking: Landing? = nil,
         context: inout Context, profile: CapabilityProfile, route: Route? = nil
     ) -> [PhysicalStep] {
         let before = context.selection
@@ -1182,7 +1191,7 @@ private extension PhysicalPlanner {
                 capability: atom, unmoved: unmoved, leavesCaret: leavesCaret, offTarget: offTarget, exemptions: exemptions
             )
         }
-        return counted(chords) + settle(context, profile: profile, blame: blame, route: route)
+        return counted(chords) + settle(context, profile: profile, blame: blame, route: route, landing: checking)
     }
 
     /// Whether the keys may rightly leave the caret where it was: they had nowhere to go from it.

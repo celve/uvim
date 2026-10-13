@@ -6642,13 +6642,29 @@ for (keys, after, landing) in [("j", "abcdefghijk\u{200B}\nshort\u{200B}", 15),
     precondition(wrapped.text == after && wrapped.caret == landing && wrapped.settleFailures == 0 && wrapped.softMisses == 0,
                  "\(keys) by paragraph keys in a wrapped field: \(wrapped.text.debugDescription) at \(wrapped.caret)")
 }
-for (caret, keys, route) in [(2, "j", nil), (10, "j", Route.lineEnd)] as [(Int, String, Route?)] {
-    var unmoved = Sim(text: "abcdefghijk\u{200B}\nlonger line here\u{200B}", caret: caret, profile: keyProfile)
+for (text, caret, keys, ignored, blamed) in [
+    ("abcdefghijk\u{200B}\nlonger line here\u{200B}", 2, "j", Chord.paragraphEnd, Capability.lineEndKey),
+    ("abcdefghijk\u{200B}\nlonger line here\u{200B}", 10, "j", .paragraphEnd, .lineEndKey),
+    ("aa\u{200B}\nbb\u{200B}\ncc\u{200B}", 1, "G", .paragraphStart, .lineStartKey),
+    ("aa\u{200B}\nbb\u{200B}\ncc\u{200B}", 5, "dk", Chord.paragraphStart.shifted, .lineStartKey),
+    ("aa\u{200B}\nbb\u{200B}\ncc\u{200B}", 5, "dk", .paragraphEnd, .lineEndKey),
+] {
+    var unmoved = Sim(text: text, caret: caret, profile: keyProfile)
     unmoved.emulatesKeys = true
-    unmoved.ignoredChords = [.paragraphEnd]
+    unmoved.ignoredChords = [ignored]
     unmoved.type(keys)
-    precondition(unmoved.blamed == [.lineEndKey] && unmoved.attribution.missedRoute == route, "\(keys) from \(caret): \(unmoved.blamed)")
+    precondition(unmoved.blamed == [blamed] && unmoved.settleFailures == 1, "\(keys) from \(caret) ignoring \(ignored): \(unmoved.blamed)")
 }
+var routeMiss = Sim(text: "abcdefghijk\u{200B}\nlonger line here\u{200B}", caret: 10, profile: keyProfile)
+routeMiss.emulatesKeys = true
+routeMiss.ignoredChords = [.right]
+routeMiss.type("j")
+precondition(routeMiss.blamed.isEmpty && routeMiss.attribution.missedRoute == .lineEnd, "\(routeMiss.blamed)")
+var pulledBack = Sim(text: "aa\u{200B}\nbb\u{200B}\ncc\u{200B}", caret: 1, profile: keyProfile)
+pulledBack.emulatesKeys = true
+pulledBack.pullsBackFromLineEnds = true
+pulledBack.type("G")
+precondition(pulledBack.caret == 8 && pulledBack.settleFailures == 0, "⌘↓ may land on either side of the run")
 var displayRows = Sim(text: "alpha beta gamma\u{200B}\nnext", caret: 0, profile: nativeRead)
 displayRows.emulatesKeys = true
 displayRows.wrapWidth = 6
