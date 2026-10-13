@@ -551,7 +551,7 @@ public final class Controller {
         let settled = executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
         // Keys the field ignored fail their settle, and a write lane then writes the start as it was read.
         if !settled, writes {
-            let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, toEnd: toEnd, profile: binding.capabilities)
+            let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, profile: binding.capabilities)
             executor.execute(asRead, on: binding.element, state: &state, paragraphs: paragraphs)
         }
         // Keys can still be landing when their settle passes, so where they replaced a write the caret is waited for.

@@ -361,7 +361,7 @@ private extension Sim {
             snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, toEnd: toEnd, profile: profile
         )
         if !executeAside(collapse), profile.has(.writeSelection) {
-            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, toEnd: toEnd, profile: profile))
+            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, profile: profile))
         }
         return readsCaret(paragraphs: paragraphs)
     }
