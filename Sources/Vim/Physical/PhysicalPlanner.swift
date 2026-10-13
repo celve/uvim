@@ -310,7 +310,8 @@ private extension PhysicalPlanner {
 
         /// A register's text for `range`, each chip's label whole and no line ending in invisible characters (LIN-1978).
         func content(_ range: Range<Int>, _ text: String) -> String {
-            TextModel.withoutLineEndInvisibles(breaks?.withAtoms(text, at: range) ?? text)
+            guard let model else { return breaks?.withAtoms(text, at: range) ?? text }
+            return model.visibleParts(of: range).map { breaks?.withAtoms(model.substring($0), at: $0) ?? model.substring($0) }.joined()
         }
 
         /// The snapshot's caret when it is in an empty paragraph, which `AXValue` can leave out and read beside, so a
@@ -722,16 +723,16 @@ private extension PhysicalPlanner {
 // MARK: - Destinations
 
 private extension PhysicalPlanner {
+    /// Never among the invisible characters ending a line, which are its break's (LIN-1978).
     static func resolve(_ destination: LogicalStep.Destination, model: TextModel, from position: Int) -> Int? {
         switch destination {
         case .motion(let motion, let count):
-            // Never among the invisible characters ending a line, which are its break's (LIN-1978).
             return model.destination(of: motion, from: position, count: count).map(model.visibleOffset)
         case .offset(let offset):
-            return model.clamp(offset)
+            return model.visibleOffset(offset)
         case .mark(let point, let lineWise):
             guard model.isValid(point) else { return nil }   // stale mark: reject, never jump wrong
-            return lineWise ? model.firstNonBlank(inLineOf: point.offset) : model.clamp(point.offset)
+            return lineWise ? model.firstNonBlank(inLineOf: point.offset) : model.visibleOffset(point.offset)
         }
     }
 
@@ -1130,10 +1131,14 @@ private extension PhysicalPlanner {
         var steps = collapsing(&context)
         // One model throughout: which end of a selection moves is state the keys build up.
         var model = KeyModel(text: text, anchor: position, focus: position, atoms: original.atoms, gaps: original.gaps)
+        let shown = original.model
         for group in groups where !group.chords.isEmpty {
             for chord in group.chords {
                 guard model.press(chord) else { return .next }
             }
+            // Hosts differ on where a key lands beside invisible characters ending a line, so none is planned to stop there.
+            guard let shown, [model.selection.lowerBound, model.selection.upperBound].allSatisfy({ shown.visibleOffset($0) == $0 })
+            else { return .next }
             steps += keys(group.chords, blaming: group.blame, to: model.selection, context: &context, profile: profile,
                           route: group.blame == nil ? route : nil)
         }
@@ -1438,6 +1443,8 @@ private extension PhysicalPlanner {
             context.selectionOpaque = false
             return .steps([.press(key.chord, count: count)])
         }
+        // The app's own keys land past invisible characters ending a line, where the model's lanes stop.
+        if model.endsLinesInvisibly { return .next }
         // Exact fields keep vim's words.
         if key.atom == .wordKeys, profile.has(.writeSelection) { return .next }
         if case .line = motion, !movesByRow(motion, profile: profile) { return .next }
@@ -1485,7 +1492,7 @@ private extension PhysicalPlanner {
             context.selectionWise = .character
             return .steps([.press(.wordRight, count: 1), .press(.wordLeft, count: 1), .press(.selectWordRight, count: 1)])
         }
-        guard !profile.has(.writeSelection), profile.has(.wordKeys) else { return .next }
+        guard !profile.has(.writeSelection), profile.has(.wordKeys), !model.endsLinesInvisibly else { return .next }
         let p = selection.lowerBound
         var steps: [PhysicalStep] = selection.isEmpty ? [] : [.press(.left, count: 1)]
         if let key = span, case .span(.motion(_, let count), _) = target {
@@ -1548,12 +1555,13 @@ private extension PhysicalPlanner {
             }
             return model.visibleOffset(range.lowerBound)..<model.visibleOffset(range.upperBound)
         case .toLineEnd:
-            return position..<model.lineEnd(of: position)
+            let start = model.visibleOffset(position)
+            return start..<model.lineEnd(of: start)
         case .current:
             guard let selection = context.selection, !selection.isEmpty else { return nil }
             return selection
         case .remembered(let memory):
-            return model.clamp(memory.range.lowerBound)..<model.clamp(memory.range.upperBound)
+            return model.visibleOffset(memory.range.lowerBound)..<model.visibleOffset(memory.range.upperBound)
         }
     }
 
@@ -1686,14 +1694,21 @@ private extension PhysicalPlanner {
         context: inout Context,
         profile: CapabilityProfile
     ) -> [PhysicalStep]? {
-        if profile.has(.writeSelection),
-           let model = context.model(for: destination, profile),
-           let selection = context.selection,
-           let anchor = context.anchor {
-            let head = selection.lowerBound == anchor ? selection.upperBound : selection.lowerBound
+        if let model = context.model(for: destination, profile), let selection = context.selection, let anchor = context.anchor,
+           profile.has(.writeSelection) || profile.has(.readCaret) && model.endsLinesInvisibly {
+            let start = model.visibleOffset(anchor)
+            let head = model.visibleOffset(selection.lowerBound == anchor ? selection.upperBound : selection.lowerBound)
             guard let target = resolve(destination, model: model, from: head) else { return nil }
-            let range = min(anchor, target)..<max(anchor, target)
+            let range = min(start, target)..<max(start, target)
             context.selection = range
+            context.selectionOpaque = false
+            guard profile.has(.writeSelection) else {
+                // The app's own extend lands past invisible characters ending a line, so keys rebuild it from the anchor.
+                let count = model.graphemes(in: range)
+                return keyPath(from: selection, to: start, model: model, context: context)
+                    + (count > 0 ? [.press(target < start ? .selectLeft : .selectRight, count: count)] : [])
+                    + settle(context, profile: profile)
+            }
             return write(range, context: context) + settle(context, profile: profile)
         }
         // Blind: the app owns the anchor. This deliberately ignores
@@ -1919,7 +1934,7 @@ private extension PhysicalPlanner {
         let position = selection.lowerBound
         let range = model.lines(from: position, count: count, includingTerminator: false)
         guard !context.retypesStructure(range) else { return nil }
-        let lines = TextModel.withoutLineEndInvisibles(model.substring(range))
+        let lines = model.visibleText(in: range)
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
         guard lines.count > 1 else { return [] }
@@ -1984,9 +1999,7 @@ private extension PhysicalPlanner {
             switch wise {
             case .character, .block:   // block degrades to characterwise
                 if let model = context.model, let position = context.position {
-                    let target = action.position == .after
-                        ? min(model.advance(position, byGraphemes: 1), model.lineEnd(of: position))
-                        : position
+                    let target = putTarget(action, at: position, model: model)
                     guard let moved = moveSteps(to: target, context: &context, profile: profile) else { return nil }
                     steps += moved
                 } else if action.position == .after {
@@ -2000,7 +2013,7 @@ private extension PhysicalPlanner {
                 if let model = context.linewiseModel(profile), let position = context.position {
                     let end = model.lineBreak(of: position)
                     let target = action.position == .after
-                        ? (end >= model.length ? model.lineEnd(of: position) : end + 1)
+                        ? (end >= model.length ? model.visibleOffset(end) : end + 1)
                         : model.lineStart(of: position)
                     guard let moved = moveSteps(to: target, as: lineTarget(action, end: end, model: model),
                                                 context: &context, profile: profile) else { return nil }
@@ -2041,9 +2054,7 @@ private extension PhysicalPlanner {
         profile: CapabilityProfile
     ) -> [PhysicalStep]? {
         if let model = context.model, let position = context.position {
-            let target = action.position == .after
-                ? min(model.advance(position, byGraphemes: 1), model.lineEnd(of: position))
-                : position
+            let target = putTarget(action, at: position, model: model)
             guard var steps = moveSteps(to: target, context: &context, profile: profile) else { return nil }
             steps += insertSteps(payload, after: steps, context: &context, profile: profile)
             return steps
@@ -2055,6 +2066,12 @@ private extension PhysicalPlanner {
         steps.append(.clipboardInsert(payload))
         context.invalidate()
         return steps
+    }
+
+    /// After the character at the caret, or at the caret, and never among the invisible characters ending a line.
+    static func putTarget(_ action: PutAction, at caret: Int, model: TextModel) -> Int {
+        let position = model.visibleOffset(caret)
+        return action.position == .after ? min(model.advance(position, byGraphemes: 1), model.lineEnd(of: position)) : position
     }
 
     static func putLinewise(
@@ -2072,7 +2089,7 @@ private extension PhysicalPlanner {
             if action.position == .after {
                 if end >= model.length {
                     // Last line without a terminator: lead with the newline.
-                    target = model.lineEnd(of: position)
+                    target = model.visibleOffset(end)
                     insertion = "\n" + String(text.dropLast())
                 } else {
                     target = end + 1

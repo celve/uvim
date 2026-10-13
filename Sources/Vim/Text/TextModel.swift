@@ -129,20 +129,36 @@ public struct TextModel: Equatable, Sendable {
         isInvisible(i) && offset(i) >= lineEnd(of: lineStart(of: offset(i)))
     }
 
-    /// `text` without the invisible characters that end its lines, as a register keeps it.
-    public static func withoutLineEndInvisibles(_ text: String) -> String {
-        var kept = ""
-        var run = ""
-        for character in text {
-            if isInvisible(character) {
-                run.append(character)
-                continue
+    /// `range` less the invisible characters ending its lines, as a register keeps it.
+    public func visibleParts(of range: Range<Int>) -> [Range<Int>] {
+        var parts: [Range<Int>] = []
+        var start = range.lowerBound
+        var i = index(range.lowerBound)
+        while i < index(range.upperBound) {
+            let next = text.index(after: i)
+            if inBreak(i) {
+                if offset(i) > start { parts.append(start..<offset(i)) }
+                start = offset(next)
             }
-            if character != "\n" { kept += run }
-            run = ""
-            kept.append(character)
+            i = next
         }
-        return kept + run
+        if range.upperBound > start { parts.append(start..<range.upperBound) }
+        return parts
+    }
+
+    public func visibleText(in range: Range<Int>) -> String {
+        visibleParts(of: range).map(substring).joined()
+    }
+
+    /// Some line ends in invisible characters, past which an app's own keys land.
+    public var endsLinesInvisibly: Bool {
+        var start = 0
+        while true {
+            let end = lineBreak(of: start)
+            if lineEnd(of: start) < end { return true }
+            guard end < length else { return false }
+            start = end + 1
+        }
     }
 
     /// Whether a line holding any of `range`, ends included, is empty, as `AXValue` shows lines.

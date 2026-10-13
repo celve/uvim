@@ -6576,7 +6576,11 @@ precondition(TextModel("ab\u{2060}", atoms: [2]).lineEnd(of: 0) == 3, "a chip is
 precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [4]).lineEnd(of: 3) == 4)
 precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [2, 4]).lineEnd(of: 3) == 3)
 precondition(TextModel("ab\n\u{200B}\ncd").lineEnd(of: 3) == 3 && TextModel("\u{200B}", paragraphBreaks: []).lineEnd(of: 0) == 0)
-precondition(TextModel.withoutLineEndInvisibles("a\u{200B}\nb\u{2060}\u{FEFF}\nc\u{200B}") == "a\nb\nc\u{200B}")
+precondition(TextModel("a\u{200B}\nb\u{2060}\u{FEFF}\nc\u{200B}").visibleText(in: 0..<9) == "a\nb\nc")
+precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [4]).visibleText(in: 3..<5) == "\u{200B}\n")
+precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [2, 4]).visibleText(in: 3..<5) == "\n")
+precondition(TextModel("ab\u{200B}\ncd").endsLinesInvisibly && !TextModel("ab\n\u{200B}cd").endsLinesInvisibly)
+precondition(!TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [4]).endsLinesInvisibly && !TextModel("ab\u{2060}", atoms: [2]).endsLinesInvisibly)
 var zwKeys = KeyModel(text: "ab\u{200B}\ncd", anchor: 0, focus: 0)
 precondition(zwKeys.press(.paragraphEnd) && zwKeys.selection == 3..<3, "⌃E lands after it in AppKit and WebKit")
 precondition(zwKeys.press(.right) && zwKeys.selection == 4..<4 && zwKeys.press(.left) && zwKeys.selection == 3..<3)
@@ -6588,6 +6592,80 @@ var pasteboardPut = VimState.initial
 pasteboardPut.session.registers.unnamed = .pasteboard(wise: .line)
 precondition(physical("p", text: "one\u{200B}\ntwo\u{200B}", caret: 6, profile: axProfile, state: pasteboardPut).steps.first
              == .setSelection(8..<8))
+for profile in [readProfile, keyProfile, axProfile] {
+    var visualEnd = Sim(text: "hello\u{200B}", caret: 1, profile: profile)
+    visualEnd.emulatesKeys = true
+    visualEnd.type("v$d")
+    precondition(visualEnd.text == "h\u{200B}" && visualEnd.settleFailures == 0, "v$d under \(profile): \(visualEnd.text.debugDescription)")
+    precondition(visualEnd.state.session.register("\"") == .content(RegisterContent(text: "ello", wise: .character)))
+}
+var nativeWords = Sim(text: "hello\u{200B}", caret: 5, profile: nativeRead)
+nativeWords.emulatesKeys = true
+nativeWords.type("dw")
+precondition(nativeWords.text == "hello\u{200B}" && nativeWords.settleFailures == 0, "an app's word keys land past the run")
+nativeWords = Sim(text: "hello\u{200B}", caret: 0, profile: nativeRead)
+nativeWords.emulatesKeys = true
+nativeWords.type("2dw")
+precondition(nativeWords.text == "\u{200B}" && nativeWords.settleFailures == 0)
+var bang = VimState.initial
+bang.session.registers.unnamed = .content(RegisterContent(text: "!", wise: .character))
+for (text, keys, after) in [
+    ("hello\u{200B}", "vhd", "hell\u{200B}"), ("hello\u{200B}", "v$d", "hello\u{200B}"), ("hello\u{200B}", "ma0ld`a", "h\u{200B}"),
+    ("hello\u{200B}", "p", "hello!\u{200B}"), ("hello\u{200B}", "P", "hello!\u{200B}"), ("hello\u{200B}\u{2060}", "p", "hello!\u{200B}\u{2060}"),
+] {
+    var hostCaret = Sim(text: text, caret: 6, state: bang, profile: axProfile)
+    hostCaret.type(keys)
+    precondition(hostCaret.text == after && hostCaret.settleFailures == 0, "\(keys) from after the run: \(hostCaret.text.debugDescription)")
+}
+var insertedAfterRun = Sim(text: "hello\u{200B}\nworld", caret: 6, profile: axProfile)
+insertedAfterRun.type("i")
+insertedAfterRun.feed("<Esc>")
+insertedAfterRun.type("0gi")
+precondition(insertedAfterRun.caret == 5 && insertedAfterRun.settleFailures == 0, "gi returns before the run")
+let placeholderLine = FieldSnapshot(
+    capabilities: axProfile, text: "ab\n\u{200B}\ncd", selection: 3..<3, breaks: ParagraphBreaks(offsets: [4])
+)
+for (keys, kept) in [("yy", "\u{200B}\n"), ("dd", "\u{200B}\n")] {
+    let planned = PhysicalPlanner.plan(LogicalPlanner.plan(RawCommand(keys), state: .initial), snapshot: placeholderLine).steps
+    precondition(planned.contains { step in
+        if case .commit(.yanked(_, .literal(kept), _)) = step { return true }
+        if case .commit(.deleted(_, .literal(kept), _)) = step { return true }
+        return false
+    }, "\(keys) keeps Linear's placeholder")
+}
+precondition(PhysicalPlanner.plan(LogicalPlanner.plan(RawCommand("J"), state: .initial), snapshot: placeholderLine).steps
+             .contains(.replaceSelection("\u{200B} cd")))
+// No write or check uvim plans lands among the invisible characters ending a line, from any caret, in any lane.
+var visualAt = VimState.initial
+for text in ["hello\u{200B}", "hi there\u{200B}\nworld\u{200B}", "a\u{200B}\u{2060}\nb c", "\u{200B}", "x\n\u{200B}\ny z\u{FEFF}"] {
+    let model = TextModel(text)
+    for profile in [axProfile, readProfile, keyProfile, nativeRead, noInsertProfile] {
+        for caret in text.indices.map({ $0.utf16Offset(in: text) }) + [model.length] {
+            visualAt.field.mode = .visual(VimState.VisualContext(kind: .character, anchor: caret))
+            let commands = ["$", "A", "a", "x", "X", "D", "C", "dd", "cc", "yy", "p", "P", "o", "J", "w", "e", "b", "W", "E", "dw", "de",
+                            "db", "cw", "diw", "daw", "yiw", "l", "h", "j", "k", "0", "^", "g_", "G", "gg", "d$", "y$", "3l", "2w", "2dw", "~"]
+            let runs = commands.map { ($0, bang) } + ["$", "l", "h", "w", "e", "b", "j", "k", "g_", "G"].map { ($0, visualAt) }
+            for (keys, state) in runs {
+                for step in physical(keys, text: text, caret: caret, profile: profile, state: state).steps {
+                    var ends: [Int] = []
+                    switch step {
+                    case .setSelection(let range): ends = [range.lowerBound, range.upperBound]
+                    case .settle(let expectation), .softSettle(let expectation):
+                        if case .exact(let range)? = expectation.landing { ends = [range.lowerBound, range.upperBound] }
+                    default: break
+                    }
+                    if case .replaceSelection = step { break }
+                    if case .typeText = step { break }
+                    if case .clipboardInsert = step { break }
+                    if case .clipboardCut = step { break }
+                    if case .press(.deleteBack, _) = step { break }
+                    precondition(ends.allSatisfy { model.visibleOffset($0) == $0 },
+                                 "\(keys) from \(caret) in \(text.debugDescription) under \(profile): \(step)")
+                }
+            }
+        }
+    }
+}
 let afterHardBreak = FieldSnapshot(
     capabilities: axProfile, text: "ab\n\u{200B}\ncd", selection: 3..<3, breaks: ParagraphBreaks(offsets: [4])
 )
