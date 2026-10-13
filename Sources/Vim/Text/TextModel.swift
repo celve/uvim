@@ -100,7 +100,8 @@ public struct TextModel: Equatable, Sendable {
 
     /// `o`, or its line's end where `o` is among or after the invisible characters ending the line.
     public func visibleOffset(_ o: Int) -> Int {
-        min(clamp(o), lineEnd(of: lineStart(of: o)))
+        guard (0...length).contains(o) else { return o }
+        return min(o, lineEnd(of: lineStart(of: o)))
     }
 
     /// `end` less the invisible characters right before it, back to `start`, but for a line a hard break draws with them alone.

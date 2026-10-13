@@ -6599,8 +6599,13 @@ for profile in [readProfile, keyProfile, axProfile] {
     precondition(visualEnd.text == "h\u{200B}" && visualEnd.settleFailures == 0, "v$d under \(profile): \(visualEnd.text.debugDescription)")
     precondition(visualEnd.state.session.register("\"") == .content(RegisterContent(text: "ello", wise: .character)))
 }
+var remembered = VimState.initial
+remembered.field.lastVisual = VisualMemory(kind: .character, range: 1..<6)
+precondition(physical("gv", text: "hello\u{200B}", caret: 0, profile: axProfile, state: remembered).steps.first == .setSelection(1..<5))
 var nativeWords = Sim(text: "hello\u{200B}", caret: 5, profile: nativeRead)
 nativeWords.emulatesKeys = true
+nativeWords.type("w")
+precondition(nativeWords.caret == 5 && nativeWords.settleFailures == 0, "the app's ⌥→ would land past the run")
 nativeWords.type("dw")
 precondition(nativeWords.text == "hello\u{200B}" && nativeWords.settleFailures == 0, "an app's word keys land past the run")
 nativeWords = Sim(text: "hello\u{200B}", caret: 0, profile: nativeRead)

@@ -729,10 +729,10 @@ private extension PhysicalPlanner {
         case .motion(let motion, let count):
             return model.destination(of: motion, from: position, count: count).map(model.visibleOffset)
         case .offset(let offset):
-            return model.visibleOffset(offset)
+            return model.visibleOffset(model.clamp(offset))
         case .mark(let point, let lineWise):
             guard model.isValid(point) else { return nil }   // stale mark: reject, never jump wrong
-            return lineWise ? model.firstNonBlank(inLineOf: point.offset) : model.visibleOffset(point.offset)
+            return lineWise ? model.firstNonBlank(inLineOf: point.offset) : model.visibleOffset(model.clamp(point.offset))
         }
     }
 
@@ -1555,13 +1555,13 @@ private extension PhysicalPlanner {
             }
             return model.visibleOffset(range.lowerBound)..<model.visibleOffset(range.upperBound)
         case .toLineEnd:
-            let start = model.visibleOffset(position)
-            return start..<model.lineEnd(of: start)
+            return position..<model.lineEnd(of: position)
         case .current:
             guard let selection = context.selection, !selection.isEmpty else { return nil }
             return selection
         case .remembered(let memory):
-            return model.visibleOffset(memory.range.lowerBound)..<model.visibleOffset(memory.range.upperBound)
+            let range = model.clamp(memory.range.lowerBound)..<model.clamp(memory.range.upperBound)
+            return model.visibleOffset(range.lowerBound)..<model.visibleOffset(range.upperBound)
         }
     }
 
