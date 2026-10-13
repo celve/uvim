@@ -6706,6 +6706,39 @@ for (text, caret, keys, typed, after) in [
     precondition(lark.text == after, "\(keys) in \(text.debugDescription): \(lark.text.debugDescription)")
     precondition(lark.settleFailures == 0 && lark.softMisses == 0 && lark.bells == 0 && lark.unsupportedSteps == 0, keys)
 }
+// The same in Chromium's paragraphs, where a field offset past a run is the next line's start, so only the text's end and a run's inside are off limits.
+for text in ["hello\(zw)", "hi there\(zw)\nworld\(zw)", "a\(zw)\u{2060}\nb c", zw, "x\n\(zw)\ny z\u{FEFF}", "one\(zw)\n\(zw)\nthree\(zw)"] {
+    let breaks = ParagraphBreaks(value: text, fieldText: String(text.filter { $0 != "\n" }))!
+    let model = TextModel(text, paragraphBreaks: Set(breaks.offsets))
+    var offLimits = Set<Int>()
+    for o in 1...model.length where model.visibleOffset(o) < o && (o < model.lineBreak(of: o) || o == model.length) {
+        offLimits.insert(breaks.fieldOffset(o))
+    }
+    for profile in [axProfile, larkProfile, readProfile, keyProfile] {
+        for caret in text.indices.map({ $0.utf16Offset(in: text) }) + [model.length] {
+            visualAt.field.mode = .visual(VimState.VisualContext(kind: .character, anchor: caret))
+            let commands = ["$", "A", "a", "x", "D", "C", "dd", "cc", "yy", "p", "P", "o", "J", "w", "e", "b", "dw", "de", "db",
+                            "diw", "l", "h", "j", "k", "0", "g_", "G", "d$", "2dw"]
+            for (keys, state) in commands.map({ ($0, bang) }) + ["$", "l", "h", "w", "e", "b", "j", "k", "G"].map({ ($0, visualAt) }) {
+                let snapshot = FieldSnapshot(capabilities: profile, text: text, selection: caret..<caret, webContent: true, breaks: breaks)
+                for step in PhysicalPlanner.plan(LogicalPlanner.plan(RawCommand(keys), state: state), snapshot: snapshot).steps {
+                    var ends: [Int] = []
+                    switch step {
+                    case .setSelection(let range): ends = [range.lowerBound, range.upperBound]
+                    case .settle(let expectation), .softSettle(let expectation):
+                        if case .exact(let range)? = expectation.landing { ends = [range.lowerBound, range.upperBound] }
+                    default: break
+                    }
+                    if case .replaceSelection = step { break }
+                    if case .typeText = step { break }
+                    if case .clipboardInsert = step { break }
+                    if case .press(.deleteBack, _) = step { break }
+                    precondition(!ends.contains(where: offLimits.contains), "\(keys) from \(caret) in \(text.debugDescription): \(step)")
+                }
+            }
+        }
+    }
+}
 var larkYank = larkSim("one\(zw)\ntwo\(zw)", caret: 1)
 larkYank.type("yy")
 precondition(larkYank.state.session.register("\"") == .content(RegisterContent(text: "one\n", wise: .line)))
