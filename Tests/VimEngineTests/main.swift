@@ -6648,6 +6648,7 @@ for (text, caret, keys, ignored, blamed) in [
     ("aa\u{200B}\nbb\u{200B}\ncc\u{200B}", 1, "G", .paragraphStart, .lineStartKey),
     ("aa\u{200B}\nbb\u{200B}\ncc\u{200B}", 5, "dk", Chord.paragraphStart.shifted, .lineStartKey),
     ("aa\u{200B}\nbb\u{200B}\ncc\u{200B}", 5, "dk", .paragraphEnd, .lineEndKey),
+    ("one\u{200B}\ntwo", 1, "dd", Chord.paragraphEnd.shifted, .lineEndKey),
 ] {
     var unmoved = Sim(text: text, caret: caret, profile: keyProfile)
     unmoved.emulatesKeys = true
