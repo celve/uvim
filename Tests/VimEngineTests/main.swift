@@ -3449,18 +3449,19 @@ sim.type("j")
 precondition(sim.settleFailures == 1 && TextModel(wrapped).lineStart(of: sim.caret) == 0)
 
 // A key that does nothing is blamed, and so is one that lands elsewhere.
-for (ignored, blamed) in [(Chord.paragraphStart, Capability.lineStartKey), (Chord.paragraphEnd.shifted, .lineEndKey)] {
-    sim = Sim(text: "one\ntwo", caret: 5, profile: keyProfile)
+for (text, ignored, blamed) in [("one\ntwo\nx", Chord.paragraphStart, Capability.lineStartKey), ("one\ntwo\nx", Chord.paragraphEnd.shifted, .lineEndKey),
+                                ("one\ntwo", .paragraphEnd, .lineEndKey), ("one\ntwo", Chord.paragraphStart.shifted, .lineStartKey)] {
+    sim = Sim(text: text, caret: 5, profile: keyProfile)
     sim.emulatesKeys = true
     sim.ignoredChords = [ignored]
     sim.type("dd")
-    precondition(sim.blamed == [blamed] && sim.text == "one\ntwo")
+    precondition(sim.blamed == [blamed] && sim.text == text)
 }
-sim = Sim(text: "one\ntwo", caret: 5, profile: keyProfile)
+sim = Sim(text: "one\ntwo\nx", caret: 5, profile: keyProfile)
 sim.emulatesKeys = true
 sim.reboundChords = [.paragraphStart: .selectAll]
 sim.type("dd")
-precondition(sim.blamed == [.lineStartKey] && sim.text == "one\ntwo")
+precondition(sim.blamed == [.lineStartKey] && sim.text == "one\ntwo\nx")
 for web in [false, true] {
     sim = Sim(text: "the cat", caret: 4, profile: keyProfile)
     sim.emulatesKeys = true
@@ -3505,12 +3506,12 @@ precondition(webPhysical("0", text: "the cat", caret: 4, profile: keyProfile).st
     guard case .settle(let expectation) = $0 else { return false }
     return expectation.blame?.offTarget == true
 })
-sim = Sim(text: "one\ntwo", caret: 5, profile: keyProfile)
+sim = Sim(text: "one\ntwo\nx", caret: 5, profile: keyProfile)
 sim.emulatesKeys = true
 sim.webContent = true
 sim.reboundChords = [.paragraphStart: .selectAll]
 sim.type("dd")
-precondition(sim.blamed == [.lineStartKey] && sim.text == "one\ntwo")
+precondition(sim.blamed == [.lineStartKey] && sim.text == "one\ntwo\nx")
 // Elsewhere reads are exact: a key that did nothing is blamed wherever it had somewhere to go.
 for (text, caret, keys, ignored, blamed) in [
     ("one\ntwo", 5, "$", Chord.paragraphEnd, Capability.lineEndKey), ("one\ntwo", 4, "$", .paragraphEnd, .lineEndKey),
@@ -6577,19 +6578,16 @@ precondition(physical("dd", text: "one\ntwo", caret: 5, profile: axProfile).step
     .setSelection(0..<1),
     .commit(.setCursor(0..<1)),
 ])
+let upTwo: [Chord] = [Chord.paragraphStart.shifted, .selectLeft, Chord.paragraphStart.shifted, .selectLeft]
 for (keys, caret, expected) in [
-    ("dd", 10, [Chord.paragraphStart, .left, .selectRight, Chord.paragraphEnd.shifted, .deleteBack, .paragraphStart]),
-    ("2dd", 5, [.paragraphStart, .left, .selectRight, Chord.paragraphEnd.shifted, .selectRight, Chord.paragraphEnd.shifted,
-                .deleteBack, .paragraphStart]),
-    ("dk", 10, [.paragraphEnd, .right, .selectLeft, Chord.paragraphStart.shifted, .selectLeft, Chord.paragraphStart.shifted,
-                .selectLeft, .deleteBack, .paragraphStart]),
-    ("dG", 5, [.paragraphStart, .left, Chord.documentEnd.shifted, .deleteBack, .paragraphStart]),
+    ("dd", 10, [Chord.paragraphEnd, Chord.paragraphStart.shifted, .selectLeft]), ("2dd", 5, [.documentEnd] + upTwo),
+    ("dk", 10, [.paragraphEnd] + upTwo), ("dG", 5, [.documentEnd] + upTwo),
 ] {
-    precondition(chords(physical(keys, text: lastThree, caret: caret, profile: keyProfile)) == expected, keys)
+    precondition(chords(physical(keys, text: lastThree, caret: caret, profile: keyProfile)) == expected + [.deleteBack, .paragraphStart], keys)
 }
 let longAbove = String(repeating: "word ", count: 40) + "\nlast"
-precondition(chords(physical("dd", text: longAbove, caret: 202, profile: readProfile)).prefix(8)
-    == [.left, .left, .selectRight, .selectRight, .selectRight, .selectRight, .selectRight, .deleteBack])
+precondition(chords(physical("dd", text: longAbove, caret: 202, profile: readProfile))
+             == [.right, .right, .right] + Array(repeating: .selectLeft, count: 5) + [.deleteBack] + Array(repeating: .left, count: 200))
 
 for profile in [axProfile, keyProfile, readProfile, noInsertProfile] {
     for (text, caret, keys, after, cursor, register) in [
@@ -6635,7 +6633,7 @@ for mode in ["plain", "markers", "emptyParagraphs"] {
     }
     refused.learn(with: Sim.Learner(chromium: mode != "plain", probed: profile))
     refused.type("dd")
-    precondition(refused.text == lastThree && refused.settleFailures == 1 && refused.caret == 8, mode)
+    precondition(refused.text == lastThree && refused.settleFailures == 1 && refused.caret == 13, mode)
     refused.type("dd")
     precondition(refused.text == "one\ntwo" && refused.caret == 4 && refused.settleFailures == 1, mode)
 }
@@ -6660,5 +6658,55 @@ for profile in [writeKeys, keyProfile] {
     chipAbove.type("dd")
     precondition(chipAbove.text == "Intro \u{2060}" && chipAbove.caret == 0 && chipAbove.settleFailures == 0 && chipAbove.softMisses == 0)
 }
+
+// A removal that fails at any step leaves the caret on the lines it was to delete, so a retry takes them and no other.
+let backspaceLane = CapabilityProfile(available: [
+    .readText, .readLength, .readCaret, .readSelectedText, .wholeDocument, .writeSelection, .drawCursor,
+    .lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey,
+])
+var ignoredBackspace = Sim(text: "one\ntwo", caret: 7, profile: backspaceLane)
+ignoredBackspace.emulatesKeys = true
+ignoredBackspace.ignoredChords = [.deleteBack]
+ignoredBackspace.type("dd")
+precondition(ignoredBackspace.text == "one\ntwo" && ignoredBackspace.caret == 7 && ignoredBackspace.settleFailures == 1)
+ignoredBackspace.ignoredChords = []
+ignoredBackspace.type("dd")
+precondition(ignoredBackspace.text == "one" && ignoredBackspace.caret == 0)
+var ignoredInBreaks = Sim(text: "one\ntwo\n", caret: 8, profile: adding([.drawCursor], to: writeKeys))
+ignoredInBreaks.emptyParagraphs = true
+ignoredInBreaks.readModel = .textContent
+ignoredInBreaks.webContent = true
+ignoredInBreaks.emulatesKeys = true
+ignoredInBreaks.ignoredChords = [.deleteBack]
+ignoredInBreaks.type("dd")
+precondition(ignoredInBreaks.text == "one\ntwo\n" && ignoredInBreaks.caret == 8 && ignoredInBreaks.settleFailures == 1)
+ignoredInBreaks.ignoredChords = []
+ignoredInBreaks.type("dd")
+precondition(ignoredInBreaks.text == "one\ntwo" && ignoredInBreaks.caret == 4)
+var partly = Sim(text: "one\n\u{2060}last", caret: 9, profile: adding([.drawCursor], to: writeKeys))
+partly.emptyParagraphs = true
+partly.listLines = [Sim.ListLine(), Sim.ListLine()]
+partly.readModel = .textContent
+partly.emulatesKeys = true
+partly.swallowsReplace = true
+partly.ignoredChords = [.right]
+partly.type("dd")
+precondition(partly.text == "one\n\u{2060}last" && partly.caret == 9 && partly.settleFailures == 1)
+partly.swallowsReplace = false
+partly.ignoredChords = []
+partly.type("dd")
+precondition(partly.text == "one" && partly.caret == 0)
+for (ignored, caret) in [(Chord.paragraphStart.shifted, 13), (.selectLeft, 13)] {
+    var stuck = Sim(text: lastThree, caret: 10, profile: keyProfile)
+    stuck.emulatesKeys = true
+    stuck.ignoredChords = [ignored]
+    stuck.type("dd")
+    precondition(stuck.text == lastThree && stuck.caret == caret && stuck.settleFailures == 1, "\(ignored)")
+    stuck.ignoredChords = []
+    stuck.type("dd")
+    precondition(stuck.text == "one\ntwo")
+}
+precondition(PhysicalPlanner.collapse(3..<6, side: .end, paragraphs: true, toEnd: true, profile: writeKeys) == PhysicalPlan(.setSelection(6..<6)))
+precondition(PhysicalPlanner.collapse(3..<6, misread: true, toEnd: true, profile: writeKeys) == PhysicalPlan(.press(.right, count: 1)))
 
 print("Vim engine tests passed")

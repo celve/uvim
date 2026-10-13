@@ -50,14 +50,14 @@ public enum PhysicalPlanner {
         /// The range the plan meant to replace, in field offsets; nil in the blind lane, which has no offsets.
         public let operand: Range<Int>?
 
-        /// The operand starts with the line break above the lines it deletes, which a repair steps past to stay on them.
-        public let breakAbove: Bool
+        /// The operand is lines a delete takes from the text's end, so a selection the run strands collapses to its end, on them.
+        public let collapsesToEnd: Bool
 
-        public init(plan: PhysicalPlan, rejection: Rejection?, operand: Range<Int>?, breakAbove: Bool = false) {
+        public init(plan: PhysicalPlan, rejection: Rejection?, operand: Range<Int>?, collapsesToEnd: Bool = false) {
             self.plan = plan
             self.rejection = rejection
             self.operand = operand
-            self.breakAbove = breakAbove
+            self.collapsesToEnd = collapsesToEnd
         }
 
         /// Whether the run died checking the selected text: other text is selected, however its offsets read.
@@ -122,7 +122,7 @@ public enum PhysicalPlanner {
             uncover = []
         }
         return Planning(
-            plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand, breakAbove: context.breakAbove
+            plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand, collapsesToEnd: context.collapsesToEnd
         )
     }
 
@@ -152,14 +152,14 @@ public enum PhysicalPlanner {
 // MARK: - Repair and release
 
 public extension PhysicalPlanner {
-    /// Collapses a selection an aborted run left to its start, in field offsets; `snapshot` reads the field as it is.
+    /// Collapses a selection an aborted run left to its start, or its end `toEnd`, in field offsets; `snapshot` reads the field as it is.
     static func collapse(
         _ selection: Range<Int>, misread: Bool = false, side: ParagraphBreaks.Side? = nil, paragraphs: Bool = false,
-        snapshot: FieldSnapshot? = nil, past: Bool = false, profile: CapabilityProfile
+        snapshot: FieldSnapshot? = nil, toEnd: Bool = false, profile: CapabilityProfile
     ) -> PhysicalPlan {
-        // After a failed text check the offsets name other text than is selected, and ← collapses whatever is.
-        guard !misread else { return PhysicalPlan(.press(.left, count: 1)) }
-        var start = selection.lowerBound
+        // After a failed text check the offsets name other text than is selected, and ← or → collapses whatever is.
+        guard !misread else { return PhysicalPlan(.press(toEnd ? .right : .left, count: 1)) }
+        var start = toEnd ? selection.upperBound : selection.lowerBound
         var field = FieldSnapshot(capabilities: profile, selection: start..<start, breaks: paragraphs ? ParagraphBreaks() : nil)
         // A `<br>` Linear drew for its caret leaves in its own time, and every offset behind it moves then.
         let held = snapshot.flatMap { $0.drawnBreak == nil ? $0 : nil }
@@ -171,14 +171,8 @@ public extension PhysicalPlanner {
         }
         var context = Context(snapshot: field)
         context.unknown.insert(.length)
-        var keys = [.press(.left, count: 1)] + (context.normalizes(start) ? outside : [])
-        // Past the line break above deleted lines, so the caret stays on them.
-        if past {
-            keys += run(.right, count: 1, selecting: context.arrowsSelect, normalizing: false)
-            start += 1
-            context.selection = start..<start
-        }
-        keys += settle(context, profile: profile)
+        let keys = (toEnd ? [.press(.right, count: 1)] : [.press(.left, count: 1)] + (context.normalizes(start) ? outside : []))
+            + settle(context, profile: profile)
         guard profile.has(.writeSelection) else { return PhysicalPlan(steps: keys) }
         // A folded write plans nothing where the caret is already placed, which a selection there is not.
         context.selection = nil
@@ -219,8 +213,8 @@ private extension PhysicalPlanner {
         /// The last predicted edit's range, in field offsets — the one in flight if the plan dies.
         var operand: Range<Int>?
 
-        /// The operand starts with the line break above the lines it deletes.
-        var breakAbove = false
+        /// The operand is lines a delete takes from the text's end.
+        var collapsesToEnd = false
 
         /// Posted events not yet settled, which an AX write would overtake at the window server.
         var keysQueued = false
@@ -424,11 +418,11 @@ private extension PhysicalPlanner {
         }
 
         /// Apply a predicted edit: text surgery, caret after the replacement.
-        mutating func applyEdit(range: Range<Int>, replacement: String, breakAbove: Bool = false) {
+        mutating func applyEdit(range: Range<Int>, replacement: String, collapsesToEnd: Bool = false) {
             // An empty range is a plain insert, which replaces nothing.
             if !range.isEmpty {
                 operand = field(range)
-                self.breakAbove = breakAbove
+                self.collapsesToEnd = collapsesToEnd
             }
             let before = model
             text = model?.replacing(range, with: replacement)
@@ -1101,23 +1095,29 @@ private extension PhysicalPlanner {
     /// Line-shaped selections by native keys, as many as the command counts, since keys past the end do nothing;
     /// `next` where lane B counts them, as it does past the repeat limit.
     static func nativeSelect(
-        _ target: LogicalStep.SelectionTarget, range: Range<Int>, before: Bool = false,
+        _ target: LogicalStep.SelectionTarget, range: Range<Int>, endingLines: Bool = false,
         context: inout Context, profile: CapabilityProfile
     ) -> Lane {
         guard !profile.has(.writeSelection) else { return .next }
+        if endingLines {
+            guard let model = context.model, let position = context.position else { return .next }
+            let lines = model.newlineCount(in: range)
+            guard repeats(lines) else { return .next }
+            return pressing(linesUp(lines, fromLastLine: model.lineEnd(of: position) == model.length), to: range,
+                            context: &context, profile: profile)
+        }
         let groups: [KeyGroup]
         switch target {
         case .lines(let count, let extent) where repeats(count):
-            groups = linesDown(count, newline: extent != .interior, before: before)
+            groups = linesDown(count, newline: extent != .interior)
         case .lineSpan(to: .motion(.line(.down, _), let count), let extent) where repeats(count):
-            groups = linesDown(count + 1, newline: extent != .interior, before: before)
+            groups = linesDown(count + 1, newline: extent != .interior)
         case .lineSpan(to: .motion(.line(.up, _), let count), let extent) where repeats(count):
             groups = [([.paragraphEnd], .lineEndKey), (extent == .interior ? [] : [.right, .selectLeft], nil),
                       ([Chord.paragraphStart.shifted], .lineStartKey),
-                      (repeated([.selectLeft, Chord.paragraphStart.shifted], count) + (before ? [.selectLeft] : []), nil)]
+                      (repeated([.selectLeft, Chord.paragraphStart.shifted], count), nil)]
         case .lineSpan(to: .motion(.fileEnd, _), _):
-            groups = [([.paragraphStart], .lineStartKey), (before ? [.left] : [], nil),
-                      ([Chord.documentEnd.shifted], .documentEndKey)]
+            groups = [([.paragraphStart], .lineStartKey), ([Chord.documentEnd.shifted], .documentEndKey)]
         case .lineSpan(to: .motion(.fileStart, _), let extent):
             groups = [([.paragraphEnd], .lineEndKey), (extent == .interior ? [] : [.right], nil),
                       ([Chord.documentStart.shifted], .documentStartKey)]
@@ -1134,12 +1134,18 @@ private extension PhysicalPlanner {
         return pressing(groups, to: range, context: &context, profile: profile)
     }
 
-    /// ⌃A, then ⇧⌃E per line with ⇧→ between, and ⇧→ once more for the last newline, or first ← ⇧→ for the one before.
-    static func linesDown(_ count: Int, newline: Bool, before: Bool = false) -> [KeyGroup] {
+    /// ⌃A, then ⇧⌃E per line with ⇧→ between, and ⇧→ once more for the last newline.
+    static func linesDown(_ count: Int, newline: Bool) -> [KeyGroup] {
         var rest = repeated([.selectRight, Chord.paragraphEnd.shifted], count - 1)
-        if newline, !before { rest.append(.selectRight) }
-        return [([.paragraphStart], .lineStartKey), (before ? [.left, .selectRight] : [], nil),
-                ([Chord.paragraphEnd.shifted], .lineEndKey), (rest, nil)]
+        if newline { rest.append(.selectRight) }
+        return [([.paragraphStart], .lineStartKey), ([Chord.paragraphEnd.shifted], .lineEndKey), (rest, nil)]
+    }
+
+    /// Lines that end the text and the line break above them, selected back from the text's end so no key strands a caret above.
+    static func linesUp(_ lines: Int, fromLastLine: Bool) -> [KeyGroup] {
+        [fromLastLine ? ([.paragraphEnd], Capability.lineEndKey) : ([.documentEnd], Capability.documentEndKey),
+         ([Chord.paragraphStart.shifted], .lineStartKey),
+         (repeated([.selectLeft, Chord.paragraphStart.shifted], lines - 1) + [.selectLeft], nil)]
     }
 
     /// Presses the groups from the caret, each then settled, an unblamed one marked for `route`; `next` unless they land on `target`.
@@ -1653,21 +1659,48 @@ private extension PhysicalPlanner {
         context.selectionWise = target.wise ?? context.selectionWise ?? .character
         context.selectionOpaque = false
         // Pressed even where nothing is to select, so a settle checks the caret the command starts from.
-        return nativeSelect(target, range: range, before: context.endingLines, context: &context, profile: profile).or {
+        return nativeSelect(target, range: range, endingLines: context.endingLines, context: &context, profile: profile).or {
             if range == context.selection {
                 return .steps([])   // already selected (Visual operators)
             }
             if profile.has(.writeSelection) {
+                // Chromium lands a write at the line break above elsewhere, so the lines are selected back from the text's end.
+                if context.endingLines, context.breaks != nil {
+                    return .steps(selectBack(range, reaching: toEnd(of: range, model: model, context: context), model: model,
+                                             context: &context, profile: profile))
+                }
                 context.selection = range
                 let caret = selection.isEmpty ? selection.lowerBound : nil
                 return .steps(write(range, from: caret, context: context) + settle(context, profile: profile))
             }
+            if context.endingLines {
+                let reaching = keyPath(from: selection, to: range.upperBound, model: model, context: context)
+                return .steps(selectBack(range, reaching: reaching, model: model, context: &context, profile: profile))
+            }
             return lineSelect(range, model: model, context: &context, profile: profile).or {
-                let keys = selectKeys(range, from: selection, before: context.endingLines, model: model, context: context)
+                let keys = selectKeys(range, from: selection, model: model, context: context)
                 context.selection = range
                 return .steps(keys.presses + settle(context, profile: profile, route: keys.route))
             }
         }
+    }
+
+    /// Lines that end the text, selected back from its end once a check finds the caret there, so no key strands one above them.
+    static func selectBack(
+        _ range: Range<Int>, reaching: [PhysicalStep], model: TextModel, context: inout Context, profile: CapabilityProfile
+    ) -> [PhysicalStep] {
+        context.selection = range.upperBound..<range.upperBound
+        let reached = reaching + settle(context, profile: profile)
+        context.selection = range
+        return reached + [.press(.selectLeft, count: model.graphemes(in: range))] + settle(context, profile: profile)
+    }
+
+    /// A caret written inside the last line and stepped to its end, as `foldedWrite` does: one written at a code span's end ignores ⇧← (LIN-1683).
+    static func toEnd(of range: Range<Int>, model: TextModel, context: Context) -> [PhysicalStep] {
+        let end = range.upperBound
+        guard model.lineStart(of: end) < end else { return write(end..<end, context: context) }
+        let inside = model.advance(end, byGraphemes: -1)
+        return write(inside..<inside, context: context) + run(.right, count: 1, selecting: context.arrowsSelect, normalizing: false)
     }
 
     /// A delete's lines as whole lines, which take the newline after them where the delete takes the one before.
@@ -1698,17 +1731,14 @@ private extension PhysicalPlanner {
 
     /// ⇧→ across a range from its start; or, as an optional route, ⇧← across one that ends at the caret on its line.
     static func selectKeys(
-        _ range: Range<Int>, from selection: Range<Int>, before: Bool = false, model: TextModel, context: Context
+        _ range: Range<Int>, from selection: Range<Int>, model: TextModel, context: Context
     ) -> (presses: [PhysicalStep], route: Route?) {
         let count = model.graphemes(in: range)
         if selection.isEmpty, count > 0, selection.lowerBound == range.upperBound, model.newlineCount(in: range) == 0,
            !context.missed.contains(.selectBack) {
             return ([.press(.selectLeft, count: count)], .selectBack)
         }
-        // The newline before the lines is one ← from their start, however long the line above it is.
-        let start = before ? range.lowerBound + 1 : range.lowerBound
-        let back = before ? run(.left, count: 1, selecting: context.arrowsSelect, normalizing: false) : []
-        return (keyPath(from: selection, to: start, model: model, context: context) + back
+        return (keyPath(from: selection, to: range.lowerBound, model: model, context: context)
             + (count > 0 ? [.press(.selectRight, count: count)] : []), nil)
     }
 
@@ -1815,15 +1845,16 @@ private extension PhysicalPlanner {
             // Paragraph breaks alone read as a caret, so no check could tell a text write that did nothing.
             let writes = profile.has(.insertText) && !context.field(selection).isEmpty
             steps.append(writes ? .replaceSelection("") : .press(.deleteBack, count: 1))
-            context.applyEdit(range: selection, replacement: "", breakAbove: ending)
-            // Blind (press) delete: soft — a mismatch must not abort the
-            // `setMode(.insert)` that follows a `ciw`/`s`/`cc`.
-            steps += settle(context, profile: profile, hard: writes)
+            context.applyEdit(range: selection, replacement: "", collapsesToEnd: ending)
+            // Blind (press) delete: soft, so a mismatch spares a `ciw`/`s`/`cc`'s Insert; a removal's is hard where offsets tell its lines apart.
+            steps += settle(context, profile: profile, hard: writes || ending && context.breaks == nil)
             if !blackhole {
                 steps.append(.commit(.deleted(into: register, content: .literal(content), wise: wise)))
             }
             guard ending else { return steps }
             context.endingLines = false
+            // Nothing reads whether Chromium's line break went too, or whether Backspace did anything there.
+            guard context.breaks == nil else { return steps + relativeLanding(context: &context, profile: profile) }
             return lowerMove(.motion(.lineStart(firstNonBlank: true), count: 1), context: &context, profile: profile)
                 .map { steps + $0 }
         }
@@ -1839,6 +1870,21 @@ private extension PhysicalPlanner {
             .clipboardCut,
             .commit(.deleted(into: register, content: .pasteboard, wise: wise)),
         ]
+    }
+
+    /// After a delete no check confirms whole: → leaves the caret at the lines' end if it missed, and ⌃A, not a write, finds the first non-blank.
+    static func relativeLanding(context: inout Context, profile: CapabilityProfile) -> [PhysicalStep] {
+        var steps: [PhysicalStep] = [.press(.right, count: 1)]
+        steps += settle(context, profile: profile, hard: false)
+        guard profile.has(.lineStartKey), let model = context.model, let caret = context.caret else { return steps }
+        let target = model.firstNonBlank(inLineOf: caret)
+        let column = model.graphemes(in: model.lineStart(of: caret)..<target)
+        context.selection = target..<target
+        steps.append(.press(.paragraphStart, count: 1))
+        if column > 0 {
+            steps += run(.right, count: column, selecting: context.arrowsSelect, normalizing: context.normalizes(target))
+        }
+        return steps + settle(context, profile: profile)
     }
 
     static func lowerYank(

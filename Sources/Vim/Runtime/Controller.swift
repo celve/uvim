@@ -403,13 +403,15 @@ public final class Controller {
             if planned.abortedAtTextCheck(evidence.abortedAt) {
                 // Other text than the plan meant was selected, so the mode it asked for goes too.
                 if let read = selection(of: binding.element, paragraphs: paragraphs), !read.caret {
-                    let collapse = PhysicalPlanner.collapse(read.range, misread: true, profile: binding.capabilities)
+                    let collapse = PhysicalPlanner.collapse(
+                        read.range, misread: true, toEnd: planned.collapsesToEnd, profile: binding.capabilities
+                    )
                     executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
                 }
                 if state.field.mode.isInserting {
                     executor.commit(.setMode(before.nonVisual), state: &state)
                 }
-            } else if !repairStrandedSelection(on: binding, operand: planned.operand, breakAbove: planned.breakAbove,
+            } else if !repairStrandedSelection(on: binding, operand: planned.operand, toEnd: planned.collapsesToEnd,
                                                reading: reading),
                       state.field.mode.isInserting {
                 // A selection we could not collapse is one the app would type over.
@@ -523,7 +525,7 @@ public final class Controller {
 
     /// Collapse a stranded selection, and report whether the field is safe to type into.
     private func repairStrandedSelection(
-        on binding: FocusTracker.Binding, operand: Range<Int>?, breakAbove: Bool, reading: Snapshotter.Reading
+        on binding: FocusTracker.Binding, operand: Range<Int>?, toEnd: Bool, reading: Snapshotter.Reading
     ) -> Bool {
         let paragraphs = reading.snapshot.breaks != nil
         // Unknown is not empty: a settle can fail *because* the read went dark.
@@ -542,15 +544,14 @@ public final class Controller {
                 sampling: sampling, known: emptyParagraphs, knownUnreachable: unreachable
             ).snapshot
         }
-        let past = breakAbove && read.range == operand
         let collapse = PhysicalPlanner.collapse(
-            read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, past: past, profile: binding.capabilities
+            read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, toEnd: toEnd, profile: binding.capabilities
         )
         let writes = binding.capabilities.has(.writeSelection)
         let settled = executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
         // Keys the field ignored fail their settle, and a write lane then writes the start as it was read.
         if !settled, writes {
-            let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, past: past, profile: binding.capabilities)
+            let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, toEnd: toEnd, profile: binding.capabilities)
             executor.execute(asRead, on: binding.element, state: &state, paragraphs: paragraphs)
         }
         // Keys can still be landing when their settle passes, so where they replaced a write the caret is waited for.

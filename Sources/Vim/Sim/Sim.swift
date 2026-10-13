@@ -319,13 +319,13 @@ private extension Sim {
         guard abortedAt == nil else {
             // Abort hygiene, mirroring the Controller down to the stand-down.
             if planned.abortedAtTextCheck(abortedAt) {
-                if !unreadableSelection, !readSelection.isEmpty {
-                    executeAside(PhysicalPlanner.collapse(readSelection, misread: true, profile: profile))
+                if !unreadableSelection, !readsCaret(paragraphs: snapshot.breaks != nil) {
+                    executeAside(PhysicalPlanner.collapse(readSelection, misread: true, toEnd: planned.collapsesToEnd, profile: profile))
                 }
                 if state.field.mode.isInserting {
                     state = VimReducer.reduce(state, .setMode(before.nonVisual))
                 }
-            } else if !repairStrandedSelection(operand: planned.operand, breakAbove: planned.breakAbove, snapshot: snapshot,
+            } else if !repairStrandedSelection(operand: planned.operand, toEnd: planned.collapsesToEnd, snapshot: snapshot,
                                                value: value),
                       state.field.mode.isInserting {
                 state = VimReducer.reduce(state, .setMode(before.nonVisual))
@@ -347,24 +347,28 @@ private extension Sim {
 
     /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.
     mutating func repairStrandedSelection(
-        operand: Range<Int>?, breakAbove: Bool, snapshot: FieldSnapshot, value: String?
+        operand: Range<Int>?, toEnd: Bool, snapshot: FieldSnapshot, value: String?
     ) -> Bool {
         guard !unreadableSelection else { return false }   // unknown is not empty
-        guard !readSelection.isEmpty else { return true }
-        if state.field.mode.isInserting, readSelection == operand { return true }
         let paragraphs = snapshot.breaks != nil
+        guard !readsCaret(paragraphs: paragraphs) else { return true }
+        if state.field.mode.isInserting, readSelection == operand { return true }
         let read = readSelection
         // As the Controller: the markers answer for the side, and the field is read again once `AXValue` has changed.
         let marked = paragraphs && (markers || emptyParagraphs)
-        let past = breakAbove && read == operand
         let collapse = PhysicalPlanner.collapse(
             read, side: marked ? chromium.side(selection.lowerBound) : nil, paragraphs: paragraphs,
-            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, past: past, profile: profile
+            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, toEnd: toEnd, profile: profile
         )
         if !executeAside(collapse), profile.has(.writeSelection) {
-            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, past: past, profile: profile))
+            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, toEnd: toEnd, profile: profile))
         }
-        return readSelection.isEmpty
+        return readsCaret(paragraphs: paragraphs)
+    }
+
+    /// As the Controller reads a caret: through the markers where it reads paragraphs, where selected breaks alone are no caret.
+    func readsCaret(paragraphs: Bool) -> Bool {
+        paragraphs && (markers || emptyParagraphs) ? selection.isEmpty : readSelection.isEmpty
     }
 
     /// Fold a just-ended Insert session into the dot memories.
