@@ -6581,6 +6581,13 @@ var zwKeys = KeyModel(text: "ab\u{200B}\ncd", anchor: 0, focus: 0)
 precondition(zwKeys.press(.paragraphEnd) && zwKeys.selection == 3..<3, "⌃E lands after it in AppKit and WebKit")
 precondition(zwKeys.press(.right) && zwKeys.selection == 4..<4 && zwKeys.press(.left) && zwKeys.selection == 3..<3)
 
+var nativePut = Sim(text: "one\u{200B}\ntwo\u{200B}", caret: 1, profile: axProfile)
+nativePut.type("yyjp")
+precondition(nativePut.text == "one\u{200B}\ntwo\none\u{200B}" && nativePut.settleFailures == 0, "a put below the last line goes before its run")
+var pasteboardPut = VimState.initial
+pasteboardPut.session.registers.unnamed = .pasteboard(wise: .line)
+precondition(physical("p", text: "one\u{200B}\ntwo\u{200B}", caret: 6, profile: axProfile, state: pasteboardPut).steps.first
+             == .setSelection(8..<8))
 let afterHardBreak = FieldSnapshot(
     capabilities: axProfile, text: "ab\n\u{200B}\ncd", selection: 3..<3, breaks: ParagraphBreaks(offsets: [4])
 )
