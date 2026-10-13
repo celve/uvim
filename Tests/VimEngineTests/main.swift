@@ -6642,6 +6642,13 @@ for (keys, after, landing) in [("j", "abcdefghijk\u{200B}\nshort\u{200B}", 15),
     precondition(wrapped.text == after && wrapped.caret == landing && wrapped.settleFailures == 0 && wrapped.softMisses == 0,
                  "\(keys) by paragraph keys in a wrapped field: \(wrapped.text.debugDescription) at \(wrapped.caret)")
 }
+for (caret, keys, route) in [(2, "j", nil), (10, "j", Route.lineEnd)] as [(Int, String, Route?)] {
+    var unmoved = Sim(text: "abcdefghijk\u{200B}\nlonger line here\u{200B}", caret: caret, profile: keyProfile)
+    unmoved.emulatesKeys = true
+    unmoved.ignoredChords = [.paragraphEnd]
+    unmoved.type(keys)
+    precondition(unmoved.blamed == [.lineEndKey] && unmoved.attribution.missedRoute == route, "\(keys) from \(caret): \(unmoved.blamed)")
+}
 var displayRows = Sim(text: "alpha beta gamma\u{200B}\nnext", caret: 0, profile: nativeRead)
 displayRows.emulatesKeys = true
 displayRows.wrapWidth = 6

@@ -1145,7 +1145,7 @@ private extension PhysicalPlanner {
             }
             pending = ([], nil)
             steps += keys(merged.chords, blaming: merged.blame, to: model.selection, context: &context, profile: profile,
-                          route: merged.blame == nil ? route : nil)
+                          route: group.blame == nil ? route : nil)
         }
         guard pending.chords.isEmpty, model.selection == target else { return .next }
         original = context
