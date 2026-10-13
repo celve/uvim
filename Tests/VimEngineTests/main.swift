@@ -6577,6 +6577,9 @@ precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [4]).lineEnd(of: 3) 
 precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [2, 4]).lineEnd(of: 3) == 3)
 precondition(TextModel("ab\n\u{200B}\ncd").lineEnd(of: 3) == 3 && TextModel("\u{200B}", paragraphBreaks: []).lineEnd(of: 0) == 0)
 precondition(TextModel.withoutLineEndInvisibles("a\u{200B}\nb\u{2060}\u{FEFF}\nc\u{200B}") == "a\nb\nc\u{200B}")
+var zwKeys = KeyModel(text: "ab\u{200B}\ncd", anchor: 0, focus: 0)
+precondition(zwKeys.press(.paragraphEnd) && zwKeys.selection == 3..<3, "⌃E lands after it in AppKit and WebKit")
+precondition(zwKeys.press(.right) && zwKeys.selection == 4..<4 && zwKeys.press(.left) && zwKeys.selection == 3..<3)
 
 let afterHardBreak = FieldSnapshot(
     capabilities: axProfile, text: "ab\n\u{200B}\ncd", selection: 3..<3, breaks: ParagraphBreaks(offsets: [4])
