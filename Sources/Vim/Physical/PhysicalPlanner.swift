@@ -263,7 +263,7 @@ private extension PhysicalPlanner {
             }
         }
 
-        var model: TextModel? { text.map(TextModel.init) }
+        var model: TextModel? { text.map { TextModel($0, atoms: atoms, paragraphBreaks: breaks.map { Set($0.offsets) }) } }
 
         func field(_ range: Range<Int>) -> Range<Int> {
             breaks?.fieldRange(range) ?? range
@@ -276,7 +276,7 @@ private extension PhysicalPlanner {
         func plainStart(_ offset: Int, in model: TextModel) -> Bool {
             // A stop folds no text, so a quote's first line after one takes a write as any paragraph's does.
             let folded = breaks?.hidden.contains { !$0.isGap && (offset - 1...offset + 1).contains($0.at) } ?? false
-            return model.lineEnd(of: offset) > offset && !folded
+            return model.lineBreak(of: offset) > offset && !folded
         }
 
         /// Chromium rich text, where a plain arrow at a Linear code span's edge can stay put (LIN-1683).
@@ -308,9 +308,9 @@ private extension PhysicalPlanner {
 
         func isAtom(_ offset: Int) -> Bool { breaks?.isAtom(offset) ?? false }
 
-        /// A register's text for `range`, each chip's label whole.
+        /// A register's text for `range`, each chip's label whole and no line ending in invisible characters (LIN-1978).
         func content(_ range: Range<Int>, _ text: String) -> String {
-            breaks?.withAtoms(text, at: range) ?? text
+            TextModel.withoutLineEndInvisibles(breaks?.withAtoms(text, at: range) ?? text)
         }
 
         /// The snapshot's caret when it is in an empty paragraph, which `AXValue` can leave out and read beside, so a
@@ -496,7 +496,7 @@ private extension PhysicalPlanner {
         guard range.isEmpty else {
             let ends = [range.lowerBound, range.upperBound]
             let needsKeys = { (end: Int) in
-                context.isAtom(end) || model.lineEnd(of: end) == end
+                context.isAtom(end) || model.lineBreak(of: end) == end
                     || model.lineStart(of: end) == end && !context.plainStart(end, in: model)
             }
             guard ends.contains(where: needsKeys) else { return [.setSelection(context.written(range))] }
@@ -518,7 +518,7 @@ private extension PhysicalPlanner {
             return [.setSelection(field.lowerBound - 1..<field.lowerBound - 1)]
         }
         let start = model.lineStart(of: caret)
-        let end = model.lineEnd(of: caret)
+        let end = model.lineBreak(of: caret)
         if caret == end, caret < model.length, start < caret {
             let inside = model.advance(caret, byGraphemes: -1)
             // A plain → from a code span's start only steps into it.
@@ -555,7 +555,7 @@ private extension PhysicalPlanner {
         }
         var at = range.lowerBound
         while at < range.upperBound {
-            let end = model.lineEnd(of: at)
+            let end = model.lineBreak(of: at)
             let stop = min(end, range.upperBound)
             let graphemes = model.graphemes(in: at..<stop)
             // ⇧⌃E stops at a chip (LIN-1652), and over one character saves nothing.
@@ -576,7 +576,7 @@ private extension PhysicalPlanner {
         var end = model.lineStart(of: offset) - 1
         while end >= 0 {
             let start = model.lineStart(of: end)
-            let last = model.advance(end, byGraphemes: -1)
+            let last = model.advance(model.lineEnd(of: start), byGraphemes: -1)
             if last > start { return last }
             end = start - 1
         }
@@ -725,7 +725,8 @@ private extension PhysicalPlanner {
     static func resolve(_ destination: LogicalStep.Destination, model: TextModel, from position: Int) -> Int? {
         switch destination {
         case .motion(let motion, let count):
-            return model.destination(of: motion, from: position, count: count)
+            // Never among the invisible characters ending a line, which are its break's (LIN-1978).
+            return model.destination(of: motion, from: position, count: count).map(model.visibleOffset)
         case .offset(let offset):
             return model.clamp(offset)
         case .mark(let point, let lineWise):
@@ -787,7 +788,7 @@ private extension PhysicalPlanner {
     static func outside(before chord: Chord, at caret: Int, context: Context, profile: CapabilityProfile) -> [PhysicalStep]? {
         guard context.arrowsSelect, [.selectRight, Chord.paragraphEnd.shifted].contains(chord) else { return nil }
         guard caret == 0 || context.edge(caret) == .paragraphStart else { return outside }
-        guard chord != .selectRight, let model = context.model, model.lineEnd(of: caret) > caret else { return nil }
+        guard chord != .selectRight, let model = context.model, model.lineBreak(of: caret) > caret else { return nil }
         return profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)]
             : [.press(.selectRight, count: 1), .press(.left, count: 1)]
     }
@@ -1067,10 +1068,10 @@ private extension PhysicalPlanner {
     static func lineStarts(after line: Int, count: Int, in model: TextModel) -> [Int] {
         var starts: [Int] = []
         guard count > 0 else { return starts }
-        var end = model.lineEnd(of: line)
+        var end = model.lineBreak(of: line)
         while starts.count < count, end < model.length {
             starts.append(end + 1)
-            if starts.count < count { end = model.lineEnd(of: end + 1) }
+            if starts.count < count { end = model.lineBreak(of: end + 1) }
         }
         return starts
     }
@@ -1528,8 +1529,9 @@ private extension PhysicalPlanner {
         switch target {
         case .span(let destination, let inclusive):
             guard var end = resolve(destination, model: model, from: position) else { return nil }
-            if inclusive { end = model.advance(end, byGraphemes: 1) }
-            return min(position, end)..<max(position, end)
+            if inclusive { end = model.visibleOffset(model.advance(end, byGraphemes: 1)) }
+            let start = model.visibleOffset(position)
+            return min(start, end)..<max(start, end)
         case .lineSpan(let destination, let interior):
             guard let end = resolve(destination, model: model, from: position) else { return nil }
             return model.lineSpan(from: position, to: end, includingTerminator: !interior)
@@ -1544,7 +1546,7 @@ private extension PhysicalPlanner {
                 guard next.upperBound > range.upperBound else { break }
                 range = range.lowerBound..<next.upperBound
             }
-            return range
+            return model.visibleOffset(range.lowerBound)..<model.visibleOffset(range.upperBound)
         case .toLineEnd:
             return position..<model.lineEnd(of: position)
         case .current:
@@ -1917,7 +1919,7 @@ private extension PhysicalPlanner {
         let position = selection.lowerBound
         let range = model.lines(from: position, count: count, includingTerminator: false)
         guard !context.retypesStructure(range) else { return nil }
-        let lines = model.substring(range)
+        let lines = TextModel.withoutLineEndInvisibles(model.substring(range))
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
         guard lines.count > 1 else { return [] }
@@ -1996,9 +1998,9 @@ private extension PhysicalPlanner {
                 // next line's start is document geography — a scoped field
                 // drops to the blind branch below.
                 if let model = context.linewiseModel(profile), let position = context.position {
-                    let end = model.lineEnd(of: position)
+                    let end = model.lineBreak(of: position)
                     let target = action.position == .after
-                        ? (end >= model.length ? model.length : end + 1)
+                        ? (end >= model.length ? model.lineEnd(of: position) : end + 1)
                         : model.lineStart(of: position)
                     guard let moved = moveSteps(to: target, as: lineTarget(action, end: end, model: model),
                                                 context: &context, profile: profile) else { return nil }
@@ -2066,11 +2068,11 @@ private extension PhysicalPlanner {
         if let model = context.linewiseModel(profile), let position = context.position {
             var insertion = text
             let target: Int
-            let end = model.lineEnd(of: position)
+            let end = model.lineBreak(of: position)
             if action.position == .after {
                 if end >= model.length {
                     // Last line without a terminator: lead with the newline.
-                    target = model.length
+                    target = model.lineEnd(of: position)
                     insertion = "\n" + String(text.dropLast())
                 } else {
                     target = end + 1

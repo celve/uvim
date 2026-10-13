@@ -4991,12 +4991,14 @@ for profile in [keyProfile, writeKeys] {
                  "jjjjjwwwwwwwwwwwbbbbbbb",
                  "jjjjjjjjjjjjjjjjdd", "jjjjjlx"] {
         var linear = linearSim(profile)
-        var plain = Sim(text: linear.text, caret: 0, profile: profile)
+        // A chip is drawn, so plain text stands a visible character in for it.
+        var plain = Sim(text: String(linear.text.map { $0 == "\u{2060}" ? "@" : $0 }), caret: 0, profile: profile)
         plain.emulatesKeys = true
         for key in keys {
             linear.type(String(key))
             plain.type(String(key))
-            precondition(linear.caret == plain.caret && linear.text == plain.text, "\(keys) at \(key)")
+            precondition(linear.caret == plain.caret && linear.text == String(plain.text.map { $0 == "@" ? "\u{2060}" : $0 }),
+                         "\(keys) at \(key)")
         }
         precondition(linear.settleFailures == 0 && linear.bells == 0, keys)
     }
@@ -6550,5 +6552,89 @@ stuck.ignoredChords = [.deleteBack]
 stuck.feed("<C-[>")
 stuck.type("x")
 precondition(stuck.text == "x" && stuck.softMisses == 1, "the page's own text still misses")
+
+// MARK: - Invisible line ends (LIN-1978)
+
+let closedLines = TextModel("hello\u{200B}\nworld\u{200B}")
+precondition(closedLines.lineEnd(of: 2) == 5 && closedLines.lineBreak(of: 2) == 6)
+precondition(closedLines.lineEnd(of: 6) == 6 && closedLines.visibleOffset(6) == 5 && closedLines.visibleOffset(4) == 4)
+precondition(closedLines.lines(from: 2, count: 1, includingTerminator: true) == 0..<7)
+precondition(closedLines.lines(from: 8, count: 1, includingTerminator: true) == 7..<12)
+precondition(closedLines.lines(from: 2, count: 2, includingTerminator: false) == 0..<12)
+precondition(closedLines.lineSpan(from: 8, to: 1, includingTerminator: false) == 0..<12)
+precondition(closedLines.destination(of: .lineEnd, from: 9, count: 1) == 12)
+precondition(closedLines.destination(of: .lastNonBlank, from: 6, count: 1) == 4)
+precondition(closedLines.verticalMove(from: 5, by: 1, firstNonBlank: false) == 12)
+precondition(closedLines.wordForward(from: 0, big: false) == 7 && closedLines.wordBackward(from: 7, big: false) == 0)
+precondition(closedLines.wordEnd(from: 2, big: false) == 4 && closedLines.wordEnd(from: 4, big: false) == 11)
+precondition(closedLines.wordEnd(from: 11, big: false) == 11)
+precondition(TextModel("a\u{200B}\u{2060}\u{FEFF}").lineEnd(of: 0) == 1)
+precondition(TextModel("e\u{301}\u{200B}").lineEnd(of: 0) == 2)
+precondition(TextModel("o\u{200D}").lineEnd(of: 0) == 2 && TextModel("\u{2764}\u{FE0F}").lineEnd(of: 0) == 2)
+precondition(TextModel("ab\u{2060}", atoms: [2]).lineEnd(of: 0) == 3, "a chip is drawn")
+// Linear draws the line after a `<br>` with a U+200B, and keeps the caret after it; a paragraph's is empty.
+precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [4]).lineEnd(of: 3) == 4)
+precondition(TextModel("ab\n\u{200B}\ncd", paragraphBreaks: [2, 4]).lineEnd(of: 3) == 3)
+precondition(TextModel("ab\n\u{200B}\ncd").lineEnd(of: 3) == 3 && TextModel("\u{200B}", paragraphBreaks: []).lineEnd(of: 0) == 0)
+precondition(TextModel.withoutLineEndInvisibles("a\u{200B}\nb\u{2060}\u{FEFF}\nc\u{200B}") == "a\nb\nc\u{200B}")
+
+let afterHardBreak = FieldSnapshot(
+    capabilities: axProfile, text: "ab\n\u{200B}\ncd", selection: 3..<3, breaks: ParagraphBreaks(offsets: [4])
+)
+precondition(PhysicalPlanner.plan(LogicalPlanner.plan(RawCommand("A"), state: .initial), snapshot: afterHardBreak).steps.first
+             == .setSelection(4..<4))
+
+let larkProfile = CapabilityProfile(available: [
+    .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .drawCursor, .wholeDocument,
+])
+/// Lark's composer as LIN-1975 read it: Chromium paragraphs each closed by a U+200B, and AX text writes ignored.
+func larkSim(_ text: String, caret: Int) -> Sim {
+    var host = blankSim([text], caret: caret, profile: larkProfile)
+    host.swallowsReplace = true
+    host.pullsBackFromLineEnds = true
+    return host
+}
+let zw = "\u{200B}"
+for (text, caret, keys, typed, after) in [
+    ("hello world\(zw)", 6, "D", nil, "hello \(zw)"), ("hello\(zw)", 2, "dd", nil, zw),
+    ("one\(zw)\ntwo\(zw)", 5, "dd", nil, "one\(zw)\n\(zw)"), ("one\(zw)\ntwo\(zw)", 1, "dd", nil, "two\(zw)"),
+    ("hello\(zw)", 4, "x", nil, "hell\(zw)"), ("hello\(zw)", 2, "C", "!", "he!\(zw)"), ("hello\(zw)", 2, "A", "!", "hello!\(zw)"),
+    ("hello\(zw)", 2, "o", "new", "hello\nnew\(zw)"), ("one\(zw)\ntwo\(zw)", 1, "J", nil, "one two\(zw)"),
+    ("hello\(zw)", 2, "cc", "X", "X\(zw)"), (zw, 0, "A", "hi", "hi\(zw)"), (zw, 0, "a", "hi", "hi\(zw)"),
+    ("one\(zw)\ntwo\(zw)", 1, "yyjp", nil, "one\(zw)\ntwo\none\(zw)"), ("one\(zw)\n\(zw)", 5, "dd", nil, "one\(zw)\n\(zw)"),
+    ("hello\(zw)", 1, "v$d", nil, "h\(zw)"),
+] as [(String, Int, String, String?, String)] {
+    var lark = larkSim(text, caret: caret)
+    lark.type(keys)
+    if let typed {
+        lark.type(typed)
+        lark.feed("<Esc>")
+    }
+    precondition(lark.text == after, "\(keys) in \(text.debugDescription): \(lark.text.debugDescription)")
+    precondition(lark.settleFailures == 0 && lark.softMisses == 0 && lark.bells == 0 && lark.unsupportedSteps == 0, keys)
+}
+var larkYank = larkSim("one\(zw)\ntwo\(zw)", caret: 1)
+larkYank.type("yy")
+precondition(larkYank.state.session.register("\"") == .content(RegisterContent(text: "one\n", wise: .line)))
+for (text, caret, keys, landing) in [
+    ("hello\(zw)", 0, "$", 5), ("hi there\(zw)", 3, "w", 8), ("one\(zw)\ntwo\(zw)", 0, "w", 5), ("one\(zw)\ntwo\(zw)", 2, "e", 7),
+    ("one\(zw)\ntwo\(zw)", 2, "j", 7), ("one\(zw)\ntwo\(zw)", 2, "ll", 3),
+] {
+    var lark = larkSim(text, caret: caret)
+    lark.type(keys)
+    precondition(lark.caret == landing && lark.settleFailures == 0 && lark.bells == 0, "\(keys) from \(caret) in \(text.debugDescription)")
+}
+
+for profile in [axProfile, readProfile, keyProfile] {
+    for (caret, keys, after) in [
+        (2, "D", "he\(zw)\nworld\(zw)"), (8, "dd", "hello\(zw)\n\(zw)"), (2, "dd", "world\(zw)"), (2, "J", "hello world\(zw)"),
+    ] {
+        var native = Sim(text: "hello\(zw)\nworld\(zw)", caret: caret, profile: profile)
+        native.emulatesKeys = true
+        native.type(keys)
+        precondition(native.text == after && native.settleFailures == 0 && native.softMisses == 0 && native.bells == 0,
+                     "\(keys) from \(caret) under \(profile): \(native.text.debugDescription)")
+    }
+}
 
 print("Vim engine tests passed")
