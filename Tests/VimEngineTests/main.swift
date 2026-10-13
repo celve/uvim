@@ -6656,6 +6656,13 @@ for (text, caret, keys, ignored, blamed) in [
     unmoved.type(keys)
     precondition(unmoved.blamed == [blamed] && unmoved.settleFailures == 1, "\(keys) from \(caret) ignoring \(ignored): \(unmoved.blamed)")
 }
+for (caret, keys) in [(1, "j"), (6, "dk")] {
+    var overshoot = Sim(text: "one\u{200B}\ntwo\u{200B}\nthree\u{200B}", caret: caret, profile: keyProfile)
+    overshoot.emulatesKeys = true
+    overshoot.reboundChords = [.paragraphEnd: .documentEnd]
+    overshoot.type(keys)
+    precondition(overshoot.blamed == [.lineEndKey] && overshoot.settleFailures == 1, "\(keys) from \(caret): \(overshoot.blamed)")
+}
 var routeMiss = Sim(text: "abcdefghijk\u{200B}\nlonger line here\u{200B}", caret: 10, profile: keyProfile)
 routeMiss.emulatesKeys = true
 routeMiss.ignoredChords = [.right]

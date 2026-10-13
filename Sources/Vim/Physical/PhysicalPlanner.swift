@@ -358,6 +358,9 @@ private extension PhysicalPlanner {
                 read = .caretAfter(field(o..<o).lowerBound, strict: strict)
             case .caretBefore(let o, let strict):
                 read = .caretBefore(field(o..<o).lowerBound, strict: strict)
+            case .caretWithin(let range):
+                let lower = field(range.lowerBound..<range.lowerBound).lowerBound
+                read = .caretWithin(lower...max(lower, field(range.upperBound..<range.upperBound).lowerBound))
             case .between:
                 read = landing
             }
@@ -1141,8 +1144,8 @@ private extension PhysicalPlanner {
             // A merged check names one key, so keys that blame different ones are not merged.
             guard pending.blame == nil || group.blame == nil || pending.blame == group.blame else { return .next }
             let merged: KeyGroup = (pending.chords + group.chords, pending.blame ?? group.blame)
-            // Hosts differ on where a key lands among invisible characters ending a line: a caret there is checked
-            // anywhere from the line's visible end on, and a selection together with the keys after it.
+            // Hosts differ on where a key lands among invisible characters ending a line: a caret there is checked on
+            // either side of them, and a selection together with the keys after it.
             var checking: Landing?
             let ends = [model.selection.lowerBound, model.selection.upperBound]
             if let shown, let end = ends.first(where: { shown.visibleOffset($0) != $0 }) {
@@ -1150,7 +1153,7 @@ private extension PhysicalPlanner {
                     pending = merged
                     continue
                 }
-                checking = .caretAfter(shown.visibleOffset(end), strict: false)
+                checking = .caretWithin(shown.visibleOffset(end)...shown.lineBreak(of: end))
             }
             pending = ([], nil)
             steps += keys(merged.chords, blaming: merged.blame, to: model.selection, checking: checking, context: &context,

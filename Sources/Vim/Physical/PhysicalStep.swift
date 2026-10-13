@@ -174,6 +174,7 @@ public enum Landing: Equatable, Sendable {
     case exact(Range<Int>)
     case caretAfter(Int, strict: Bool)
     case caretBefore(Int, strict: Bool)
+    case caretWithin(ClosedRange<Int>)
     /// The span between two kept carets (`Expectation.keeps`).
     case between(Int, Int)
 
@@ -185,6 +186,8 @@ public enum Landing: Equatable, Sendable {
             return observed.isEmpty && (strict ? observed.lowerBound > offset : observed.lowerBound >= offset)
         case .caretBefore(let offset, let strict):
             return observed.isEmpty && (strict ? observed.lowerBound < offset : observed.lowerBound <= offset)
+        case .caretWithin(let range):
+            return observed.isEmpty && range.contains(observed.lowerBound)
         case .between:
             return false
         }
@@ -378,6 +381,7 @@ extension Landing {
         case .exact(let range): return "\(range.lowerBound)..\(range.upperBound)"
         case .caretAfter(let offset, let strict): return (strict ? ">" : ">=") + "\(offset)"
         case .caretBefore(let offset, let strict): return (strict ? "<" : "<=") + "\(offset)"
+        case .caretWithin(let range): return "\(range.lowerBound)...\(range.upperBound)"
         case .between(let from, let to): return "k\(from)..k\(to)"
         }
     }
