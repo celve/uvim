@@ -39,8 +39,12 @@ public enum VimEffect: Equatable, Sendable {
 
     case setMark(Character, MarkPoint)
 
-    /// Recorded by a linewise delete, for `u`.
-    case setUndoLanding(VimState.UndoLanding?)
+    /// Pushed by a linewise delete, for `u`; a new change leaves nothing to redo.
+    case recordUndoLanding(VimState.UndoLanding)
+
+    /// `u` landed on the newest record, which ⌃R (`redidUndo`) puts back.
+    case landedUndo
+    case redidUndo
 }
 
 // MARK: - Abort survival
@@ -54,7 +58,8 @@ extension VimEffect {
             if case .visual = mode { return false }
             return true
         case .setInsertStart, .setCursor, .deleted, .yanked, .setMark,
-             .searched, .found, .setLastInsert, .setLastChange, .setLastVisual, .setUndoLanding:
+             .searched, .found, .setLastInsert, .setLastChange, .setLastVisual, .recordUndoLanding,
+             .landedUndo, .redidUndo:
             return false
         }
     }

@@ -486,7 +486,7 @@ precondition(physical("dd", text: "one\ntwo", caret: 1, profile: axProfile).step
     .replaceSelection(""),
     .settle(Expectation(selection: 0..<0, length: 3)),
     .commit(.deleted(into: nil, content: .literal("one\n"), wise: .line)),
-    .commit(.setUndoLanding(VimState.UndoLanding(at: 0, removed: "one\n", target: 0, after: "two".hashValue))),
+    .commit(.recordUndoLanding(VimState.UndoLanding(at: 0, removed: "one\n", target: 0, after: "two".hashValue))),
     .setSelection(0..<1),
     .commit(.setCursor(0..<1)),
 ])
@@ -6980,7 +6980,7 @@ precondition(physical("dd", text: "one\ntwo", caret: 5, profile: axProfile).step
     .press(.deleteBack, count: 1),
     .settle(Expectation(selection: 3..<3, length: 3)),
     .commit(.deleted(into: nil, content: .literal("two\n"), wise: .line)),
-    .commit(.setUndoLanding(VimState.UndoLanding(at: 3, removed: "\ntwo", target: 4, after: "one".hashValue))),
+    .commit(.recordUndoLanding(VimState.UndoLanding(at: 3, removed: "\ntwo", target: 4, after: "one".hashValue))),
     .setSelection(0..<0),
     .settle(Expectation(selection: 0..<0, length: 3)),
     .setSelection(0..<1),
@@ -7167,14 +7167,24 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
 
 // Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
 var undone = VimState.initial
-undone.field.undoLanding = VimState.UndoLanding(at: 7, removed: "\nthree", target: 8, after: "one\ntwo".hashValue)
+undone.field.undoLandings = [VimState.UndoLanding(at: 7, removed: "\nthree", target: 8, after: "one\ntwo".hashValue)]
+precondition(physical("u", text: "one\ntwo", caret: 4, profile: writeKeys, state: undone).steps == [
+    .press(.undo, count: 1), .commit(.landedUndo), .press(.documentEnd, count: 1), .press(.paragraphStart, count: 1),
+    .commit(.setCursor(nil)),
+])
 precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile, state: undone).steps == [
+    .press(.undo, count: 1), .commit(.landedUndo), .press(.down, count: 1), .commit(.setCursor(nil)),
+])
+var undoneMiddle = VimState.initial
+undoneMiddle.field.undoLandings = [VimState.UndoLanding(at: 4, removed: "two\n", target: 4, after: "one\nthree".hashValue)]
+precondition(physical("u", text: "one\nthree", caret: 4, profile: axProfile, state: undoneMiddle).steps == [
     .press(.undo, count: 1),
+    .commit(.landedUndo),
     .settle(Expectation(landing: nil, length: 13)),
-    .setSelection(8..<8),
-    .settle(Expectation(selection: 8..<8, length: 13)),
-    .setSelection(8..<9),
-    .commit(.setCursor(8..<9)),
+    .setSelection(4..<4),
+    .settle(Expectation(selection: 4..<4, length: 13)),
+    .setSelection(4..<5),
+    .commit(.setCursor(4..<5)),
 ])
 precondition(physical("u", text: "one\ntwX", caret: 4, profile: axProfile, state: undone).steps == [
     .press(.undo, count: 1), .commit(.setCursor(nil)),
@@ -7193,22 +7203,21 @@ for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak
             return sim
         }
         let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys")"
-        let lines = profile.has(.lineStartKey) || profile.has(.writeSelection) && !rich
-        for (text, caret, keys, restoredLine, after) in [
-            (lastThree, 10, "ddu", 8, "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", 10, "one\ntwo"),
-            (lastThree, 5, "dGu", 4, "one\nthree"), (lastThree, 1, "jddu", 4, "one\nthree"), ("one\ntwo\n", 8, "ddu", 8, "one\ntwo"),
-            ("one\n\nthree", 4, "ddu", 4, "one\nthree"),
+        let keysReach = profile.has(.lineStartKey) && profile.has(.documentEndKey)
+        for (text, caret, keys, restoredLine, ending, after) in [
+            (lastThree, 10, "ddu", 8, true, "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", 10, true, "one\ntwo"),
+            (lastThree, 5, "dGu", 4, true, "one\nthree"), (lastThree, 1, "jddu", 4, false, "one\nthree"),
+            ("one\ntwo\n", 8, "ddu", 8, true, "one\ntwo"), ("one\n\nthree", 4, "ddu", 4, false, "one\nthree"),
         ] {
             var sim = host(text, caret)
             sim.type(keys)
             let model = TextModel(text)
             precondition(sim.text == text && sim.settleFailures == 0, "\(keys) in \(text.debugDescription), \(context)")
-            // Keys land on a restored line, its start where ⌃A takes them; a plain field's write on the first, at its first non-blank.
-            if profile.has(.writeSelection), !rich {
+            // Vim's cursor where keys reach it from the text's end or a plain field's write puts it; elsewhere on a restored line.
+            if ending ? keysReach : profile.has(.writeSelection) && !rich || keysReach && model.firstNonBlank(inLineOf: restoredLine) == model.lineStart(of: restoredLine) {
                 precondition(sim.caret == restoredLine, "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
             } else {
-                precondition(sim.caret >= model.lineStart(of: restoredLine) && (!lines || sim.caret == model.lineStart(of: sim.caret)),
-                             "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
+                precondition(sim.caret >= model.lineStart(of: restoredLine), "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
             }
             if keys.hasPrefix("dd") || keys.hasPrefix("j"), profile.has(.writeSelection) || profile.has(.lineStartKey) {
                 sim.type("dd")
@@ -7219,6 +7228,27 @@ for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak
         upward.type("dku")
         upward.type("dd")
         precondition(["one\nthree", "one\ntwo"].contains(upward.text), "dkudd, \(context): \(upward.text.debugDescription)")
+        var twice = host("one\ntwo\nthree\nfour", 14)
+        twice.type("dddduu")
+        precondition(twice.text == "one\ntwo\nthree\nfour" && TextModel(twice.text).lineStart(of: twice.caret) == 14, "dddduu, \(context)")
+        twice.type("dd")
+        precondition(twice.text == "one\ntwo\nthree", "dddduudd, \(context): \(twice.text.debugDescription)")
+        // An app that groups the second delete's lone ⌫ with the first's undoes both at once, which still end the text.
+        var grouped = host("one\ntwo\n", 4)
+        grouped.type("ddddudd")
+        precondition(grouped.text.hasPrefix("one"), "ddddudd, \(context): \(grouped.text.debugDescription)")
+        var redone = host(lastThree, 10)
+        redone.type("ddu")
+        redone.feed("<C-r>")
+        precondition(redone.text == "one\ntwo", "ddu⌃R, \(context): \(redone.text.debugDescription)")
+        redone.type("udd")
+        precondition(redone.text == "one\ntwo", "ddu⌃Rudd, \(context): \(redone.text.debugDescription)")
+        let zw = "\u{200B}"
+        var invisible = host("one\(zw)\ntwo\(zw)", 6)
+        invisible.type("ddu")
+        precondition(invisible.text == "one\(zw)\ntwo\(zw)" && invisible.caret >= 5, "ddu with line-end runs, \(context): \(invisible.caret)")
+        invisible.type("dd")
+        precondition(invisible.text == "one\(zw)", "dduddd with line-end runs, \(context): \(invisible.text.debugDescription)")
         var stale = host(lastThree, 10)
         stale.type("dd0x")
         stale.type("u")

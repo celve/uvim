@@ -76,7 +76,11 @@ public struct Sim {
     public var undoSelection = UndoSelection.restored
 
     /// Each undo group's text before it and its first edit's offset, newest last, as the host's undo stack holds them.
-    private var undoGroups: [(before: String, at: Int, listLines: [ListLine]?, codeSpans: [Range<Int>])] = []
+    private var undoGroups: [UndoGroup] = []
+    private typealias UndoGroup = (before: String, at: Int, listLines: [ListLine]?, codeSpans: [Range<Int>])
+
+    /// Groups ⌘Z undid, with the text each left, which ⇧⌘Z puts back until a new edit.
+    private var redoGroups: [(group: UndoGroup, after: String, listLines: [ListLine]?, codeSpans: [Range<Int>])] = []
 
     /// Hosts group consecutive typed edits for undo until the caret moves some other way.
     private var coalescing = false
@@ -491,7 +495,8 @@ private extension Sim {
 
             case .press(let chord, let count):
                 for _ in 0..<count where !ignoredChords.contains(chord) {
-                    guard emulatesKeys || Self.countedKeys.contains(chord) || chord == .undo, press(reboundChords[chord] ?? chord) else {
+                    guard emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord),
+                          press(reboundChords[chord] ?? chord) else {
                         unsupportedSteps += 1
                         break
                     }
@@ -579,6 +584,7 @@ private extension Sim {
     /// a key the model does not know.
     mutating func press(_ chord: Chord) -> Bool {
         if chord == .undo { return undo() }
+        if chord == .redo { return redo() }
         if atChipStart, [Key.arrowLeft, .arrowRight].contains(chord.key), !chord.modifiers.contains(.option) {
             atChipStart = false
             return true
@@ -735,12 +741,14 @@ private extension Sim {
         } else {
             undoGroups.append((before: text, at: offset, listLines: listLines, codeSpans: codeSpans))
         }
+        redoGroups = []
         coalescing = typing
     }
 
     /// ⌘Z: the newest group's text back, selected as `undoSelection` has this host select it.
     mutating func undo() -> Bool {
         guard let group = undoGroups.popLast() else { return true }
+        redoGroups.append((group: group, after: text, listLines: listLines, codeSpans: codeSpans))
         let restored = group.before.utf16.count - text.utf16.count
         (text, listLines, codeSpans) = (group.before, group.listLines, group.codeSpans)
         (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
@@ -752,6 +760,17 @@ private extension Sim {
         case .toBreak: toBreak ?? put.count
         }
         selection = group.at..<group.at + length
+        return true
+    }
+
+    /// ⇧⌘Z: the newest undone group's edit again, the caret where it began.
+    mutating func redo() -> Bool {
+        guard let undone = redoGroups.popLast() else { return true }
+        undoGroups.append(undone.group)
+        (text, listLines, codeSpans) = (undone.after, undone.listLines, undone.codeSpans)
+        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
+        let at = TextModel(text).clamp(undone.group.at)
+        selection = at..<at
         return true
     }
 

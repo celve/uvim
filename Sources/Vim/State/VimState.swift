@@ -109,8 +109,10 @@ public extension VimState {
         /// end-of-line).
         public var cursor: Range<Int>?
 
-        /// Where the last linewise delete's lines go back when `u` undoes it.
-        public var undoLanding: UndoLanding?
+        /// Where linewise deletes' lines go back when `u` undoes them, newest last, as the field's undo stack holds them;
+        /// `u` moves the one it lands on to `redoLandings`, and ⌃R moves it back.
+        public var undoLandings: [UndoLanding]
+        public var redoLandings: [UndoLanding]
 
         public init(
             mode: Mode = .normal,
@@ -118,14 +120,16 @@ public extension VimState {
             marks: [Character: MarkPoint] = [:],
             lastVisual: VisualMemory? = nil,
             cursor: Range<Int>? = nil,
-            undoLanding: UndoLanding? = nil
+            undoLandings: [UndoLanding] = [],
+            redoLandings: [UndoLanding] = []
         ) {
             self.mode = mode
             self.insertStart = insertStart
             self.marks = marks
             self.lastVisual = lastVisual
             self.cursor = cursor
-            self.undoLanding = undoLanding
+            self.undoLandings = undoLandings
+            self.redoLandings = redoLandings
         }
     }
 }

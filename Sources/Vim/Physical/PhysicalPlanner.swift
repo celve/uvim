@@ -757,8 +757,9 @@ private extension PhysicalPlanner {
         }
     }
 
-    /// Vim's cursor on the first line an undone linewise delete restored: a write puts it there in plain text; keys collapse
-    /// toward the restored lines, which hosts leave selected from the line break above them, through it, or from their start.
+    /// Vim's cursor on the first line an undone linewise delete restored. Lines restored with the break above end the text, so
+    /// keys reach them from its end, whatever the app selected or undid with them; a write puts others there in plain text,
+    /// and elsewhere → ← and ⌃A collapse what the app selected onto them.
     static func lowerLandUndo(
         _ landing: VimState.UndoLanding, context: inout Context, profile: CapabilityProfile
     ) -> [PhysicalStep] {
@@ -766,7 +767,21 @@ private extension PhysicalPlanner {
         let plain = context.breaks == nil
         context.text = found
         context.applyEdit(range: landing.at..<landing.at, replacement: landing.removed)
-        var steps: [PhysicalStep] = []
+        var steps: [PhysicalStep] = [.commit(.landedUndo)]
+        guard let model = context.model else { return steps }
+        if model.lineStart(of: landing.target) > landing.at {
+            let lines = landing.removed.utf16.filter { $0 == 10 }.count
+            let column = model.graphemes(in: model.lineStart(of: landing.target)..<landing.target)
+            context.invalidate()
+            guard profile.has(.documentEndKey) else {
+                return steps + [.press(.down, count: lines)] + (profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)] : [])
+            }
+            steps.append(.press(.documentEnd, count: 1))
+            guard profile.has(.lineStartKey) else { return steps }
+            steps += [.press(.paragraphStart, count: 1)]
+                + repeatElement([PhysicalStep.press(.left, count: 1), .press(.paragraphStart, count: 1)], count: lines - 1).joined()
+            return column > 0 ? steps + run(.right, count: column, selecting: context.arrowsSelect, normalizing: false) : steps
+        }
         // What a host selects after an undo varies, so the length alone tells whether the lines came back.
         if plain, profile.has(.readCaret) {
             context.unknown.insert(.selection)
@@ -778,9 +793,8 @@ private extension PhysicalPlanner {
             return steps + write(landing.target..<landing.target, context: context) + settle(context, profile: profile)
         }
         // Undone paragraphs are no surer a prediction than typed ones, so rich text lands by keys too; → ← keeps a caret put.
-        let above = context.model.map { $0.lineStart(of: landing.target) > landing.at } ?? false
         context.invalidate()
-        return steps + (above ? [.press(.right, count: 1)] : [.press(.right, count: 1), .press(.left, count: 1)])
+        return steps + [.press(.right, count: 1), .press(.left, count: 1)]
             + (profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)] : [])
     }
 
@@ -1943,7 +1957,7 @@ private extension PhysicalPlanner {
             }
             if wise == .line, let after = context.text {
                 let removed = (breakAbove?.lowerBound ?? selection.lowerBound)..<selection.upperBound
-                steps.append(.commit(.setUndoLanding(VimState.UndoLanding(
+                steps.append(.commit(.recordUndoLanding(VimState.UndoLanding(
                     at: removed.lowerBound, removed: model.substring(removed),
                     target: model.firstNonBlank(inLineOf: selection.lowerBound), after: after.hashValue
                 ))))
