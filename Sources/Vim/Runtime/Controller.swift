@@ -448,9 +448,12 @@ public final class Controller {
             chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
             sampling: sampling, known: emptyParagraphs, knownUnreachable: unreachable
         ).snapshot
-        guard let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after) else { return }
-        let landed = executor.execute(landing, on: binding.element, state: &state, paragraphs: after.breaks != nil)
-        Diag.undoLanding(tracker.epoch, seq, plan: landing, executed: landed, evidence: executor.lastRun)
+        let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after)
+        let landed = landing.map { executor.execute($0, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+        Diag.undoLanding(
+            tracker.epoch, seq, plan: landing, executed: landed ?? true, evidence: executor.lastRun, waited: waited,
+            lengths: (before.utf16.count, after.text?.utf16.count)
+        )
     }
 
     /// Fold a just-ended Insert session into the dot memories.
