@@ -7118,6 +7118,17 @@ precondition(upward.text == lastThree && upward.caret >= 8)
 upward.ignoredChords = []
 upward.type("dk")
 precondition(upward.text == "one")
+var emptyUpward = Sim(text: "one\n\n", caret: 5, profile: axProfile)
+emptyUpward.emptyParagraphs = true
+emptyUpward.readModel = .textContent
+emptyUpward.webContent = true
+emptyUpward.emulatesKeys = true
+emptyUpward.ignoredChords = [.deleteBack]
+emptyUpward.type("dk")
+precondition(emptyUpward.text == "one\n\n" && emptyUpward.caret == 5)
+emptyUpward.ignoredChords = []
+emptyUpward.type("dk")
+precondition(emptyUpward.text == "one")
 var belowEmpty = Sim(text: "one\n\nthree", caret: 5, profile: readProfile)
 belowEmpty.emptyParagraphs = true
 belowEmpty.readModel = .textContent
