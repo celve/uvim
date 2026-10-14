@@ -4,6 +4,8 @@ public struct RunAttribution: Equatable, Sendable {
     /// The optional route whose settle failed, which is no evidence on any key.
     public private(set) var missedRoute: Route?
     private var pending: Question?
+    /// The selection write before the presses since the last settle, which a settle that `checksWrite` checks.
+    private var finishing: Question?
     /// The field as the previous step read it, when that step was a settle that passed.
     private var settled: Read?
     /// `settled` as it stood at the text write just recorded.
@@ -38,10 +40,15 @@ public struct RunAttribution: Equatable, Sendable {
         switch step {
         case .setSelection:
             pending = .write(.writeSelection)
+            finishing = pending
         case .replaceSelection:
             pending = .write(.insertText)
+            finishing = nil
             beforeWrite = previous
+        case .press:
+            pending = nil
         case .settle(let expectation):
+            if expectation.checksWrite, pending == nil { pending = finishing }
             let read = Read(expectation, selection: selection, length: length)
             let unchanged = written != nil && read == written && writeError == nil
             let item = passed
@@ -52,8 +59,10 @@ public struct RunAttribution: Equatable, Sendable {
             if !passed, selection != nil, let route = expectation.route { missedRoute = route }
             if passed { settled = read }
             pending = nil
+            finishing = nil
         default:
             pending = nil
+            finishing = nil
         }
     }
 
@@ -122,6 +131,7 @@ extension Expectation {
     private func broken(_ blame: Blame, _ observed: Range<Int>) -> Evidence.Why? {
         if blame.unmoved.contains(observed) { return .unmoved }
         if blame.leavesCaret && !observed.isEmpty { return .leftSelection }
+        if blame.selects && observed.isEmpty { return .leftCaret }
         if let longest, observed.count > longest { return .tooLong }
         if blame.offTarget && landing?.matches(observed) == false { return .offTarget }
         return nil

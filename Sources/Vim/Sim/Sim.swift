@@ -505,11 +505,14 @@ private extension Sim {
                 if let slot = expectation.keeps, let caret = observed?.lowerBound { kept[slot] = caret }
 
             case .softSettle(let expectation):
-                // Best-effort barrier: never aborts. In this synchronous host
-                // there is nothing async to wait for, and the blind step it
-                // follows may be an unsupported no-op, so the field need not match
-                // the prediction — which is exactly why a soft settle must proceed.
-                let passed = settles(expectation, generated: generated).passed
+                // A miss proceeds, as the blind step before it may be an unsupported no-op here, but an ignored ⌫ fails.
+                let (passed, observed, length) = settles(expectation, generated: generated)
+                let read = Self.asRead(expectation, observed, length)
+                if !passed, expectation.ignored(selection: read.selection, length: read.length) {
+                    settleFailures += 1
+                    drainResidency(of: steps, after: index)
+                    return index
+                }
                 if !passed { softMisses += 1 }
                 generated = !passed || expectation.metByEmptyField
 
@@ -521,6 +524,13 @@ private extension Sim {
             }
         }
         return nil
+    }
+
+    /// A settle's read as the executor's: an attribute its expectation does not ask for is not read.
+    static func asRead(
+        _ expectation: Expectation, _ selection: Range<Int>?, _ length: Int
+    ) -> (selection: Range<Int>?, length: Int?) {
+        (expectation.landing == nil ? nil : selection, expectation.length == nil ? nil : length)
     }
 
     /// In `reads`' coordinates a boundary offset lands at the next paragraph's start.
