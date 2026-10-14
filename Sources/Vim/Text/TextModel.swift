@@ -8,8 +8,16 @@
 public struct TextModel: Equatable, Sendable {
     public let text: String
 
-    public init(_ text: String) {
+    /// Offsets of characters that stand for something drawn, such as a chip, however invisible they read.
+    public let atoms: Set<Int>
+
+    /// In rich text, the `\n`s Chromium generates between paragraphs; any other `\n` there is a hard break (`<br>`).
+    public let paragraphBreaks: Set<Int>?
+
+    public init(_ text: String, atoms: Set<Int> = [], paragraphBreaks: Set<Int>? = nil) {
         self.text = text
+        self.atoms = atoms
+        self.paragraphBreaks = paragraphBreaks
     }
 
     public var length: Int { text.utf16.count }
@@ -41,7 +49,7 @@ public struct TextModel: Equatable, Sendable {
         text.distance(from: index(range.lowerBound), to: index(range.upperBound))
     }
 
-    /// `graphemes(in:)` from `offset` to its line's end, or its start, where that is at most `limit`; walks no further.
+    /// `graphemes(in:)` from `offset` to its line's break, where ⌃E lands, or its start, where at most `limit`; walks no further.
     public func graphemes(from offset: Int, toLineEnd: Bool, atMost limit: Int) -> Int? {
         guard limit >= 0 else { return nil }
         var i = index(offset)
@@ -78,18 +86,87 @@ public struct TextModel: Equatable, Sendable {
         return offset(text.index(after: newline))
     }
 
-    /// Offset of the line's newline (or the text end): the end-of-line gap.
-    public func lineEnd(of o: Int) -> Int {
+    /// Offset of the line's newline (or the text end), where a host's ⌃E lands.
+    public func lineBreak(of o: Int) -> Int {
         let i = index(o)
         guard let newline = text[i...].firstIndex(of: "\n") else { return length }
         return offset(newline)
     }
 
-    /// Whether a line holding any of `range`, ends included, is empty.
+    /// The end-of-line gap, before invisible characters ending the line (LIN-1978); never before `o`, where a host left a caret.
+    public func lineEnd(of o: Int) -> Int {
+        max(clamp(o), visibleEnd(from: lineStart(of: o), to: lineBreak(of: o)))
+    }
+
+    /// `o`, or its line's end where `o` is among or after the invisible characters ending the line.
+    public func visibleOffset(_ o: Int) -> Int {
+        guard (0...length).contains(o) else { return o }
+        return min(o, lineEnd(of: lineStart(of: o)))
+    }
+
+    /// `end` less the invisible characters right before it, back to `start`, but for a line a hard break draws with them alone.
+    private func visibleEnd(from start: Int, to end: Int) -> Int {
+        let first = index(start)
+        var i = index(end)
+        while i > first, isInvisible(text.index(before: i)) {
+            i = text.index(before: i)
+        }
+        // Linear draws the line after a `<br>` with a U+200B, and keeps a caret on it after that.
+        if i == first, start > 0, let paragraphBreaks, !paragraphBreaks.contains(start - 1) { return end }
+        return offset(i)
+    }
+
+    private func isInvisible(_ i: String.Index) -> Bool {
+        Self.isInvisible(text[i]) && !atoms.contains(offset(i))
+    }
+
+    /// A character Unicode draws as nothing, as U+200B, U+2060 or U+FEFF; one joined to the character before is part of that one.
+    static func isInvisible(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy(\.properties.isDefaultIgnorableCodePoint)
+    }
+
+    /// `i` is among the invisible characters that end its line.
+    private func inBreak(_ i: String.Index) -> Bool {
+        isInvisible(i) && offset(i) >= lineEnd(of: lineStart(of: offset(i)))
+    }
+
+    /// `range` less the invisible characters ending its lines, as a register keeps it.
+    public func visibleParts(of range: Range<Int>) -> [Range<Int>] {
+        var parts: [Range<Int>] = []
+        var start = range.lowerBound
+        var i = index(range.lowerBound)
+        while i < index(range.upperBound) {
+            let next = text.index(after: i)
+            if inBreak(i) {
+                if offset(i) > start { parts.append(start..<offset(i)) }
+                start = offset(next)
+            }
+            i = next
+        }
+        if range.upperBound > start { parts.append(start..<range.upperBound) }
+        return parts
+    }
+
+    public func visibleText(in range: Range<Int>) -> String {
+        visibleParts(of: range).map(substring).joined()
+    }
+
+    /// Some line ends in invisible characters, past which an app's own keys land.
+    public var endsLinesInvisibly: Bool {
+        var start = 0
+        while true {
+            let end = lineBreak(of: start)
+            if lineEnd(of: start) < end { return true }
+            guard end < length else { return false }
+            start = end + 1
+        }
+    }
+
+    /// Whether a line holding any of `range`, ends included, is empty, as `AXValue` shows lines.
     public func touchesEmptyLine(_ range: Range<Int>) -> Bool {
         var start = lineStart(of: range.lowerBound)
         while start <= range.upperBound {
-            let end = lineEnd(of: start)
+            let end = lineBreak(of: start)
             if end == start { return true }
             guard end < length else { return false }
             start = end + 1
@@ -98,8 +175,9 @@ public struct TextModel: Equatable, Sendable {
     }
 
     public func firstNonBlank(inLineOf o: Int) -> Int {
-        var i = index(lineStart(of: o))
-        let end = index(lineEnd(of: o))
+        let start = lineStart(of: o)
+        var i = index(start)
+        let end = index(lineEnd(of: start))
         while i < end, text[i] == " " || text[i] == "\t" {
             i = text.index(after: i)
         }
@@ -109,23 +187,25 @@ public struct TextModel: Equatable, Sendable {
     /// Whole lines from the line containing `a` through the line containing
     /// `b`, in either order.
     public func lineSpan(from a: Int, to b: Int, includingTerminator: Bool) -> Range<Int> {
-        let start = lineStart(of: min(a, b))
-        var end = lineEnd(of: max(a, b))
-        if includingTerminator, end < length { end += 1 }
-        return start..<end
+        lines(from: min(a, b), through: lineBreak(of: max(a, b)), includingTerminator: includingTerminator)
     }
 
     /// N whole lines starting at the line containing `o`.
     public func lines(from o: Int, count: Int, includingTerminator: Bool) -> Range<Int> {
-        let start = lineStart(of: o)
-        var end = lineEnd(of: o)
+        var end = lineBreak(of: o)
         var remaining = count - 1
         while remaining > 0, end < length {
-            end = lineEnd(of: end + 1)
+            end = lineBreak(of: end + 1)
             remaining -= 1
         }
-        if includingTerminator, end < length { end += 1 }
-        return start..<end
+        return lines(from: o, through: end, includingTerminator: includingTerminator)
+    }
+
+    /// From `o`'s line start to the break at `end`, the break taken whole or left with its invisible characters.
+    private func lines(from o: Int, through end: Int, includingTerminator: Bool) -> Range<Int> {
+        let start = lineStart(of: o)
+        guard includingTerminator, end < length else { return start..<lineEnd(of: lineStart(of: end)) }
+        return start..<(end + 1)
     }
 
     /// `j`/`k`: move whole lines, preserving the grapheme column, clamped to
@@ -135,7 +215,7 @@ public struct TextModel: Equatable, Sendable {
         let column = graphemes(in: start..<o)
         var remaining = delta
         while remaining > 0 {
-            let end = lineEnd(of: start)
+            let end = lineBreak(of: start)
             guard end < length else { break }
             start = end + 1
             remaining -= 1
@@ -163,17 +243,22 @@ public struct TextModel: Equatable, Sendable {
         return .punctuation
     }
 
+    /// The character at `i`'s class, where the invisible characters ending a line are its break's whitespace.
+    private func charClass(at i: String.Index, big: Bool) -> CharClass {
+        inBreak(i) ? .whitespace : charClass(text[i], big: big)
+    }
+
     /// `w`/`W`: start of the next word.
     public func wordForward(from o: Int, big: Bool) -> Int {
         var i = index(o)
         guard i < text.endIndex else { return length }
-        let cls = charClass(text[i], big: big)
+        let cls = charClass(at: i, big: big)
         if cls != .whitespace {
-            while i < text.endIndex, charClass(text[i], big: big) == cls {
+            while i < text.endIndex, charClass(at: i, big: big) == cls {
                 i = text.index(after: i)
             }
         }
-        while i < text.endIndex, charClass(text[i], big: big) == .whitespace {
+        while i < text.endIndex, charClass(at: i, big: big) == .whitespace {
             i = text.index(after: i)
         }
         return offset(i)
@@ -184,14 +269,14 @@ public struct TextModel: Equatable, Sendable {
         var i = index(o)
         guard i > text.startIndex else { return 0 }
         i = text.index(before: i)
-        while i > text.startIndex, charClass(text[i], big: big) == .whitespace {
+        while i > text.startIndex, charClass(at: i, big: big) == .whitespace {
             i = text.index(before: i)
         }
-        guard charClass(text[i], big: big) != .whitespace else { return offset(i) }
-        let cls = charClass(text[i], big: big)
+        guard charClass(at: i, big: big) != .whitespace else { return offset(i) }
+        let cls = charClass(at: i, big: big)
         while i > text.startIndex {
             let previous = text.index(before: i)
-            guard charClass(text[previous], big: big) == cls else { break }
+            guard charClass(at: previous, big: big) == cls else { break }
             i = previous
         }
         return offset(i)
@@ -203,14 +288,14 @@ public struct TextModel: Equatable, Sendable {
         var i = index(o)
         guard i < text.endIndex else { return o }
         i = text.index(after: i)
-        while i < text.endIndex, charClass(text[i], big: big) == .whitespace {
+        while i < text.endIndex, charClass(at: i, big: big) == .whitespace {
             i = text.index(after: i)
         }
-        guard i < text.endIndex else { return advance(length, byGraphemes: -1) }
-        let cls = charClass(text[i], big: big)
+        guard i < text.endIndex else { return advance(lineEnd(of: lineStart(of: length)), byGraphemes: -1) }
+        let cls = charClass(at: i, big: big)
         while true {
             let next = text.index(after: i)
-            guard next < text.endIndex, charClass(text[next], big: big) == cls else { break }
+            guard next < text.endIndex, charClass(at: next, big: big) == cls else { break }
             i = next
         }
         return offset(i)
@@ -223,15 +308,15 @@ public struct TextModel: Equatable, Sendable {
         guard length > 0 else { return 0..<0 }
         var i = index(o)
         if i == text.endIndex { i = text.index(before: i) }
-        let cls = charClass(text[i], big: big)
+        let cls = charClass(at: i, big: big)
         var start = i
         while start > text.startIndex {
             let previous = text.index(before: start)
-            guard charClass(text[previous], big: big) == cls, text[previous] != "\n" else { break }
+            guard charClass(at: previous, big: big) == cls, text[previous] != "\n" else { break }
             start = previous
         }
         var end = text.index(after: i)
-        while end < text.endIndex, charClass(text[end], big: big) == cls, text[end] != "\n" {
+        while end < text.endIndex, charClass(at: end, big: big) == cls, text[end] != "\n" {
             end = text.index(after: end)
         }
         var lo = offset(start)
@@ -381,7 +466,7 @@ public struct TextModel: Equatable, Sendable {
             return lineEnd(of: base)
         case .lastNonBlank:
             let start = lineStart(of: o)
-            var i = index(lineEnd(of: o))
+            var i = index(lineEnd(of: start))
             while i > index(start) {
                 i = text.index(before: i)
                 if text[i] != " ", text[i] != "\t" { return offset(i) }

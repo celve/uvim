@@ -272,7 +272,7 @@ public extension FieldSnapshot {
 
     private static func onEmptyLine(_ selection: Range<Int>, in text: String) -> Bool {
         let model = TextModel(text)
-        return selection.isEmpty && model.lineStart(of: selection.lowerBound) == model.lineEnd(of: selection.lowerBound)
+        return selection.isEmpty && model.lineStart(of: selection.lowerBound) == model.lineBreak(of: selection.lowerBound)
     }
 
     /// `breaks.valueRange` over the sides read so far, or the side it needs next.

@@ -65,7 +65,7 @@ extension Snapshotter {
     static func waitsForDrawnCaret(_ snapshot: FieldSnapshot, in element: AXUIElement) -> Bool {
         // Keys still landing read as a selection, which may yet end at a code span's end.
         guard snapshot.breaks != nil, !snapshot.holdsDrawnCaret, let caret = snapshot.caret, let text = snapshot.text,
-              TextModel(text).lineEnd(of: caret) == caret, let marked = AX.markedSelection(of: element),
+              TextModel(text).lineBreak(of: caret) == caret, let marked = AX.markedSelection(of: element),
               !marked.isCollapsed || atCodeEnd(marked) else { return false }
         let length = AX.attributes([kAXNumberOfCharactersAttribute], of: element).int(0)
         let deadline = Date().addingTimeInterval(0.2)
