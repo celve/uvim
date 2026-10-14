@@ -7270,7 +7270,8 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
         invisible.type("ddu")
         precondition(invisible.text == "one\(zw)\ntwo\(zw)" && invisible.caret >= 5, "ddu with line-end runs, \(context): \(invisible.caret)")
         invisible.type("dd")
-        precondition(invisible.text == "one\(zw)\(zw)", "dduddd with line-end runs, \(context): \(invisible.text.debugDescription)")
+        precondition(invisible.text == "one\(zw)\(zw)" && invisible.settleFailures == 0,
+                     "dduddd with line-end runs, \(context): \(invisible.text.debugDescription)")
         var stale = host(lastThree, 10)
         stale.type("dd0x")
         stale.type("u")

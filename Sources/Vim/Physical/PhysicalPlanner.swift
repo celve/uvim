@@ -1960,6 +1960,8 @@ private extension PhysicalPlanner {
                 // Chrome makes a further ⌫ over an invisible character its own undo step.
                 steps.append(.press(.deleteBack, count: 1))
                 context.applyEdit(range: above, replacement: "")
+                // Rich editors differ on whether invisible characters ending the line above go with its newline (Lark's do).
+                if context.breaks != nil, above.count > 1 { context.unknown.insert(.length) }
                 steps += settle(context, profile: profile, hard: context.breaks == nil)
             }
             if !blackhole {
