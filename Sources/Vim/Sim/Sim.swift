@@ -85,6 +85,10 @@ public struct Sim {
     /// Hosts group consecutive typed edits for undo until the caret moves some other way.
     private var coalescing = false
 
+    /// Chrome's ⌘Z and ⇧⌘Z, as measured: a key sent right behind one runs first, and a read or write waits for it.
+    public var undoesLate = false
+    private var lateHistory: [Chord] = []
+
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
     private var snapshotting = false
@@ -466,8 +470,13 @@ private extension Sim {
         var kept: [Int: Int] = [:]
         var generated = generated
         attribution = RunAttribution()
+        defer { landLateHistory() }
         for (index, step) in steps.enumerated() {
             if case .settle = step {} else { attribution.record(step) }
+            switch step {
+            case .press, .commit: break
+            default: landLateHistory()
+            }
             switch step {
             case .setSelection(let range):
                 guard !swallowsSelect else { break }
@@ -494,6 +503,10 @@ private extension Sim {
                 applyReplace(typed)
 
             case .press(let chord, let count):
+                if undoesLate, [.undo, .redo].contains(chord) {
+                    lateHistory += repeatElement(chord, count: count)
+                    break
+                }
                 for _ in 0..<count where !ignoredChords.contains(chord) {
                     guard emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord),
                           press(reboundChords[chord] ?? chord) else {
@@ -501,6 +514,7 @@ private extension Sim {
                         break
                     }
                 }
+                landLateHistory()
 
             case .clipboardCut:
                 pasteboard = TextModel(text).substring(selection)
@@ -743,6 +757,11 @@ private extension Sim {
         }
         redoGroups = []
         coalescing = typing
+    }
+
+    mutating func landLateHistory() {
+        for chord in lateHistory where !ignoredChords.contains(chord) { _ = press(chord) }
+        lateHistory = []
     }
 
     /// ⌘Z: the newest group's text back, selected as `undoSelection` has this host select it.

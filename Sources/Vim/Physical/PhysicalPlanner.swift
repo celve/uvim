@@ -769,6 +769,11 @@ private extension PhysicalPlanner {
         context.applyEdit(range: landing.at..<landing.at, replacement: landing.removed)
         var steps: [PhysicalStep] = [.commit(.landedUndo)]
         guard let model = context.model else { return steps }
+        context.unknown.insert(.selection)
+        let restored = context.expectation(.exact(landing.target..<landing.target), profile: profile)
+        context.unknown.remove(.selection)
+        // Chrome can take a key sent right behind ⌘Z before the undo, so keys wait for the restored length.
+        let wait: [PhysicalStep] = restored.length == nil ? [] : [.softSettle(restored)]
         if model.lineStart(of: landing.target) > landing.at {
             let lines = landing.removed.utf16.filter { $0 == 10 }.count
             let column = model.graphemes(in: model.lineStart(of: landing.target)..<landing.target)
@@ -776,12 +781,12 @@ private extension PhysicalPlanner {
             if plain, profile.has(.writeSelection) {
                 // Reaching the text's end checks that this undo restored these lines alone before Vim's cursor is written.
                 context.selection = model.length..<model.length
-                steps += [end] + settle(context, profile: profile)
+                steps += wait + [end] + settle(context, profile: profile)
                 context.selection = landing.target..<landing.target
                 return steps + write(landing.target..<landing.target, context: context) + settle(context, profile: profile)
             }
             context.invalidate()
-            steps.append(end)
+            steps += wait + [end]
             guard profile.has(.documentEndKey) else {
                 return steps + (profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)] : [])
             }
@@ -791,11 +796,7 @@ private extension PhysicalPlanner {
             return column > 0 ? steps + run(.right, count: column, selecting: context.arrowsSelect, normalizing: false) : steps
         }
         // What a host selects after an undo varies, so the length alone tells whether the lines came back.
-        if plain, profile.has(.readCaret) {
-            context.unknown.insert(.selection)
-            steps.append(.settle(context.expectation(.exact(landing.target..<landing.target), profile: profile)))
-            context.unknown.remove(.selection)
-        }
+        steps += plain && profile.has(.readCaret) ? [.settle(restored)] : wait
         if plain, profile.has(.writeSelection) {
             context.selection = landing.target..<landing.target
             return steps + write(landing.target..<landing.target, context: context) + settle(context, profile: profile)

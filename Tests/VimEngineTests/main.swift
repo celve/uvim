@@ -7169,12 +7169,17 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
 var undone = VimState.initial
 undone.field.undoLandings = [VimState.UndoLanding(at: 7, removed: "\nthree", target: 8, after: "one\ntwo".hashValue)]
 precondition(physical("u", text: "one\ntwo", caret: 4, profile: keyProfile, state: undone).steps == [
-    .press(.undo, count: 1), .commit(.landedUndo), .press(.documentEnd, count: 1), .press(.paragraphStart, count: 1),
+    .press(.undo, count: 1),
+    .commit(.landedUndo),
+    .softSettle(Expectation(landing: nil, length: 13)),
+    .press(.documentEnd, count: 1),
+    .press(.paragraphStart, count: 1),
     .commit(.setCursor(nil)),
 ])
 precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile, state: undone).steps == [
     .press(.undo, count: 1),
     .commit(.landedUndo),
+    .softSettle(Expectation(landing: nil, length: 13)),
     .press(.down, count: 1),
     .settle(Expectation(selection: 13..<13, length: 13)),
     .setSelection(8..<8),
@@ -7196,12 +7201,14 @@ precondition(physical("u", text: "one\nthree", caret: 4, profile: axProfile, sta
 precondition(physical("u", text: "one\ntwX", caret: 4, profile: axProfile, state: undone).steps == [
     .press(.undo, count: 1), .commit(.setCursor(nil)),
 ])
-for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak), (true, .toBreak), (true, .restored)] {
+for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, .throughBreak, true), (true, .toBreak, true),
+                            (true, .restored, false)] {
     for profile in [axProfile, writeKeys, keyProfile, readProfile] {
         func host(_ text: String, _ caret: Int) -> Sim {
             var sim = Sim(text: text, caret: caret, profile: profile)
             sim.emulatesKeys = true
             sim.undoSelection = shape
+            sim.undoesLate = late
             if rich {
                 sim.emptyParagraphs = true
                 sim.readModel = .textContent
