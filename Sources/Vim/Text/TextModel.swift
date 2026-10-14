@@ -201,12 +201,14 @@ public struct TextModel: Equatable, Sendable {
     }
 
     /// From `o`'s line start to the break at `end`, the break taken whole or left with its invisible characters; lines that end
-    /// the text, removed, take the break above them instead, from the line above's visible end.
+    /// the text, removed, take the newline above them instead, in paragraphs with the line above's invisible characters, which
+    /// an editor that closes its lines with one (Lark's) deletes with the newline.
     private func lines(from o: Int, through end: Int, _ extent: LineExtent) -> Range<Int> {
         let start = lineStart(of: o)
         guard extent != .interior, end < length else {
             let last = lineEnd(of: lineStart(of: end))
-            return extent == .removed && start > 0 ? lineEnd(of: lineStart(of: start - 1))..<last : start..<last
+            guard extent == .removed, start > 0 else { return start..<last }
+            return (paragraphBreaks == nil ? start - 1 : lineEnd(of: lineStart(of: start - 1)))..<last
         }
         return start..<(end + 1)
     }

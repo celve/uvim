@@ -155,6 +155,9 @@ public struct Sim {
     /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
     public var pullsBackFromLineEnds = false
 
+    /// Lark's editor: ⌫ at a line's start deletes the line above's closing invisible characters with the `\n`, as its newline.
+    public var runsAreNewlines = false
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -623,6 +626,12 @@ private extension Sim {
             if crosses {
                 codeInside.toggle()
                 return true
+            }
+        }
+        if chord == .deleteBack, runsAreNewlines, selection.isEmpty, selection.lowerBound > 0 {
+            let model = TextModel(text)
+            if model.lineStart(of: selection.lowerBound) == selection.lowerBound {
+                selection = model.lineEnd(of: model.lineStart(of: selection.lowerBound - 1))..<selection.lowerBound
             }
         }
         let shown = chromium

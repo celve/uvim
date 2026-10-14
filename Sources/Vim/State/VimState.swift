@@ -209,7 +209,7 @@ public extension VimState {
     }
 
     /// A linewise delete as undoing it puts it back: `removed` at `at`, and Vim's cursor then on `target`, the first
-    /// restored line's first non-blank. `after` hashes the text the delete left, which `u` must find again.
+    /// restored line's first non-blank. `after` is the `fingerprint` of the text the delete left, which `u` must find again.
     struct UndoLanding: Equatable, Sendable {
         public let at: Int
         public let removed: String
@@ -221,6 +221,11 @@ public extension VimState {
             self.removed = removed
             self.target = target
             self.after = after
+        }
+
+        /// A text less its invisible characters, which hosts keep or drop beside a deleted newline as their editors do.
+        public static func fingerprint(_ text: String) -> Int {
+            text.filter { !TextModel.isInvisible($0) }.hashValue
         }
     }
 

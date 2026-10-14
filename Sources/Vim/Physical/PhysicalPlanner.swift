@@ -234,7 +234,7 @@ private extension PhysicalPlanner {
         var anchor: Int?
         var nextSlot = 0
 
-        /// The selection is lines that end the text, and a delete takes this line break above them too, with the line above's invisible run.
+        /// The selection is lines that end the text, and a delete takes this line break above them too.
         var breakAbove: Range<Int>?
 
         /// The plan deletes lines that end the text.
@@ -763,7 +763,7 @@ private extension PhysicalPlanner {
     static func lowerLandUndo(
         _ landing: VimState.UndoLanding, context: inout Context, profile: CapabilityProfile
     ) -> [PhysicalStep] {
-        guard let found = context.beforeUndo, found.hashValue == landing.after else { return [] }
+        guard let found = context.beforeUndo, VimState.UndoLanding.fingerprint(found) == landing.after else { return [] }
         let plain = context.breaks == nil
         context.text = found
         context.applyEdit(range: landing.at..<landing.at, replacement: landing.removed)
@@ -1956,8 +1956,9 @@ private extension PhysicalPlanner {
                 steps += settle(context, profile: profile, hard: writes, deleting: writes ? nil : held)
             }
             if let above = breakAbove {
-                // The line break above goes last, by ⌫ from a caret on the emptied lines, so nothing above them is ever selected.
-                steps.append(.press(.deleteBack, count: model.graphemes(in: above)))
+                // The line break above goes last, by one ⌫ from a caret on the emptied lines, so nothing above them is ever selected;
+                // Chrome makes a further ⌫ over an invisible character its own undo step.
+                steps.append(.press(.deleteBack, count: 1))
                 context.applyEdit(range: above, replacement: "")
                 steps += settle(context, profile: profile, hard: context.breaks == nil)
             }
@@ -1968,7 +1969,7 @@ private extension PhysicalPlanner {
                 let removed = (breakAbove?.lowerBound ?? selection.lowerBound)..<selection.upperBound
                 steps.append(.commit(.recordUndoLanding(VimState.UndoLanding(
                     at: removed.lowerBound, removed: model.substring(removed),
-                    target: model.firstNonBlank(inLineOf: selection.lowerBound), after: after.hashValue
+                    target: model.firstNonBlank(inLineOf: selection.lowerBound), after: VimState.UndoLanding.fingerprint(after)
                 ))))
             }
             guard ending else { return steps }

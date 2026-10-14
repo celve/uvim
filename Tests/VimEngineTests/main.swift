@@ -6672,7 +6672,8 @@ precondition(closedLines.lineEnd(of: 2) == 5 && closedLines.lineBreak(of: 2) == 
 precondition(closedLines.lineEnd(of: 6) == 6 && closedLines.visibleOffset(6) == 5 && closedLines.visibleOffset(4) == 4)
 precondition(closedLines.lines(from: 2, count: 1, extent: .whole) == 0..<7)
 precondition(closedLines.lines(from: 8, count: 1, extent: .whole) == 7..<12)
-precondition(closedLines.lines(from: 8, count: 1, extent: .removed) == 5..<12)
+precondition(closedLines.lines(from: 8, count: 1, extent: .removed) == 6..<12)
+precondition(TextModel("hello\u{200B}\nworld\u{200B}", paragraphBreaks: [6]).lines(from: 8, count: 1, extent: .removed) == 5..<12)
 precondition(closedLines.lines(from: 2, count: 2, extent: .interior) == 0..<12)
 precondition(closedLines.lineSpan(from: 8, to: 1, extent: .interior) == 0..<12)
 precondition(closedLines.destination(of: .lineEnd, from: 9, count: 1) == 12)
@@ -6879,6 +6880,7 @@ func larkSim(_ text: String, caret: Int) -> Sim {
     var host = blankSim([text], caret: caret, profile: larkProfile)
     host.swallowsReplace = true
     host.pullsBackFromLineEnds = true
+    host.runsAreNewlines = true
     return host
 }
 let zw = "\u{200B}"
@@ -6933,6 +6935,11 @@ for text in ["hello\(zw)", "hi there\(zw)\nworld\(zw)", "a\(zw)\u{2060}\nb c", z
         }
     }
 }
+var larkUndo = larkSim("one\(zw)\ntwo\(zw)", caret: 6)
+larkUndo.type("ddu")
+precondition(larkUndo.text == "one\(zw)\ntwo\(zw)" && larkUndo.caret >= 5, "\(larkUndo.caret)")
+larkUndo.type("dd")
+precondition(larkUndo.text == "one\(zw)" && larkUndo.settleFailures == 0, larkUndo.text.debugDescription)
 var larkYank = larkSim("one\(zw)\ntwo\(zw)", caret: 1)
 larkYank.type("yy")
 precondition(larkYank.state.session.register("\"") == .content(RegisterContent(text: "one\n", wise: .line)))
@@ -6945,9 +6952,10 @@ for (text, caret, keys, landing) in [
     precondition(lark.caret == landing && lark.settleFailures == 0 && lark.bells == 0, "\(keys) from \(caret) in \(text.debugDescription)")
 }
 
+// Outside paragraphs the line break above a last line goes alone, so the line above keeps its own run.
 for profile in [axProfile, readProfile, keyProfile] {
     for (caret, keys, after) in [
-        (2, "D", "he\(zw)\nworld\(zw)"), (8, "dd", "hello\(zw)"), (2, "dd", "world\(zw)"), (2, "J", "hello world\(zw)"),
+        (2, "D", "he\(zw)\nworld\(zw)"), (8, "dd", "hello\(zw)\(zw)"), (2, "dd", "world\(zw)"), (2, "J", "hello world\(zw)"),
     ] {
         var native = Sim(text: "hello\(zw)\nworld\(zw)", caret: caret, profile: profile)
         native.emulatesKeys = true
@@ -7262,7 +7270,7 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
         invisible.type("ddu")
         precondition(invisible.text == "one\(zw)\ntwo\(zw)" && invisible.caret >= 5, "ddu with line-end runs, \(context): \(invisible.caret)")
         invisible.type("dd")
-        precondition(invisible.text == "one\(zw)", "dduddd with line-end runs, \(context): \(invisible.text.debugDescription)")
+        precondition(invisible.text == "one\(zw)\(zw)", "dduddd with line-end runs, \(context): \(invisible.text.debugDescription)")
         var stale = host(lastThree, 10)
         stale.type("dd0x")
         stale.type("u")
