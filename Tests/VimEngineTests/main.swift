@@ -295,6 +295,17 @@ let blockProfile = CapabilityProfile(available: [
 let noInsertProfile = CapabilityProfile(available: [
     .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .wholeDocument,
 ])
+func deleting(_ expectation: Expectation, _ selection: Range<Int>, before length: Int?) -> Expectation {
+    var deleting = expectation
+    deleting.deletes = selection
+    deleting.lengthBefore = length
+    return deleting
+}
+func checkingWrite(_ expectation: Expectation) -> Expectation {
+    var checking = expectation
+    checking.checksWrite = true
+    return checking
+}
 
 func physical(
     _ keys: String,
@@ -334,7 +345,7 @@ precondition(ciwB.steps == [
     .press(.deleteBack, count: 1),
     // Blind DELETE is soft: a mismatch here must NOT abort the setMode below —
     // this is the ChatGPT "ciw won't enter insert" bug.
-    .softSettle(Expectation(selection: 4..<4, length: 10)),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)),
     .commit(.deleted(into: nil, content: .literal("hello"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(4)),
@@ -362,7 +373,7 @@ precondition(ciwNoInsert.steps == [
     .settle(Expectation(selection: 4..<9, length: 15)),
     .settle(Expectation(selection: 4..<9, length: 15, selectedText: "hello")),
     .press(.deleteBack, count: 1),
-    .softSettle(Expectation(selection: 4..<4, length: 10)),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)),
     .commit(.deleted(into: nil, content: .literal("hello"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(4)),
@@ -1247,7 +1258,7 @@ precondition(physical("ciw", text: "say hello world", selection: 5..<15, profile
     .settle(Expectation(selection: 4..<9, length: 15)),
     .settle(Expectation(selection: 4..<9, length: 15, selectedText: "hello")),
     .press(.deleteBack, count: 1),
-    .softSettle(Expectation(selection: 4..<4, length: 10)),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)),
     .commit(.deleted(into: nil, content: .literal("hello"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(4)),
@@ -1309,7 +1320,7 @@ precondition(PhysicalPlanner.plan(
     .settle(Expectation(selection: 1..<2, length: 3)),
     .settle(Expectation(selection: 1..<2, length: 3, selectedText: "b")),
     .press(.deleteBack, count: 1),
-    .softSettle(Expectation(selection: 1..<1, length: 2)),
+    .softSettle(deleting(Expectation(selection: 1..<1, length: 2), 1..<2, before: 3)),
     .commit(.deleted(into: nil, content: .literal("b"), wise: .character)),
     .commit(.setCursor(nil)),
 ])
@@ -1476,7 +1487,7 @@ let lastWordA = paragraphPlanning("ciw", text: threeParagraphs, caret: 7, profil
 precondition(lastWordA.plan.steps == [
     .setSelection(5..<7),
     .press(.selectLeft, count: 1),
-    .settle(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd)),
+    .settle(checkingWrite(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd))),
     .settle(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd, selectedText: "ef")),
     .replaceSelection(""),
     .settle(Expectation(selection: 5..<5, length: 9, edge: .paragraphEnd)),
@@ -1494,7 +1505,7 @@ precondition(paragraphPlanning("ciw", text: threeParagraphs, caret: 7, profile: 
     .settle(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd)),
     .settle(Expectation(selection: 5..<7, length: 11, edge: .paragraphEnd, selectedText: "ef")),
     .press(.deleteBack, count: 1),
-    .softSettle(Expectation(selection: 5..<5, length: 9, edge: .paragraphEnd)),
+    .softSettle(deleting(Expectation(selection: 5..<5, length: 9, edge: .paragraphEnd), 5..<7, before: 11)),
     .commit(.deleted(into: nil, content: .literal("ef"), wise: .character)),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(6)),
@@ -1503,7 +1514,7 @@ precondition(paragraphPlanning("A", text: threeParagraphs, caret: 0, profile: no
     .setSelection(2..<2),
     .press(.selectLeft, count: 1),
     .press(.left, count: 1),
-    .settle(Expectation(selection: 2..<2, length: 11, edge: .paragraphEnd)),
+    .settle(checkingWrite(Expectation(selection: 2..<2, length: 11, edge: .paragraphEnd))),
     .commit(.setMode(.insert)),
     .commit(.setInsertStart(2)),
 ])
@@ -1514,7 +1525,7 @@ precondition(PhysicalPlanner.planning(fromParagraphEnd, snapshot: FieldSnapshot(
     .setSelection(2..<2),
     .press(.left, count: 1),
     .press(.selectRight, count: 3),
-    .settle(Expectation(selection: 2..<4, length: 11)),
+    .settle(checkingWrite(Expectation(selection: 2..<4, length: 11))),
     .settle(Expectation(selection: 2..<4, length: 11, selectedText: "cd")),
     .replaceSelection(""),
     .settle(Expectation(selection: 2..<2, length: 8)),
@@ -3271,7 +3282,8 @@ precondition(Array(keyedDD.steps[0...6]) == [
     )),
     .press(Chord.paragraphEnd.shifted, count: 1),
     .settle(Expectation(
-        landing: .exact(4..<7), length: 13, blame: .init(capability: .lineEndKey, unmoved: [4..<4], offTarget: true)
+        landing: .exact(4..<7), length: 13,
+        blame: .init(capability: .lineEndKey, unmoved: [4..<4], selects: true, offTarget: true)
     )),
     .press(.selectRight, count: 1),
     .settle(Expectation(selection: 4..<8, length: 13)),
@@ -6549,6 +6561,105 @@ var stuck = chatBox("x", profile: removing([.insertText], from: chatProfile))
 stuck.ignoredChords = [.deleteBack]
 stuck.feed("<C-[>")
 stuck.type("x")
-precondition(stuck.text == "x" && stuck.softMisses == 1, "the page's own text still misses")
+precondition(stuck.text == "x" && stuck.settleFailures == 1 && stuck.softMisses == 0, "the page's own text still fails")
+
+// MARK: - Failed checks that blame nothing (LIN-1979)
+
+// `D` as logged in Lark: the write, the ⇧← that brings it back from the paragraph's end, and an end read two short.
+let loggedD = checkingWrite(Expectation(selection: 13..<18, length: 22, edge: .paragraphEnd))
+func corrected(_ expectation: Expectation, passed: Bool, read: Range<Int>) -> [Evidence] {
+    var run = RunAttribution()
+    run.record(.setSelection(13..<18))
+    run.record(.press(.selectLeft, count: 1))
+    run.record(.settle(expectation), passed: passed, selection: read, length: 22)
+    return run.evidence
+}
+precondition(corrected(loggedD, passed: false, read: 13..<16)
+             == [Evidence(.write(.writeSelection), .refutes, why: .moved, seen: .settle(2))])
+precondition(offAfter(corrected(loggedD, passed: false, read: 13..<16)) == Strikes.limit)
+precondition(corrected(loggedD, passed: true, read: 13..<18)
+             == [Evidence(.write(.writeSelection), .supports(nil), why: .settled, seen: .settle(2))])
+var unmarkedD = loggedD
+unmarkedD.checksWrite = false
+precondition(corrected(unmarkedD, passed: false, read: 13..<16).isEmpty)
+var settledBetween = RunAttribution()
+settledBetween.record(.setSelection(13..<18))
+settledBetween.record(.settle(Expectation(selection: 13..<18, length: 22)), passed: true, selection: 13..<18, length: 22)
+settledBetween.record(.press(.selectLeft, count: 1))
+settledBetween.record(.settle(loggedD), passed: false, selection: 13..<16, length: 22)
+precondition(settledBetween.evidence.count == 1 && settledBetween.evidence[0].outcome == .supports(nil),
+             "keys after a settle finish no write")
+precondition(dia1D.steps.allSatisfy { if case .settle(let expectation) = $0 { !expectation.checksWrite } else { true } },
+             "a folded write's keys leave the write unchecked")
+var ignoresWrites = chromiumSim("one two\nthree", caret: 4, profile: axProfile, markers: true, chromium: true)
+ignoresWrites.swallowsSelect = true
+for count in 1...Strikes.limit {
+    ignoresWrites.type("D")
+    let lesson = ignoresWrites.learner!.lessons.last!
+    precondition(lesson.refuted?.question == .write(.writeSelection) && lesson.refuted?.why == .moved && lesson.strikes == count)
+}
+precondition(!ignoresWrites.profile.has(.writeSelection) && ignoresWrites.text == "one two\nthree")
+
+let caretLeft = Expectation(landing: .exact(4..<7), blame: Expectation.Blame(
+    capability: .lineEndKey, unmoved: [4..<4], selects: true, exemptions: [.init(.paragraphLines, offTarget: true)]))
+precondition(judged(caretLeft, 7..<7) == key(.lineEndKey, .refutes, .leftCaret) && caretLeft.blamed(observed: 7..<7) == .lineEndKey)
+precondition(judged(caretLeft, 4..<4) == key(.lineEndKey, .refutes, .unmoved))
+precondition(judged(caretLeft, 4..<6) == key(.lineEndKey, .neutral, .paragraphLines), "a selection off target")
+precondition(Evidence.Why.leftCaret.rawValue == "left-caret")
+func selecting(_ plan: PhysicalPlan) -> [Bool] {
+    plan.steps.compactMap { if case .settle(let expectation) = $0 { expectation.blame?.selects } else { nil } }
+}
+precondition(selecting(webPhysical("dd", text: "ab\ncdef", caret: 4, profile: keyProfile, breaks: chromiumBreak)) == [false, true])
+precondition(selecting(webPhysical("dd", text: "ab\n\ncd", caret: 3, profile: keyProfile, breaks: ParagraphBreaks(offsets: [2, 3])))
+             == [false, false], "an empty line has nothing to select")
+precondition(selecting(PhysicalPlanner.plan(LogicalPlanner.plan(RawCommand("d0"), state: .initial), snapshot: FieldSnapshot(
+    capabilities: keyProfile, text: "ab\ncdef", selection: 2..<2, webContent: true, breaks: ParagraphBreaks(offsets: []),
+    caretInEmptyParagraph: true
+))) == [false], "from a caret in an empty paragraph")
+var proseMirror = chromiumSim("one\ntwo\nthree", caret: 5, profile: keyProfile, markers: true, chromium: true)
+proseMirror.reboundChords = [Chord.paragraphEnd.shifted: .paragraphEnd, Chord.paragraphStart.shifted: .paragraphStart]
+for count in 1...Strikes.limit {
+    proseMirror.type("dd")
+    let lesson = proseMirror.learner!.lessons.last!
+    precondition(lesson.refuted?.question == .key(.lineEndKey) && lesson.refuted?.why == .leftCaret && lesson.strikes == count)
+}
+precondition(!proseMirror.profile.has(.lineEndKey) && proseMirror.text == "one\ntwo\nthree")
+proseMirror.type("dd")
+precondition(proseMirror.text == "one\nthree" && proseMirror.settleFailures == Strikes.limit, "then counted ⇧→ select the line")
+
+let afterBackspace = deleting(Expectation(selection: 4..<4, length: 10), 4..<9, before: 15)
+precondition(afterBackspace.ignored(selection: 4..<9, length: 15) && afterBackspace.ignored(selection: 4..<9, length: nil))
+precondition(deleting(Expectation(selection: 4..<4), 4..<9, before: nil).ignored(selection: 4..<9, length: 14))
+precondition(!afterBackspace.ignored(selection: 4..<9, length: 14) && !afterBackspace.ignored(selection: 4..<8, length: 15))
+precondition(!afterBackspace.ignored(selection: 4..<4, length: 15) && !afterBackspace.ignored(selection: nil, length: 15))
+precondition(!deleting(Expectation(selection: 4..<4), 4..<4, before: 15).ignored(selection: 4..<4, length: 15),
+             "paragraph breaks alone read as a caret either way")
+precondition(!Expectation(selection: 4..<4, length: 10).ignored(selection: 4..<9, length: 15))
+precondition(!physical("ciw", text: "say hello world", caret: 6, profile: noCursorProfile).steps.contains {
+    if case .settle(let expectation) = $0 { expectation.deletes != nil } else { false }
+}, "a text write keeps its own rule")
+var ignoresBackspace = Sim(text: "one\ntwo", caret: 5, profile: readProfile)
+ignoresBackspace.ignoredChords = [.deleteBack]
+ignoresBackspace.type("dd")
+precondition(ignoresBackspace.text == "one\ntwo" && ignoresBackspace.settleFailures == 1 && ignoresBackspace.softMisses == 0)
+precondition(ignoresBackspace.state.session.register("\"") == nil && ignoresBackspace.selection.isEmpty)
+var changeIgnored = Sim(text: "one two", caret: 5, profile: readProfile)
+changeIgnored.ignoredChords = [.deleteBack]
+changeIgnored.type("ciwX")
+precondition(changeIgnored.text == "one X" && changeIgnored.settleFailures == 1, "typing replaces the operand left selected")
+var collapsedOnly = Sim(text: "one two", caret: 5, profile: readProfile)
+collapsedOnly.reboundChords = [.deleteBack: .left]
+collapsedOnly.type("x")
+precondition(collapsedOnly.text == "one two" && collapsedOnly.softMisses == 1 && collapsedOnly.settleFailures == 0)
+// A Visual selection deleted where the selected text cannot be read has no settle before its ⌫.
+let unreadText = CapabilityProfile(available: [.readText, .readLength, .readCaret, .wholeDocument])
+for (keys, after) in [("vld", "one\ntwo"), ("vlcX", "Xne\ntwo")] {
+    var visual = Sim(text: "one\ntwo", caret: 0, profile: unreadText)
+    visual.emulatesKeys = true
+    visual.ignoredChords = [.deleteBack]
+    visual.type(keys)
+    precondition(visual.text == after && visual.settleFailures == 1 && visual.softMisses == 0, keys)
+    precondition(visual.state.session.register("\"") == nil, keys)
+}
 
 print("Vim engine tests passed")
