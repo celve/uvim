@@ -7168,12 +7168,19 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
 // Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
 var undone = VimState.initial
 undone.field.undoLandings = [VimState.UndoLanding(at: 7, removed: "\nthree", target: 8, after: "one\ntwo".hashValue)]
-precondition(physical("u", text: "one\ntwo", caret: 4, profile: writeKeys, state: undone).steps == [
+precondition(physical("u", text: "one\ntwo", caret: 4, profile: keyProfile, state: undone).steps == [
     .press(.undo, count: 1), .commit(.landedUndo), .press(.documentEnd, count: 1), .press(.paragraphStart, count: 1),
     .commit(.setCursor(nil)),
 ])
 precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile, state: undone).steps == [
-    .press(.undo, count: 1), .commit(.landedUndo), .press(.down, count: 1), .commit(.setCursor(nil)),
+    .press(.undo, count: 1),
+    .commit(.landedUndo),
+    .press(.down, count: 1),
+    .settle(Expectation(selection: 13..<13, length: 13)),
+    .setSelection(8..<8),
+    .settle(Expectation(selection: 8..<8, length: 13)),
+    .setSelection(8..<9),
+    .commit(.setCursor(8..<9)),
 ])
 var undoneMiddle = VimState.initial
 undoneMiddle.field.undoLandings = [VimState.UndoLanding(at: 4, removed: "two\n", target: 4, after: "one\nthree".hashValue)]
@@ -7214,7 +7221,7 @@ for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak
             let model = TextModel(text)
             precondition(sim.text == text && sim.settleFailures == 0, "\(keys) in \(text.debugDescription), \(context)")
             // Vim's cursor where keys reach it from the text's end or a plain field's write puts it; elsewhere on a restored line.
-            if ending ? keysReach : profile.has(.writeSelection) && !rich || keysReach && model.firstNonBlank(inLineOf: restoredLine) == model.lineStart(of: restoredLine) {
+            if profile.has(.writeSelection) && !rich || keysReach && (ending || model.firstNonBlank(inLineOf: restoredLine) == model.lineStart(of: restoredLine)) {
                 precondition(sim.caret == restoredLine, "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
             } else {
                 precondition(sim.caret >= model.lineStart(of: restoredLine), "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")

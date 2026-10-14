@@ -772,11 +772,19 @@ private extension PhysicalPlanner {
         if model.lineStart(of: landing.target) > landing.at {
             let lines = landing.removed.utf16.filter { $0 == 10 }.count
             let column = model.graphemes(in: model.lineStart(of: landing.target)..<landing.target)
-            context.invalidate()
-            guard profile.has(.documentEndKey) else {
-                return steps + [.press(.down, count: lines)] + (profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)] : [])
+            let end: PhysicalStep = profile.has(.documentEndKey) ? .press(.documentEnd, count: 1) : .press(.down, count: lines)
+            if plain, profile.has(.writeSelection) {
+                // Reaching the text's end checks that this undo restored these lines alone before Vim's cursor is written.
+                context.selection = model.length..<model.length
+                steps += [end] + settle(context, profile: profile)
+                context.selection = landing.target..<landing.target
+                return steps + write(landing.target..<landing.target, context: context) + settle(context, profile: profile)
             }
-            steps.append(.press(.documentEnd, count: 1))
+            context.invalidate()
+            steps.append(end)
+            guard profile.has(.documentEndKey) else {
+                return steps + (profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)] : [])
+            }
             guard profile.has(.lineStartKey) else { return steps }
             steps += [.press(.paragraphStart, count: 1)]
                 + repeatElement([PhysicalStep.press(.left, count: 1), .press(.paragraphStart, count: 1)], count: lines - 1).joined()
