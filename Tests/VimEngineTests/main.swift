@@ -475,6 +475,7 @@ precondition(physical("dd", text: "one\ntwo", caret: 1, profile: axProfile).step
     .replaceSelection(""),
     .settle(Expectation(selection: 0..<0, length: 3)),
     .commit(.deleted(into: nil, content: .literal("one\n"), wise: .line)),
+    .commit(.setUndoLanding(VimState.UndoLanding(at: 0, removed: "one\n", target: 0, after: "two".hashValue))),
     .setSelection(0..<1),
     .commit(.setCursor(0..<1)),
 ])
@@ -3262,7 +3263,7 @@ func chords(_ plan: PhysicalPlan) -> [Chord] {
 }
 
 let keyedDD = physical("dd", text: "one\ntwo\nthree", caret: 5, profile: keyProfile)
-precondition(keyedDD.traceShape == "P!P!P!!P?CC")
+precondition(keyedDD.traceShape == "P!P!P!!P?CCC")
 precondition(Array(keyedDD.steps[0...6]) == [
     .press(.paragraphStart, count: 1),
     .settle(Expectation(
@@ -4258,7 +4259,7 @@ let e78j = e78Planning("j", caret: 205).plan
 precondition(e78j.traceShape == "P!P!C")
 precondition(settleTraces(e78j) == ["sel=210..210 len=218 edge=end", "sel=210..210 len=218 edge=start"], "c60: j stops on it")
 let e78dd = e78Planning("dd", caret: 205).plan
-precondition(e78dd.traceShape == "P!P!P!!P?CC")
+precondition(e78dd.traceShape == "P!P!P!!P?CCC")
 precondition(settleTraces(e78dd)[2] == "sel=203..210 len=218 edge=start", "c49: ⇧→ ends in the blank line")
 precondition(settleTraces(e78dd).last == "soft sel=203..203 len=nil", "and what AXValue shows after is a guess")
 
@@ -6574,6 +6575,7 @@ precondition(physical("dd", text: "one\ntwo", caret: 5, profile: axProfile).step
     .press(.deleteBack, count: 1),
     .settle(Expectation(selection: 3..<3, length: 3)),
     .commit(.deleted(into: nil, content: .literal("two\n"), wise: .line)),
+    .commit(.setUndoLanding(VimState.UndoLanding(at: 3, removed: "\ntwo", target: 4, after: "one".hashValue))),
     .setSelection(0..<0),
     .settle(Expectation(selection: 0..<0, length: 3)),
     .setSelection(0..<1),
@@ -6745,6 +6747,70 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
     deaf.ignoredChords = []
     deaf.type("dd")
     precondition(deaf.text == "one\ntwo")
+}
+
+// Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
+var undone = VimState.initial
+undone.field.undoLanding = VimState.UndoLanding(at: 7, removed: "\nthree", target: 8, after: "one\ntwo".hashValue)
+precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile, state: undone).steps == [
+    .press(.undo, count: 1),
+    .settle(Expectation(landing: nil, length: 13)),
+    .setSelection(8..<8),
+    .settle(Expectation(selection: 8..<8, length: 13)),
+    .setSelection(8..<9),
+    .commit(.setCursor(8..<9)),
+])
+precondition(physical("u", text: "one\ntwX", caret: 4, profile: axProfile, state: undone).steps == [
+    .press(.undo, count: 1), .commit(.setCursor(nil)),
+])
+for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak), (true, .toBreak), (true, .restored)] {
+    for profile in [axProfile, writeKeys, keyProfile, readProfile] {
+        func host(_ text: String, _ caret: Int) -> Sim {
+            var sim = Sim(text: text, caret: caret, profile: profile)
+            sim.emulatesKeys = true
+            sim.undoSelection = shape
+            if rich {
+                sim.emptyParagraphs = true
+                sim.readModel = .textContent
+                sim.webContent = true
+            }
+            return sim
+        }
+        let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys")"
+        let lines = profile.has(.lineStartKey) || profile.has(.writeSelection) && !rich
+        for (text, caret, keys, restoredLine, after) in [
+            (lastThree, 10, "ddu", 8, "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", 10, "one\ntwo"),
+            (lastThree, 5, "dGu", 4, "one\nthree"), (lastThree, 1, "jddu", 4, "one\nthree"), ("one\ntwo\n", 8, "ddu", 8, "one\ntwo"),
+            ("one\n\nthree", 4, "ddu", 4, "one\nthree"),
+        ] {
+            var sim = host(text, caret)
+            sim.type(keys)
+            let model = TextModel(text)
+            precondition(sim.text == text && sim.settleFailures == 0, "\(keys) in \(text.debugDescription), \(context)")
+            // Keys land on a restored line, its start where ⌃A takes them; a plain field's write on the first, at its first non-blank.
+            if profile.has(.writeSelection), !rich {
+                precondition(sim.caret == restoredLine, "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
+            } else {
+                precondition(sim.caret >= model.lineStart(of: restoredLine) && (!lines || sim.caret == model.lineStart(of: sim.caret)),
+                             "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
+            }
+            if keys.hasPrefix("dd") || keys.hasPrefix("j"), profile.has(.writeSelection) || profile.has(.lineStartKey) {
+                sim.type("dd")
+                precondition(sim.text == after, "\(keys)dd in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
+            }
+        }
+        var upward = host(lastThree, 10)
+        upward.type("dku")
+        upward.type("dd")
+        precondition(["one\nthree", "one\ntwo"].contains(upward.text), "dkudd, \(context): \(upward.text.debugDescription)")
+        var stale = host(lastThree, 10)
+        stale.type("dd0x")
+        stale.type("u")
+        precondition(stale.text == "one\ntwo", "\(context): \(stale.text.debugDescription)")
+        stale.type("u")
+        stale.type("dd")
+        precondition(stale.text == "one\ntwo" && stale.settleFailures == 0, "dd0xuudd, \(context): \(stale.text.debugDescription)")
+    }
 }
 
 print("Vim engine tests passed")

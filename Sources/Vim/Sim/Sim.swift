@@ -70,6 +70,17 @@ public struct Sim {
     /// The caret stopped between two lists, before the line after it.
     private var inListGap = false
 
+    /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
+    /// in Chrome's textarea, up to that break in Chrome's rich text.
+    public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak }
+    public var undoSelection = UndoSelection.restored
+
+    /// Each undo group's text before it and its first edit's offset, newest last, as the host's undo stack holds them.
+    private var undoGroups: [(before: String, at: Int, listLines: [ListLine]?, codeSpans: [Range<Int>])] = []
+
+    /// Hosts group consecutive typed edits for undo until the caret moves some other way.
+    private var coalescing = false
+
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
     private var snapshotting = false
@@ -467,6 +478,7 @@ private extension Sim {
                 atWrittenCodeEnd = codeInside
                 inListGap = false
                 backward = false
+                coalescing = false
 
             case .replaceSelection(let replacement):
                 if !swallowsReplace { applyReplace(replacement) }
@@ -553,6 +565,7 @@ private extension Sim {
     /// One key as `KeyModel` has Cocoa's bindings do it, which is how LIN-1533 measured Chromium's arrows; false for
     /// a key the model does not know.
     mutating func press(_ chord: Chord) -> Bool {
+        if chord == .undo { return undo() }
         if atChipStart, [Key.arrowLeft, .arrowRight].contains(chord.key), !chord.modifiers.contains(.option) {
             atChipStart = false
             return true
@@ -592,10 +605,12 @@ private extension Sim {
         guard keys.press(chord) else { return false }
         inListGap = keys.inGap
         if keys.text != text {
+            noteEdit(at: keys.selection.lowerBound, typing: true)
             let deleted = keys.selection.lowerBound..<(keys.selection.lowerBound + text.utf16.count - keys.text.utf16.count)
             listLines = listLines.map { ListLine.carried($0, in: text, replacing: deleted, with: "") }
             codeSpans = Self.carried(codeSpans, replacing: deleted, with: "", into: keys.text)
         }
+        if keys.text == text, keys.selection != selection { coalescing = false }
         text = keys.text
         selection = keys.selection
         backward = keys.focus < keys.anchor
@@ -690,7 +705,34 @@ private extension Sim {
         }
     }
 
+    mutating func noteEdit(at offset: Int, typing: Bool) {
+        if typing, coalescing, let last = undoGroups.indices.last {
+            undoGroups[last].at = min(undoGroups[last].at, offset)
+        } else {
+            undoGroups.append((before: text, at: offset, listLines: listLines, codeSpans: codeSpans))
+        }
+        coalescing = typing
+    }
+
+    /// ⌘Z: the newest group's text back, selected as `undoSelection` has this host select it.
+    mutating func undo() -> Bool {
+        guard let group = undoGroups.popLast() else { return true }
+        let restored = group.before.utf16.count - text.utf16.count
+        (text, listLines, codeSpans) = (group.before, group.listLines, group.codeSpans)
+        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
+        let put = TextModel(text).substring(group.at..<group.at + max(0, restored)).utf16
+        let toBreak = put.firstIndex(of: 10).map { put.distance(from: put.startIndex, to: $0) }
+        let length = switch undoSelection {
+        case .restored: put.count
+        case .throughBreak: toBreak.map { $0 + 1 } ?? put.count
+        case .toBreak: toBreak ?? put.count
+        }
+        selection = group.at..<group.at + length
+        return true
+    }
+
     mutating func applyReplace(_ replacement: String) {
+        noteEdit(at: selection.lowerBound, typing: false)
         listLines = listLines.map { ListLine.carried($0, in: text, replacing: selection, with: replacement) }
         let replaced = TextModel(text).replacing(selection, with: replacement)
         codeSpans = Self.carried(codeSpans, replacing: selection, with: replacement, into: replaced)

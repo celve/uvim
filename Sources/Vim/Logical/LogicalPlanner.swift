@@ -117,7 +117,9 @@ private extension LogicalPlanner {
 
         case .history(let action):
             switch action {
-            case .undo, .redo: return LogicalPlan(.history(action))
+            case .undo:
+                return LogicalPlan(steps: [.history(.undo)] + (state.field.undoLanding.map { [.landUndo($0)] } ?? []))
+            case .redo: return LogicalPlan(.history(action))
             case .olderTextState, .newerTextState: return .bell(.unsupported(source))
             }
 

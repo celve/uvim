@@ -37,6 +37,8 @@ public enum VimReducer {
             next.field.marks[name] = point
         case .setCursor(let range):
             next.field.cursor = range
+        case .setUndoLanding(let landing):
+            next.field.undoLanding = landing
         case .deleted(let register, let payload, let wise):
             guard let slot = resolve(payload, wise: wise, captures: captures) else { break }
             switch slot {

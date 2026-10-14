@@ -216,6 +216,9 @@ private extension PhysicalPlanner {
         /// The plan deletes lines that end the text.
         var collapsesToEnd = false
 
+        /// The text `u` found, which `landUndo` checks after the undo.
+        var beforeUndo: String?
+
         /// Non-nil when the snapshot's selection is our drawn block cursor:
         /// the gap to collapse to before the plan acts.
         var cursorCollapse: Int?
@@ -704,6 +707,7 @@ private extension PhysicalPlanner {
         case .setMark(let name):
             return lowerSetMark(name, context: &context)
         case .history(let action):
+            context.beforeUndo = context.text
             context.invalidate()
             switch action {
             case .undo: return [.press(.undo, count: 1)]
@@ -712,11 +716,40 @@ private extension PhysicalPlanner {
             }
         case .commit(let effect):
             return [.commit(effect)]
+        case .landUndo(let landing):
+            return lowerLandUndo(landing, context: &context, profile: profile)
         case .renderCursor:
             return lowerRenderCursor(context: &context, profile: profile)
         case .bell:
             return [.bell]
         }
+    }
+
+    /// Vim's cursor on the first line an undone linewise delete restored: a write puts it there in plain text; keys collapse
+    /// toward the restored lines, which hosts leave selected from the line break above them, through it, or from their start.
+    static func lowerLandUndo(
+        _ landing: VimState.UndoLanding, context: inout Context, profile: CapabilityProfile
+    ) -> [PhysicalStep] {
+        guard let found = context.beforeUndo, found.hashValue == landing.after else { return [] }
+        let plain = context.breaks == nil
+        context.text = found
+        context.applyEdit(range: landing.at..<landing.at, replacement: landing.removed)
+        var steps: [PhysicalStep] = []
+        // What a host selects after an undo varies, so the length alone tells whether the lines came back.
+        if plain, profile.has(.readCaret) {
+            context.unknown.insert(.selection)
+            steps.append(.settle(context.expectation(.exact(landing.target..<landing.target), profile: profile)))
+            context.unknown.remove(.selection)
+        }
+        if plain, profile.has(.writeSelection) {
+            context.selection = landing.target..<landing.target
+            return steps + write(landing.target..<landing.target, context: context) + settle(context, profile: profile)
+        }
+        // Undone paragraphs are no surer a prediction than typed ones, so rich text lands by keys too; → ← keeps a caret put.
+        let above = context.model.map { $0.lineStart(of: landing.target) > landing.at } ?? false
+        context.invalidate()
+        return steps + (above ? [.press(.right, count: 1)] : [.press(.right, count: 1), .press(.left, count: 1)])
+            + (profile.has(.lineStartKey) ? [.press(.paragraphStart, count: 1)] : [])
     }
 
     /// Best-effort by design: a cursor that cannot be drawn — or may not be
@@ -1842,6 +1875,13 @@ private extension PhysicalPlanner {
             }
             if !blackhole {
                 steps.append(.commit(.deleted(into: register, content: .literal(content), wise: wise)))
+            }
+            if wise == .line, let after = context.text {
+                let removed = ending ? selection.lowerBound - 1..<selection.upperBound : selection
+                steps.append(.commit(.setUndoLanding(VimState.UndoLanding(
+                    at: removed.lowerBound, removed: model.substring(removed),
+                    target: model.firstNonBlank(inLineOf: selection.lowerBound), after: after.hashValue
+                ))))
             }
             guard ending else { return steps }
             context.endingLines = false
