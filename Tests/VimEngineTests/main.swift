@@ -7180,15 +7180,17 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
 
 // Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
 let restored = TextModel("one\ntwo\nthree")
-precondition(restored.restoredLines(from: "one\ntwo", near: 7) == 8..<13 && restored.restoredLines(from: "one\nthree", near: 4) == 4..<8)
-precondition(restored.restoredLines(from: "two\nthree", near: 0) == 0..<4 && restored.restoredLines(from: "", near: 0) == 0..<13)
+precondition(restored.restoredLines(from: "one\ntwo", near: 7)?.lines == 8..<13 && restored.restoredLines(from: "one\nthree", near: 4)?.lines == 4..<8)
+precondition(restored.restoredLines(from: "two\nthree", near: 0)?.lines == 0..<4 && restored.restoredLines(from: "", near: 0)?.lines == 0..<13)
+precondition(restored.restoredLines(from: "one\ntwo", near: 7)?.ending == true && restored.restoredLines(from: "one\nthree", near: 4)?.ending == false)
 precondition(restored.restoredLines(from: "one\ntwo three", near: 7) == nil, "J's undo")
 precondition(restored.restoredLines(from: "one\nwo\nthree", near: 4) == nil && restored.restoredLines(from: "one\ntwo\nthree", near: 0) == nil)
-precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 4) == 4..<8)
-precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 8) == 8..<12)
-precondition(TextModel("\n\n").restoredLines(from: "\n", near: 0) == 0..<1 && TextModel("\n\n").restoredLines(from: "", near: 0) == 1..<2)
-precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", near: 9) == 10..<10, "the break above an empty last line")
-precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", near: 9) == 10..<15)
+precondition(TextModel("one\nnew\ntwo").restoredLines(from: "one\nTWO", near: 4) == nil, "lines back, and a line changed")
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 4)?.lines == 4..<8)
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 8)?.lines == 8..<12)
+precondition(TextModel("\n\n").restoredLines(from: "\n", near: 0)?.lines == 0..<1 && TextModel("\n\n").restoredLines(from: "", near: 0)?.lines == 1..<2)
+precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", near: 9)?.lines == 10..<10, "the break above an empty last line")
+precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", near: 9)?.lines == 10..<15)
 precondition(PhysicalPlanner.undoLanding(
     before: "one\ntwo", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
 )?.steps == [
