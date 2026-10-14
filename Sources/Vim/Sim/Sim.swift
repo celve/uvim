@@ -368,6 +368,11 @@ private extension Sim {
         }
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
+        // A late ⌘Z has landed by now, as the Controller waits for it to.
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text,
+           let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()) {
+            executeAside(landing)
+        }
     }
 
     /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.

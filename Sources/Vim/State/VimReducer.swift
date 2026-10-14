@@ -37,13 +37,6 @@ public enum VimReducer {
             next.field.marks[name] = point
         case .setCursor(let range):
             next.field.cursor = range
-        case .recordUndoLanding(let landing):
-            next.field.undoLandings = Array((next.field.undoLandings + [landing]).suffix(100))
-            next.field.redoLandings = []
-        case .landedUndo:
-            if let landing = next.field.undoLandings.popLast() { next.field.redoLandings.append(landing) }
-        case .redidUndo:
-            if let landing = next.field.redoLandings.popLast() { next.field.undoLandings.append(landing) }
         case .deleted(let register, let payload, let wise):
             guard let slot = resolve(payload, wise: wise, captures: captures) else { break }
             switch slot {

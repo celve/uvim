@@ -430,6 +430,27 @@ public final class Controller {
         }
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
+            landUndo(from: text, reading: reading, on: binding, seq: commandSeq)
+        }
+    }
+
+    /// Puts the cursor on the lines `u` put back, as Vim does, from the field as the undo left it.
+    private func landUndo(from before: String, reading: Snapshotter.Reading, on binding: FocusTracker.Binding, seq: UInt64) {
+        // Chrome can apply ⌘Z after reads that follow it (LIN-1980).
+        var waited = 0
+        while waited < 25, AX.value(of: binding.element) == reading.value {
+            Thread.sleep(forTimeInterval: 0.01)
+            waited += 1
+        }
+        let after = Snapshotter.snapshot(
+            of: binding.element, capabilities: binding.capabilities, anchor: nil, cursor: state.field.cursor,
+            chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
+            sampling: sampling, known: emptyParagraphs, knownUnreachable: unreachable
+        ).snapshot
+        guard let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after) else { return }
+        let landed = executor.execute(landing, on: binding.element, state: &state, paragraphs: after.breaks != nil)
+        Diag.undoLanding(tracker.epoch, seq, plan: landing, executed: landed, evidence: executor.lastRun)
     }
 
     /// Fold a just-ended Insert session into the dot memories.

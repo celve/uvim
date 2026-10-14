@@ -206,7 +206,7 @@ A subset of Vim. In a field uvim can read and write, as in most native Mac apps:
 | **Search** | `/` or `?`, the text, ⏎; then `n` `N`. Literal text, case-sensitive, wrapping around the end |
 | **Marks** | `m` and a letter; then `'` or `` ` `` and the letter to jump back, in the same field, until its text is edited |
 | **Operators** | `d` `c` `y` `g~` `gu` `gU` with a motion, `iw` `aw` `iW` `aW`, or doubled (`dd` `cc` `yy` `g~~` `guu` `gUU`), but not yet with `gg`, `g_` or a search as the motion |
-| **Edit** | `x` `X` `s` `S` `r` `C` `D` `Y` `J` `gJ` `~` `p` `P` `.`, and `u` and ⌃R, which press the app's own ⌘Z and ⇧⌘Z |
+| **Edit** | `x` `X` `s` `S` `r` `C` `D` `Y` `J` `gJ` `~` `p` `P` `.`, and `u` and ⌃R, which press the app's own ⌘Z and ⇧⌘Z; after `u` puts lines back, the cursor goes to the first of them, as in Vim |
 | **Insert** | `i` `a` `I` `A` `o` `O` `gi` |
 | **Visual** | `v`, motions or `iw` `aw`, then `d` `c` `y` `~` `u` `U` `>` `<`. A selection can end one character short of Vim's, and `V` and ⌃V select characters, not lines or blocks |
 | **Counts** | Most commands take one, up to 999,999,999 as in Vim. `gg` `G` `C` `D`, the Insert commands, `u` and ⌃R ignore it, and `r` `p` `P` beep above 1,000 |

@@ -486,7 +486,6 @@ precondition(physical("dd", text: "one\ntwo", caret: 1, profile: axProfile).step
     .replaceSelection(""),
     .settle(Expectation(selection: 0..<0, length: 3)),
     .commit(.deleted(into: nil, content: .literal("one\n"), wise: .line)),
-    .commit(.recordUndoLanding(VimState.UndoLanding(at: 0, removed: "one\n", target: 0, after: "two".hashValue))),
     .setSelection(0..<1),
     .commit(.setCursor(0..<1)),
 ])
@@ -3274,7 +3273,7 @@ func chords(_ plan: PhysicalPlan) -> [Chord] {
 }
 
 let keyedDD = physical("dd", text: "one\ntwo\nthree", caret: 5, profile: keyProfile)
-precondition(keyedDD.traceShape == "P!P!P!!P?CCC")
+precondition(keyedDD.traceShape == "P!P!P!!P?CC")
 precondition(Array(keyedDD.steps[0...6]) == [
     .press(.paragraphStart, count: 1),
     .settle(Expectation(
@@ -4271,7 +4270,7 @@ let e78j = e78Planning("j", caret: 205).plan
 precondition(e78j.traceShape == "P!P!C")
 precondition(settleTraces(e78j) == ["sel=210..210 len=218 edge=end", "sel=210..210 len=218 edge=start"], "c60: j stops on it")
 let e78dd = e78Planning("dd", caret: 205).plan
-precondition(e78dd.traceShape == "P!P!P!!P?CCC")
+precondition(e78dd.traceShape == "P!P!P!!P?CC")
 precondition(settleTraces(e78dd)[2] == "sel=203..210 len=218 edge=start", "c49: ⇧→ ends in the blank line")
 precondition(settleTraces(e78dd).last == "soft sel=203..203 len=nil", "and what AXValue shows after is a guess")
 
@@ -6940,6 +6939,13 @@ larkUndo.type("ddu")
 precondition(larkUndo.text == "one\(zw)\ntwo\(zw)" && larkUndo.caret >= 5, "\(larkUndo.caret)")
 larkUndo.type("dd")
 precondition(larkUndo.text == "one\(zw)" && larkUndo.settleFailures == 0, larkUndo.text.debugDescription)
+// With keys alone, → cannot cross Lark's newline from the line above, so `u` lands from the text's end.
+var larkKeys = blankSim(["one\(zw)", "two\(zw)", "three\(zw)"], caret: 12, profile: keyProfile)
+larkKeys.webContent = true
+larkKeys.pullsBackFromLineEnds = true
+larkKeys.runsAreNewlines = true
+larkKeys.type("ddu")
+precondition(larkKeys.text == "one\(zw)\ntwo\(zw)\nthree\(zw)" && larkKeys.caret == 10, "\(larkKeys.caret)")
 var larkYank = larkSim("one\(zw)\ntwo\(zw)", caret: 1)
 larkYank.type("yy")
 precondition(larkYank.state.session.register("\"") == .content(RegisterContent(text: "one\n", wise: .line)))
@@ -6988,7 +6994,6 @@ precondition(physical("dd", text: "one\ntwo", caret: 5, profile: axProfile).step
     .press(.deleteBack, count: 1),
     .settle(Expectation(selection: 3..<3, length: 3)),
     .commit(.deleted(into: nil, content: .literal("two\n"), wise: .line)),
-    .commit(.recordUndoLanding(VimState.UndoLanding(at: 3, removed: "\ntwo", target: 4, after: "one".hashValue))),
     .setSelection(0..<0),
     .settle(Expectation(selection: 0..<0, length: 3)),
     .setSelection(0..<1),
@@ -7174,41 +7179,28 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
 }
 
 // Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
-var undone = VimState.initial
-undone.field.undoLandings = [VimState.UndoLanding(at: 7, removed: "\nthree", target: 8, after: "one\ntwo".hashValue)]
-precondition(physical("u", text: "one\ntwo", caret: 4, profile: keyProfile, state: undone).steps == [
-    .press(.undo, count: 1),
-    .commit(.landedUndo),
-    .softSettle(Expectation(landing: nil, length: 13)),
-    .press(.documentEnd, count: 1),
-    .press(.paragraphStart, count: 1),
-    .commit(.setCursor(nil)),
-])
-precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile, state: undone).steps == [
-    .press(.undo, count: 1),
-    .commit(.landedUndo),
-    .softSettle(Expectation(landing: nil, length: 13)),
-    .press(.down, count: 1),
-    .settle(Expectation(selection: 13..<13, length: 13)),
+let restored = TextModel("one\ntwo\nthree")
+precondition(restored.restoredLines(from: "one\ntwo", near: 7) == 8..<13 && restored.restoredLines(from: "one\nthree", near: 4) == 4..<8)
+precondition(restored.restoredLines(from: "two\nthree", near: 0) == 0..<4 && restored.restoredLines(from: "", near: 0) == 0..<13)
+precondition(restored.restoredLines(from: "one\ntwo three", near: 7) == nil, "J's undo")
+precondition(restored.restoredLines(from: "one\nwo\nthree", near: 4) == nil && restored.restoredLines(from: "one\ntwo\nthree", near: 0) == nil)
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 4) == 4..<8)
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 8) == 8..<12)
+precondition(TextModel("\n\n").restoredLines(from: "\n", near: 0) == 0..<1 && TextModel("\n\n").restoredLines(from: "", near: 0) == 1..<2)
+precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", near: 9) == 10..<10, "the break above an empty last line")
+precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", near: 9) == 10..<15)
+precondition(PhysicalPlanner.undoLanding(
+    before: "one\ntwo", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
+)?.steps == [
     .setSelection(8..<8),
     .settle(Expectation(selection: 8..<8, length: 13)),
     .setSelection(8..<9),
     .commit(.setCursor(8..<9)),
 ])
-var undoneMiddle = VimState.initial
-undoneMiddle.field.undoLandings = [VimState.UndoLanding(at: 4, removed: "two\n", target: 4, after: "one\nthree".hashValue)]
-precondition(physical("u", text: "one\nthree", caret: 4, profile: axProfile, state: undoneMiddle).steps == [
-    .press(.undo, count: 1),
-    .commit(.landedUndo),
-    .settle(Expectation(landing: nil, length: 13)),
-    .setSelection(4..<4),
-    .settle(Expectation(selection: 4..<4, length: 13)),
-    .setSelection(4..<5),
-    .commit(.setCursor(4..<5)),
-])
-precondition(physical("u", text: "one\ntwX", caret: 4, profile: axProfile, state: undone).steps == [
-    .press(.undo, count: 1), .commit(.setCursor(nil)),
-])
+precondition(PhysicalPlanner.undoLanding(
+    before: "one\ntwo\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<8)
+) == nil)
+precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile).steps == [.press(.undo, count: 1), .commit(.setCursor(nil))])
 for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, .throughBreak, true), (true, .toBreak, true),
                             (true, .restored, false)] {
     for profile in [axProfile, writeKeys, keyProfile, readProfile] {
@@ -7279,7 +7271,50 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
         stale.type("u")
         stale.type("dd")
         precondition(stale.text == "one\ntwo" && stale.settleFailures == 0, "dd0xuudd, \(context): \(stale.text.debugDescription)")
+        var obsolete = host("one\ntwo\nthree\nfour", 14)
+        obsolete.type("dddduxu")
+        obsolete.feed("<C-r>")
+        obsolete.type("uudd")
+        precondition(obsolete.text == "one\ntwo\nthree", "ddddux⌃Ruudd, \(context): \(obsolete.text.debugDescription)")
+        var ignored = host(lastThree, 10)
+        ignored.type("dd")
+        ignored.ignoredChords = [.undo]
+        ignored.type("u")
+        ignored.ignoredChords = []
+        ignored.type("udd")
+        precondition(ignored.text == "one\ntwo", "dd, u ignored, udd, \(context): \(ignored.text.debugDescription)")
+        // Hosts that group the last two Backspaces restore both empty lines at the first `u`, so the second restores the last.
+        var coalesced = host("one\ntwo\n\n\n", 10)
+        coalesced.type("ddkjdddduu")
+        let undone = coalesced.text
+        coalesced.type("iX")
+        coalesced.feed("<Esc>")
+        precondition(coalesced.text == undone + "X", "ddkjdddduuiX, \(context): \(coalesced.text.debugDescription)")
     }
+}
+let hundred = (0...101).map { "line-\($0)" }
+for profile in [axProfile, keyProfile] {
+    var deep = Sim(text: hundred.joined(separator: "\n"), caret: 0, profile: profile)
+    deep.emulatesKeys = true
+    deep.type("G")
+    for _ in 0...100 { deep.type("dd") }
+    for _ in 0...100 { deep.type("u") }
+    deep.type("dd")
+    precondition(deep.text == hundred.dropLast().joined(separator: "\n"), deep.text.suffix(30).debugDescription)
+}
+for (rich, profile) in [(true, adding([.lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey], to: readProfile)),
+                        (false, adding([.writeSelection, .insertText, .drawCursor], to: readProfile))] {
+    var unmeasured = Sim(text: "one\ntwo\nthree\nfour", caret: 14, profile: removing([.readLength], from: profile))
+    unmeasured.emulatesKeys = true
+    unmeasured.undoesLate = true
+    unmeasured.undoSelection = rich ? .toBreak : .restored
+    if rich {
+        unmeasured.emptyParagraphs = true
+        unmeasured.readModel = .textContent
+        unmeasured.webContent = true
+    }
+    unmeasured.type("ddudd")
+    precondition(unmeasured.text == "one\ntwo\nthree", "without readLength, rich=\(rich): \(unmeasured.text.debugDescription)")
 }
 
 print("Vim engine tests passed")

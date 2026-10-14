@@ -67,9 +67,6 @@ public enum LogicalStep: Equatable, Sendable {
     /// Undo/redo, delegated to the host's undo stack.
     case history(HistoryAction)
 
-    /// After an undo, the cursor where Vim's goes on lines a linewise delete removed, if the field read as it left them.
-    case landUndo(VimState.UndoLanding)
-
     /// Commit a state effect. Logical plans carry the memory commits only
     /// raw intent can decide (`fx` writes the find memory, `;` must not);
     /// the physical planner passes them through 1:1 and adds its own
@@ -218,7 +215,6 @@ extension LogicalStep {
         case .setMode(let mode): return "setMode(\(mode.traceName))"
         case .setMark: return "setMark"
         case .history: return "history"
-        case .landUndo: return "landUndo"
         case .commit: return "commit"
         case .renderCursor: return "renderCursor"
         case .bell(let reason): return "bell(\(reason.traceName))"

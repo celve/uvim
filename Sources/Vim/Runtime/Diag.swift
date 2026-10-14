@@ -126,6 +126,16 @@ enum Diag {
         }
     }
 
+    /// The cursor move after `u`, joined to its command's line.
+    static func undoLanding(_ epoch: UInt64, _ seq: UInt64, plan: PhysicalPlan, executed: Bool, evidence: Executor.RunEvidence) {
+        let tag = "e\(epoch).c\(seq)"
+        let line = "\(tag) undo landing steps=\(plan.traceShape) ok=\(executed ? 1 : 0)"
+        if executed { cmd.debug("\(line, privacy: .public)") } else { cmd.log("\(line, privacy: .public)") }
+        for failure in evidence.settleFailures {
+            settleFailed(tag, failure)
+        }
+    }
+
     /// Includes the soft ones, which ring nothing, abort nothing and were invisible.
     private static func settleFailed(_ tag: String, _ failure: Executor.SettleFailure) {
         var line = "\(tag) \(failure.hard ? "FAIL" : "soft")@\(failure.index)"

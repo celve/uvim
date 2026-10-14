@@ -213,6 +213,35 @@ public struct TextModel: Equatable, Sendable {
         return start..<(end + 1)
     }
 
+    /// The lines `before` lacks, where this text is `before` with whole lines put back as an undone linewise delete leaves it, placed
+    /// nearest `near`, then as the break above lines ending the text, then as lines with their own breaks; nil where they differ otherwise.
+    public func restoredLines(from before: String, near: Int?) -> Range<Int>? {
+        let after = Array(text.utf16), old = Array(before.utf16)
+        let added = after.count - old.count
+        guard added > 0 else { return nil }
+        var latest = 0
+        while latest < old.count, after[latest] == old[latest] { latest += 1 }
+        guard after[(latest + added)...].elementsEqual(old[latest...]) else { return nil }
+        var earliest = latest
+        while earliest > 0, after[earliest - 1] == after[earliest - 1 + added] { earliest -= 1 }
+        var best: (rank: [Int], lines: Range<Int>)?
+        for at in earliest...latest {
+            let end = at + added
+            var found: [(form: Int, lines: Range<Int>)] = []
+            if after[at] == 10, lineEnd(of: end) == end {
+                found.append((lineBreak(of: end) == length ? 0 : 2, (at + 1)..<end))
+            }
+            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count {
+                found.append((1, at..<end))
+            }
+            for (form, lines) in found {
+                let rank = [near.map { abs($0 - at) } ?? latest - at, form, -at]
+                if best.map({ rank.lexicographicallyPrecedes($0.rank) }) ?? true { best = (rank, lines) }
+            }
+        }
+        return best?.lines
+    }
+
     /// `j`/`k`: move whole lines, preserving the grapheme column, clamped to
     /// the target line's end.
     public func verticalMove(from o: Int, by delta: Int, firstNonBlank fnb: Bool) -> Int {

@@ -109,27 +109,18 @@ public extension VimState {
         /// end-of-line).
         public var cursor: Range<Int>?
 
-        /// Where linewise deletes' lines go back when `u` undoes them, newest last, as the field's undo stack holds them;
-        /// `u` moves the one it lands on to `redoLandings`, and ⌃R moves it back.
-        public var undoLandings: [UndoLanding]
-        public var redoLandings: [UndoLanding]
-
         public init(
             mode: Mode = .normal,
             insertStart: Int? = nil,
             marks: [Character: MarkPoint] = [:],
             lastVisual: VisualMemory? = nil,
-            cursor: Range<Int>? = nil,
-            undoLandings: [UndoLanding] = [],
-            redoLandings: [UndoLanding] = []
+            cursor: Range<Int>? = nil
         ) {
             self.mode = mode
             self.insertStart = insertStart
             self.marks = marks
             self.lastVisual = lastVisual
             self.cursor = cursor
-            self.undoLandings = undoLandings
-            self.redoLandings = redoLandings
         }
     }
 }
@@ -205,27 +196,6 @@ public extension VimState {
             self.character = character
             self.direction = direction
             self.beforeCharacter = beforeCharacter
-        }
-    }
-
-    /// A linewise delete as undoing it puts it back: `removed` at `at`, and Vim's cursor then on `target`, the first
-    /// restored line's first non-blank. `after` is the `fingerprint` of the text the delete left, which `u` must find again.
-    struct UndoLanding: Equatable, Sendable {
-        public let at: Int
-        public let removed: String
-        public let target: Int
-        public let after: Int
-
-        public init(at: Int, removed: String, target: Int, after: Int) {
-            self.at = at
-            self.removed = removed
-            self.target = target
-            self.after = after
-        }
-
-        /// A text less its invisible characters, which hosts keep or drop beside a deleted newline as their editors do.
-        public static func fingerprint(_ text: String) -> Int {
-            text.filter { !TextModel.isInvisible($0) }.hashValue
         }
     }
 
