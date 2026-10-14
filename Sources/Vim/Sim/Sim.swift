@@ -491,7 +491,7 @@ private extension Sim {
 
             case .press(let chord, let count):
                 for _ in 0..<count where !ignoredChords.contains(chord) {
-                    guard emulatesKeys || Self.countedKeys.contains(chord), press(reboundChords[chord] ?? chord) else {
+                    guard emulatesKeys || Self.countedKeys.contains(chord) || chord == .undo, press(reboundChords[chord] ?? chord) else {
                         unsupportedSteps += 1
                         break
                     }
