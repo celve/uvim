@@ -41,6 +41,7 @@ public struct Evidence: Equatable, Sendable {
         case unchanged
         case unmoved
         case leftSelection = "left-selection"
+        case leftCaret = "left-caret"
         case tooLong = "too-long"
         case offTarget = "off-target"
         case paragraphLines = "paragraph-lines"

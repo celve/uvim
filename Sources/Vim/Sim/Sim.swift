@@ -144,6 +144,9 @@ public struct Sim {
     /// Keys this field treats as others, as an app that rebinds ⌃A to select-all would.
     public var reboundChords: [Chord: Chord] = [:]
 
+    /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
+    public var pullsBackFromLineEnds = false
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -310,7 +313,7 @@ private extension Sim {
         // The Snapshotter waits for the caret drawn at a code span's end that ends a paragraph, whose `<br>` moves offsets.
         let caret = selection.lowerBound
         if drawsLate, built.snapshot.breaks != nil, !built.snapshot.holdsDrawnCaret, selection.isEmpty,
-           isCodeEdge(caret, start: false), TextModel(text).lineEnd(of: caret) == caret {
+           isCodeEdge(caret, start: false), TextModel(text).lineBreak(of: caret) == caret {
             (built, observed, value) = snapshot()
         }
         foundEmptyParagraphs = built.memo
@@ -471,7 +474,7 @@ private extension Sim {
                 let atoms = chromium.atoms
                 if !range.isEmpty, atoms.contains(lower) { lower += 1 }
                 if !range.isEmpty, atoms.contains(upper) { upper += 1 }
-                selection = min(lower, upper)..<max(lower, upper)
+                selection = pulledBack(min(lower, upper)..<max(lower, upper))
                 atChipStart = selection.isEmpty && atoms.contains(lower)
                 // Measured, a caret written at a code span's start lands outside it, one at its end inside.
                 codeInside = selection.isEmpty && isCodeEdge(lower, start: false) && !isCodeEdge(lower, start: true)
@@ -522,11 +525,14 @@ private extension Sim {
                 if let slot = expectation.keeps, let caret = observed?.lowerBound { kept[slot] = caret }
 
             case .softSettle(let expectation):
-                // Best-effort barrier: never aborts. In this synchronous host
-                // there is nothing async to wait for, and the blind step it
-                // follows may be an unsupported no-op, so the field need not match
-                // the prediction — which is exactly why a soft settle must proceed.
-                let passed = settles(expectation, generated: generated).passed
+                // A miss proceeds, as the blind step before it may be an unsupported no-op here, but an ignored ⌫ fails.
+                let (passed, observed, length) = settles(expectation, generated: generated)
+                let read = Self.asRead(expectation, observed, length)
+                if !passed, expectation.ignored(selection: read.selection, length: read.length) {
+                    settleFailures += 1
+                    drainResidency(of: steps, after: index)
+                    return index
+                }
                 if !passed { softMisses += 1 }
                 generated = !passed || expectation.metByEmptyField
 
@@ -538,6 +544,13 @@ private extension Sim {
             }
         }
         return nil
+    }
+
+    /// A settle's read as the executor's: an attribute its expectation does not ask for is not read.
+    static func asRead(
+        _ expectation: Expectation, _ selection: Range<Int>?, _ length: Int
+    ) -> (selection: Range<Int>?, length: Int?) {
+        (expectation.landing == nil ? nil : selection, expectation.length == nil ? nil : length)
     }
 
     /// In `reads`' coordinates a boundary offset lands at the next paragraph's start.
@@ -612,7 +625,7 @@ private extension Sim {
         }
         if keys.text == text, keys.selection != selection { coalescing = false }
         text = keys.text
-        selection = keys.selection
+        selection = pulledBack(keys.selection)
         backward = keys.focus < keys.anchor
         // Measured: → and ⌥→ arrive outside a start and inside an end, ← the reverse but at a line start, the rest outside.
         let arrived = selection.isEmpty ? selection.lowerBound : -1
@@ -624,6 +637,17 @@ private extension Sim {
         }
         if inListGap { codeInside = false }
         return true
+    }
+
+    func pulledBack(_ range: Range<Int>) -> Range<Int> {
+        guard pullsBackFromLineEnds else { return range }
+        let model = TextModel(text)
+        func pulled(_ offset: Int) -> Int {
+            guard offset > 0, model.lineBreak(of: offset) == offset else { return offset }
+            let before = model.advance(offset, byGraphemes: -1)
+            return TextModel.isInvisible(Character(model.substring(before..<offset))) ? before : offset
+        }
+        return pulled(range.lowerBound)..<pulled(range.upperBound)
     }
 
     func isCodeEdge(_ offset: Int, start: Bool) -> Bool {
@@ -1238,6 +1262,6 @@ struct ChromiumParagraphs {
     func inEmptyParagraph(_ selection: Range<Int>) -> Bool {
         guard selection.isEmpty else { return false }
         let model = TextModel(text)
-        return model.lineStart(of: selection.lowerBound) == model.lineEnd(of: selection.lowerBound)
+        return model.lineStart(of: selection.lowerBound) == model.lineBreak(of: selection.lowerBound)
     }
 }

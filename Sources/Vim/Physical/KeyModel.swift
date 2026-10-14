@@ -49,7 +49,7 @@ struct KeyModel {
             moved = shift ? atoms.map { $0 + 1 }.filter { start < $0 && $0 <= from }.max() ?? start : start
         case .paragraphEnd:
             let from = shift ? focus : selection.upperBound
-            let end = model.lineEnd(of: from)
+            let end = model.lineBreak(of: from)
             moved = shift ? atoms.filter { from <= $0 && $0 < end }.min() ?? end : end
         case .documentStart:
             moved = 0
@@ -73,7 +73,7 @@ struct KeyModel {
             moved = wordStart(from: shift ? focus : selection.lowerBound, in: model)
         case .paragraphForward where !shift:
             let from = selection.upperBound
-            moved = from < model.length ? model.lineEnd(of: model.advance(from, byGraphemes: 1)) : from
+            moved = from < model.length ? model.lineBreak(of: model.advance(from, byGraphemes: 1)) : from
         case .paragraphBackward where !shift:
             let from = selection.lowerBound
             moved = from > 0 ? model.lineStart(of: model.advance(from, byGraphemes: -1)) : 0
@@ -99,7 +99,7 @@ struct KeyModel {
             let stops = gaps.contains(focus + 1) && focus < model.length && model.graphemes(from: focus, toLineEnd: true, atMost: 0) == 0
             return stops ? focus : nil
         case .down:
-            let end = model.lineEnd(of: focus)
+            let end = model.lineBreak(of: focus)
             return end < model.length && gaps.contains(end + 1) && row(of: focus, in: model).end == end ? end : nil
         case .up:
             let start = model.lineStart(of: focus)
@@ -152,7 +152,7 @@ struct KeyModel {
     /// The visual row holding `offset`: a line's graphemes cut every `wrap`, the caret on a cut starting the next row.
     private func row(of offset: Int, in model: TextModel) -> (start: Int, end: Int, index: Int, column: Int) {
         let line = model.lineStart(of: offset)
-        let end = model.lineEnd(of: offset)
+        let end = model.lineBreak(of: offset)
         let width = wrap ?? Int.max
         let count = model.graphemes(in: line..<end)
         let column = model.graphemes(in: line..<offset)
@@ -165,7 +165,7 @@ struct KeyModel {
     /// ↓ and ↑: the same visual column one row over; past the first or last row, the text's end.
     private func vertical(from offset: Int, by delta: Int, in model: TextModel) -> Int {
         let here = row(of: offset, in: model)
-        let rowEnd = model.lineEnd(of: offset)
+        let rowEnd = model.lineBreak(of: offset)
         let target: Int
         if delta > 0 {
             if here.end < rowEnd {
