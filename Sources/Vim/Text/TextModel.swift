@@ -214,7 +214,7 @@ public struct TextModel: Equatable, Sendable {
     }
 
     /// The lines `before` lacks, where this text is `before` with whole lines put back as an undone linewise delete leaves it, placed
-    /// nearest `near`, then as the break above lines ending the text (`ending`), then as lines with their own breaks; nil otherwise.
+    /// nearest `near`, then as the break above lines ending the text (`ending`), then as lines with their own breaks beside `near`.
     public func restoredLines(from before: String, near: Int?) -> (lines: Range<Int>, ending: Bool)? {
         let after = Array(text.utf16), old = Array(before.utf16)
         let added = after.count - old.count
@@ -228,10 +228,12 @@ public struct TextModel: Equatable, Sendable {
         for at in earliest...latest {
             let end = at + added
             var found: [(form: Int, lines: Range<Int>)] = []
-            if after[at] == 10, lineEnd(of: end) == end {
-                found.append((lineBreak(of: end) == length ? 0 : 2, (at + 1)..<end))
+            if after[at] == 10, lineEnd(of: end) == end, lineBreak(of: end) == length {
+                found.append((0, (at + 1)..<end))
             }
-            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count {
+            // An app selects an undone join from the joined line's start, away from the break it put back; one off is a paragraph's side.
+            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count,
+               near.map({ abs($0 - at) <= 1 }) ?? true {
                 found.append((1, at..<end))
             }
             for (form, lines) in found {

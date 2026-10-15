@@ -7191,14 +7191,32 @@ precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nth
 precondition(TextModel("\n\n").restoredLines(from: "\n", near: 0)?.lines == 0..<1 && TextModel("\n\n").restoredLines(from: "", near: 0)?.lines == 1..<2)
 precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", near: 9)?.lines == 10..<10, "the break above an empty last line")
 precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", near: 9)?.lines == 10..<15)
-precondition(PhysicalPlanner.undoLanding(
+precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", near: 0) == nil, "gJ's undo")
+precondition(TextModel("one \n\ntwo").restoredLines(from: "one \ntwo", near: 0) == nil, "J's undo after a trailing space")
+precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", near: 4)?.lines == 4..<5)
+precondition(restored.restoredLines(from: "one\nthree", near: 3)?.lines == 4..<8, "a caret read on the paragraph above's side")
+let landing = PhysicalPlanner.undoLanding(
     before: "one\ntwo", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
-)?.steps == [
+)
+precondition(landing?.ending == 8..<13 && landing?.plan.steps == [
     .setSelection(8..<8),
     .settle(Expectation(selection: 8..<8, length: 13)),
     .setSelection(8..<9),
     .commit(.setCursor(8..<9)),
 ])
+let fallen = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [
+    .press(.right, count: 1), .softSettle(Expectation(selection: 13..<13, length: 13)),
+])
+precondition(PhysicalPlanner.undoFallback(
+    onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 3..<3, length: 13)
+)?.steps == [.press(.right, count: 5), .softSettle(Expectation(selection: 8..<8, length: 13))])
+precondition(PhysicalPlanner.undoFallback(
+    onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 9..<9, length: 13)
+) == nil)
+precondition(PhysicalPlanner.undoFallback(
+    onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", length: 13)
+)?.steps == [.press(.right, count: 1)])
 precondition(PhysicalPlanner.undoLanding(
     before: "one\ntwo\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<8)
 ) == nil)
@@ -7234,6 +7252,26 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
                 precondition(sim.text == after, "\(keys)dd in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
             }
         }
+        let faults: [(inout Sim) -> Void] = [
+            { $0.swallowsSelect = true }, { $0.ignoredChords = [.documentEnd] }, { $0.ignoredChords = [.down] },
+        ]
+        for fault in faults {
+            for (caret, keys, after) in [(10, "dd", "one\ntwo"), (10, "dk", "one\nthree"), (0, "jdd", "one\nthree")] {
+                var failing = host(lastThree, caret)
+                failing.type(keys)
+                fault(&failing)
+                failing.type("u")
+                (failing.swallowsSelect, failing.ignoredChords) = (false, [])
+                failing.type("dd")
+                precondition(failing.text == after || keys == "dk" && failing.text == "one\ntwo",
+                             "\(keys)udd with a failed landing, \(context): \(failing.text.debugDescription)")
+            }
+        }
+        for (text, keys) in [("one\n\ntwo", "gJudd"), ("one \n\ntwo", "Judd")] {
+            var join = host(text, 0)
+            join.type(keys)
+            precondition(join.text == "\ntwo", "\(keys) in \(text.debugDescription), \(context): \(join.text.debugDescription)")
+        }
         var upward = host(lastThree, 10)
         upward.type("dku")
         upward.type("dd")
@@ -7268,7 +7306,7 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
         stale.type("dd")
         precondition(stale.text == "one\ntwo" && stale.settleFailures == 0, "dd0xuudd, \(context): \(stale.text.debugDescription)")
         var obsolete = host("one\ntwo\nthree\nfour", 14)
-        obsolete.type("dddduxu")
+        obsolete.type("ddddux")
         obsolete.feed("<C-r>")
         obsolete.type("uudd")
         precondition(obsolete.text == "one\ntwo\nthree", "ddddux⌃Ruudd, \(context): \(obsolete.text.debugDescription)")

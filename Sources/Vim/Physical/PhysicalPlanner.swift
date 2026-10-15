@@ -177,7 +177,8 @@ public enum PhysicalPlanner {
 
 public extension PhysicalPlanner {
     /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
-    static func undoLanding(before: String, snapshot: FieldSnapshot) -> PhysicalPlan? {
+    /// `ending` holds those lines where they end the text, for `undoFallback`.
+    static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?)? {
         guard let model = Context(snapshot: snapshot).model,
               let (lines, ending) = model.restoredLines(from: before, near: snapshot.selection?.lowerBound) else { return nil }
         var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
@@ -188,7 +189,22 @@ public extension PhysicalPlanner {
                 + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
         }
         let landing = planning(LogicalPlan(steps: moves + [.renderCursor]), snapshot: snapshot)
-        return landing.rejection == nil ? landing.plan : nil
+        return landing.rejection == nil ? (landing.plan, ending ? lines : nil) : nil
+    }
+
+    /// After a landing that failed, → onto restored `lines` that end the text from wherever the app or the landing left the cursor above.
+    static func undoFallback(onto lines: Range<Int>, snapshot: FieldSnapshot) -> PhysicalPlan? {
+        // An unread or non-empty selection is most likely the app's own, from the break above: → collapses it to its end.
+        guard let selection = snapshot.selection else { return PhysicalPlan(.press(.right, count: 1)) }
+        var context = Context(snapshot: snapshot)
+        var count = 1
+        if selection.isEmpty {
+            guard let model = context.model, selection.lowerBound < lines.lowerBound else { return nil }
+            count = model.graphemes(in: selection.lowerBound..<lines.lowerBound)
+        }
+        let caret = selection.isEmpty ? lines.lowerBound : selection.upperBound
+        context.selection = caret..<caret
+        return PhysicalPlan(steps: [.press(.right, count: count)] + settle(context, profile: snapshot.capabilities, hard: false))
     }
 
     /// Collapses a selection an aborted run left to its start, or `toEnd` its end, in field offsets; `snapshot` reads the field as it is.

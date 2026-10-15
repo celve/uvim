@@ -370,8 +370,10 @@ private extension Sim {
         recordChange(for: command, from: before, mutated: physical.mutatesText)
         // A late ⌘Z has landed by now, as the Controller waits for it to.
         if logical.steps.contains(.history(.undo)), let text = snapshot.text,
-           let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()) {
-            executeAside(landing)
+           let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()),
+           !executeAside(landing.plan), let lines = landing.ending,
+           let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside()) {
+            executeAside(fallback)
         }
     }
 

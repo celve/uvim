@@ -443,17 +443,30 @@ public final class Controller {
             Thread.sleep(forTimeInterval: 0.01)
             waited += 1
         }
-        let after = Snapshotter.snapshot(
+        let after = read(binding)
+        let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after)
+        let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+        let evidence = executor.lastRun
+        // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
+        var fallback: PhysicalPlan?
+        if landed == false, let lines = landing?.ending {
+            let field = read(binding)
+            fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field)
+            if let fallback { executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil) }
+        }
+        Diag.undoLanding(
+            tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
+            lengths: (before.utf16.count, after.text?.utf16.count), fallback: fallback
+        )
+    }
+
+    /// The field as a command's snapshot reads it, outside a command.
+    private func read(_ binding: FocusTracker.Binding) -> FieldSnapshot {
+        Snapshotter.snapshot(
             of: binding.element, capabilities: binding.capabilities, anchor: nil, cursor: state.field.cursor,
             chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
             sampling: sampling, known: emptyParagraphs, knownUnreachable: unreachable
         ).snapshot
-        let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after)
-        let landed = landing.map { executor.execute($0, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
-        Diag.undoLanding(
-            tracker.epoch, seq, plan: landing, executed: landed ?? true, evidence: executor.lastRun, waited: waited,
-            lengths: (before.utf16.count, after.text?.utf16.count)
-        )
     }
 
     /// Fold a just-ended Insert session into the dot memories.
