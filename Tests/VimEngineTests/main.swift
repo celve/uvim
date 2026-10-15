@@ -6947,7 +6947,7 @@ larkKeys.runsAreNewlines = true
 larkKeys.type("ddu")
 precondition(larkKeys.text == "one\(zw)\ntwo\(zw)\nthree\(zw)" && larkKeys.caret == 10, "\(larkKeys.caret)")
 // A landing that fails in Lark's field still ends on the restored line, since ↓ crosses the break → cannot.
-// With keys alone the fallback's ⌘↓, or its ⇧↓ and ⌘→, reach the restored line where ↓ (or ↓ and ⌘↓) were ignored.
+// With keys alone the fallback's ⌘↓, or its ⇧↓ and →, reach the restored line where ↓ (or ↓ and ⌘↓) were ignored.
 let larkFaults: [(UndoSelection: Sim.UndoSelection, late: Bool, profile: CapabilityProfile?, ignored: Set<Chord>)] = [
     (.toBreak, true, nil, []), (.toBreak, false, nil, []), (.restored, true, nil, []), (.toBreak, true, keyProfile, [.documentEnd]),
     (.toBreak, true, readProfile, [.down]), (.restored, false, readProfile, [.down, .selectDown]),
@@ -6965,7 +6965,8 @@ for (shape, late, profile, ignored) in larkFaults {
         (lark.swallowsSelect, lark.ignoredChords) = (false, [])
         lark.type(probe)
         lark.feed("<Esc>")
-        let landed = probe == "dd" ? lark.text == "one\(zw)\ntwo\(zw)" : lark.text.hasPrefix("one\(zw)\ntwo\(zw)\nthree") && lark.text.contains("X")
+        let rows = lark.text.split(separator: "\n", omittingEmptySubsequences: false)
+        let landed = probe == "dd" ? lark.text == "one\(zw)\ntwo\(zw)" : rows.count == 3 && rows[0] == "one\(zw)" && rows[1] == "two\(zw)" && rows[2].contains("X")
         precondition(landed, "\(shape) late=\(late) ignored=\(ignored) u, then \(probe): \(lark.text.debugDescription)")
     }
 }
@@ -7248,7 +7249,7 @@ precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove)?.ste
     .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), onLines,
 ])
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove, selecting: true)?.steps == [
-    .press(.selectDown, count: 2), .press(.lineEnd, count: 1), onLines,
+    .press(.selectDown, count: 2), .press(.right, count: 1), onLines,
 ])
 precondition(PhysicalPlanner.undoFallback(
     onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 9..<9, length: 13)

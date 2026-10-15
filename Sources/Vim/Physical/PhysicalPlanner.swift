@@ -193,7 +193,7 @@ public extension PhysicalPlanner {
     }
 
     /// After a failed landing, keys onto restored `lines` that end the text from where the cursor stopped above: ↓, → and ⌘↓, or,
-    /// `selecting`, ⇧↓ and ⌘→ for a cursor those left above (each crosses the break where others cannot); nil once it is on them.
+    /// `selecting`, ⇧↓ and → for a cursor those left above (each crosses the break where others cannot); nil once it is on them.
     static func undoFallback(onto lines: Range<Int>, snapshot: FieldSnapshot, selecting: Bool = false) -> PhysicalPlan? {
         var context = Context(snapshot: snapshot)
         guard let model = context.model else { return nil }
@@ -202,7 +202,8 @@ public extension PhysicalPlanner {
         let above = snapshot.selection?.lowerBound ?? lines.lowerBound - 1
         let down = max(1, model.newlineCount(in: above..<lines.lowerBound))
         // ⌘↓ is the chord the blind lane presses for `G` unlearned; the settle, and the selecting stage after it, check what it did.
-        let keys: [PhysicalStep] = selecting ? [.press(.selectDown, count: down), .press(.lineEnd, count: 1)] : [
+        // → collapses a selection at its end, where AppKit's ⌘→ took an undo's selection to its first line's end, the line above.
+        let keys: [PhysicalStep] = selecting ? [.press(.selectDown, count: down), .press(.right, count: 1)] : [
             .press(.down, count: down),
             .press(.right, count: max(1, model.graphemes(in: above..<lines.lowerBound))),
             .press(.documentEnd, count: 1),
