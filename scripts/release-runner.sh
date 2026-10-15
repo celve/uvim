@@ -54,8 +54,11 @@ keys)
     fi
     ;;
 cleanup)
-    [ ! -e "$keychain" ] || security delete-keychain "$keychain"
-    rm -f "$RUNNER_TEMP/release.p12" "$RUNNER_TEMP/sparkle-key" "$RUNNER_TEMP/notary.p8"
+    # Every deletion is attempted, and any that fails still fails the step.
+    failed=0
+    [ ! -e "$keychain" ] || security delete-keychain "$keychain" || failed=1
+    rm -f "$RUNNER_TEMP/release.p12" "$RUNNER_TEMP/sparkle-key" "$RUNNER_TEMP/notary.p8" || failed=1
+    exit "$failed"
     ;;
 *) die "usage: release-runner.sh tools | identity PATTERN | keys | cleanup" ;;
 esac
