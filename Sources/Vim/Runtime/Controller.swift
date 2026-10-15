@@ -407,6 +407,7 @@ public final class Controller {
                         read.range, misread: true, toEnd: planned.collapsesToEnd, profile: binding.capabilities
                     )
                     executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
+                    _ = becomesCaret(binding.element, paragraphs: paragraphs)
                 }
                 if state.field.mode.isInserting {
                     executor.commit(.setMode(before.nonVisual), state: &state)
@@ -587,22 +588,20 @@ public final class Controller {
         let collapse = PhysicalPlanner.collapse(
             read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, toEnd: toEnd, profile: binding.capabilities
         )
-        let writes = binding.capabilities.has(.writeSelection)
         let settled = executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
         // Keys the field ignored fail their settle, and a write lane then writes the start as it was read.
-        if !settled, writes {
+        if !settled, binding.capabilities.has(.writeSelection) {
             let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, profile: binding.capabilities)
             executor.execute(asRead, on: binding.element, state: &state, paragraphs: paragraphs)
         }
-        // Keys can still be landing when their settle passes, so where they replaced a write the caret is waited for.
-        let keyed = settled && writes && !collapse.steps.allSatisfy(PhysicalPlanner.isWrite)
         // The write that stranded this may be the one that lies, so confirm.
-        return becomesCaret(binding.element, paragraphs: paragraphs, within: keyed ? 0.1 : 0)
+        return becomesCaret(binding.element, paragraphs: paragraphs)
     }
 
-    /// Whether the selection reads as a caret, by `wait` seconds from now: Chromium shows a key milliseconds after it is sent.
-    private func becomesCaret(_ element: AXUIElement, paragraphs: Bool, within wait: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(wait)
+    /// Whether the selection reads as a caret within 100 ms: Chromium shows a write or key milliseconds after it is sent,
+    /// and a command typed ahead would plan on the selection still shown (LIN-1931).
+    private func becomesCaret(_ element: AXUIElement, paragraphs: Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(0.1)
         while let read = selection(of: element, paragraphs: paragraphs) {
             if read.caret || Date() >= deadline { return read.caret }
             Thread.sleep(forTimeInterval: 0.003)

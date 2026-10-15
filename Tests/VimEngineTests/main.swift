@@ -1420,6 +1420,23 @@ precondition(strandedPlan(4..<6, .end, text: "• ab\n• cd", breaks: listItems
     .settle(Expectation(selection: 4..<4, edge: .paragraphEnd))
 ))
 
+// LIN-1931: a command typed behind a failed one can read the selection that one left while its collapse write is on the way.
+for profile in [axProfile, removing([.insertText], from: axProfile)] {
+    for (keys, selection) in [("dd", 0..<4), ("dd", 4..<8), ("x", 4..<5), ("diw", 4..<7)] {
+        precondition(physical(keys, text: "one\ntwo\nthree", selection: selection, profile: profile)
+                     == physical(keys, text: "one\ntwo\nthree", caret: selection.lowerBound, profile: profile),
+                     "\(keys) makes its selection again, as from a caret at its start")
+    }
+}
+precondition(checkedText(physical("x", text: "one two", selection: 4..<5, profile: readProfile).steps.first) == "t",
+             "a lane that cannot write takes the selection as it reads, as before")
+var visualWords = VimState.initial
+visualWords.field.mode = .visual(VimState.VisualContext(kind: .character, anchor: 4))
+precondition(PhysicalPlanner.plan(
+    LogicalPlanner.plan(RawCommand("iw"), state: visualWords),
+    snapshot: FieldSnapshot(capabilities: axProfile, text: "one two three", selection: 4..<7, anchor: 4)
+).steps.isEmpty, "Visual's own selection is the word already")
+
 precondition(paras.replacing(1..<4, with: "") == ParagraphBreaks(offsets: [2]))
 precondition(paras.replacing(0..<0, with: "x\n") == ParagraphBreaks(offsets: [1, 4, 7]))
 precondition(paras.replacing(5..<6, with: " ") == ParagraphBreaks(offsets: [2]), "J joins the paragraphs")

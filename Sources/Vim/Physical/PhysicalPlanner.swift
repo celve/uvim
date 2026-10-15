@@ -1751,7 +1751,9 @@ private extension PhysicalPlanner {
         context.selectionOpaque = false
         // Pressed even where nothing is to select, so a settle checks the caret the command starts from.
         return nativeSelect(target, range: range, context: &context, profile: profile).or {
-            if range == context.selection {
+            // Outside Visual, a write lane's selection can be a failed command's whose collapse write has yet to show (LIN-1931).
+            let collapsing = profile.has(.writeSelection) && context.anchor == nil && !range.isEmpty
+            if range == context.selection, !collapsing {
                 return .steps([])   // already selected (Visual operators)
             }
             if profile.has(.writeSelection) {
