@@ -192,19 +192,23 @@ public extension PhysicalPlanner {
         return landing.rejection == nil ? (landing.plan, ending ? lines : nil) : nil
     }
 
-    /// After a landing that failed, → onto restored `lines` that end the text from wherever the app or the landing left the cursor above.
+    /// After a landing that failed, keys onto restored `lines` that end the text from wherever the app or the landing left the cursor above:
+    /// ↓ crosses a break Lark pulls a caret back over, → covers a ↓ the field ignored, and ⌘↓ covers both.
     static func undoFallback(onto lines: Range<Int>, snapshot: FieldSnapshot) -> PhysicalPlan? {
-        // An unread or non-empty selection is most likely the app's own, from the break above: → collapses it to its end.
-        guard let selection = snapshot.selection else { return PhysicalPlan(.press(.right, count: 1)) }
         var context = Context(snapshot: snapshot)
-        var count = 1
-        if selection.isEmpty {
-            guard let model = context.model, selection.lowerBound < lines.lowerBound else { return nil }
-            count = model.graphemes(in: selection.lowerBound..<lines.lowerBound)
-        }
-        let caret = selection.isEmpty ? lines.lowerBound : selection.upperBound
-        context.selection = caret..<caret
-        return PhysicalPlan(steps: [.press(.right, count: count)] + settle(context, profile: snapshot.capabilities, hard: false))
+        guard let model = context.model else { return nil }
+        if let selection = snapshot.selection, selection.lowerBound >= lines.lowerBound { return nil }
+        let above = snapshot.selection?.lowerBound ?? lines.lowerBound - 1
+        var keys: [PhysicalStep] = [
+            .press(.down, count: max(1, model.newlineCount(in: above..<lines.lowerBound))),
+            .press(.right, count: max(1, model.graphemes(in: above..<lines.lowerBound))),
+        ]
+        if snapshot.capabilities.has(.documentEndKey) { keys.append(.press(.documentEnd, count: 1)) }
+        guard snapshot.selection != nil else { return PhysicalPlan(steps: keys) }
+        context.selection = model.length..<model.length
+        return PhysicalPlan(steps: keys + settle(
+            context, profile: snapshot.capabilities, hard: false, landing: .caretWithin(lines.lowerBound...model.length)
+        ))
     }
 
     /// Collapses a selection an aborted run left to its start, or `toEnd` its end, in field offsets; `snapshot` reads the field as it is.

@@ -228,15 +228,16 @@ public struct TextModel: Equatable, Sendable {
         var best: (rank: [Int], lines: Range<Int>, ending: Bool)?
         for at in earliest...latest {
             let end = at + added
-            // An app selects what its undo put back from where it starts, so an undone join, selected from the joined line's start,
-            // put back no lines; one off is a paragraph's side.
-            let beside = near.map { abs($0 - at) <= 1 } ?? true
+            // An app selects what its undo put back from where that starts, give or take a paragraph's side or a line's invisible end,
+            // so an undone join, selected from the joined line's start, put back no lines.
+            func beside(_ low: Int) -> Bool { near.map { (low...(at + 1)).contains($0) } ?? true }
             var found: [(form: Int, lines: Range<Int>)] = []
             // A caret may sit anywhere after an undo, and lines that end the text must still be found from it.
-            if after[at] == 10, lineEnd(of: end) == end, lineBreak(of: end) == length, beside || selection?.isEmpty == true {
+            if after[at] == 10, lineEnd(of: end) == end, lineBreak(of: end) == length,
+               selection?.isEmpty == true || beside(lineEnd(of: lineStart(of: at))) {
                 found.append((0, (at + 1)..<end))
             }
-            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count, beside {
+            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count, beside(at - 1) {
                 found.append((1, at..<end))
             }
             for (form, lines) in found {
