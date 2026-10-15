@@ -7228,6 +7228,9 @@ precondition(landing?.ending == 8..<13 && landing?.plan.steps == [
     .setSelection(8..<9),
     .commit(.setCursor(8..<9)),
 ])
+precondition(PhysicalPlanner.undoLanding(
+    before: "one\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 4..<8, length: 13)
+)?.ending == nil, "a middle line restored")
 let onLines = PhysicalStep.softSettle(Expectation(landing: .caretWithin(8...13), length: 13))
 let fallen = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [.press(.down, count: 1), .press(.right, count: 1), onLines])
