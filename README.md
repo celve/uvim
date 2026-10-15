@@ -666,9 +666,9 @@ downloaded in a browser, and macOS opens it after its one confirmation for an ap
 
 Then, with `MARKETING_VERSION` bumped on `main`, `gh workflow run release.yml` stages the release as
 the run's `dist` artifact and `gh workflow run release.yml -f mode=publish` publishes it, each once
-approved on the run's page. The build runs without the secrets, and each later step holds only those
-it needs; the job deletes its keychain and key files when it ends and stops after an hour, and a run
-that stops before the release is created publishes nothing.
+approved on the run's page. The build has the certificate in its keychain but no other secret, and
+each later step holds only those it needs; the job deletes its keychain and key files when it ends and
+stops after an hour, and a run that stops before the release is created publishes nothing.
 [`release-rehearsal.yml`](.github/workflows/release-rehearsal.yml) runs the same steps short of
 notarizing, with a throwaway identity and no secrets, on pull requests that change them.
 

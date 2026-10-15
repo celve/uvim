@@ -42,6 +42,7 @@ identity)
     [ "$(grep -cE "\"$pattern\"" <<<"$found")" = 1 ] ||
         die "no one valid identity matches '$pattern', so the build would not sign (is Apple's intermediate" \
             "missing?): $(security find-identity -p codesigning "$keychain")"
+    grep -E "\"$pattern\"" <<<"$found"
     ;;
 keys)
     [ -n "${SPARKLE_PRIVATE_KEY:-}" ] || die "the release environment has no SPARKLE_PRIVATE_KEY secret"
