@@ -1,8 +1,10 @@
 #!/bin/bash
 # Notarizes a built app and stages its Sparkle update in DIR; `publish` also releases it on GitHub.
-# Notarizes with the keychain profile $NOTARY_PROFILE names, made by `notarytool store-credentials`.
+# Notarizes with the keychain profile $NOTARY_PROFILE names, made by `notarytool store-credentials`, or where
+# no keychain holds one, with the API key file $NOTARY_KEY or the Apple ID $NOTARY_APPLE_ID.
 # Signs the update with the login keychain's Sparkle key, or the key file in $SPARKLE_KEY_FILE.
-# With TAP, a GitHub repository, it stages the release's Homebrew cask too, and `publish` writes it there.
+# With TAP, a GitHub repository, it stages the release's Homebrew cask too, and `publish` writes it there,
+# with $TAP_TOKEN when that is set.
 # Usage: sparkle-release.sh dist|publish APP SPARKLE_BIN DIR [TAP]
 set -euo pipefail
 
@@ -14,8 +16,21 @@ info() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist"; }
 [ "$mode" = dist ] || [ "$mode" = publish ] || die "unknown mode: $mode"
 command -v gh >/dev/null || die "needs the GitHub CLI: brew install gh"
 [ -x "$bin/generate_appcast" ] || die "no $bin/generate_appcast: make release resolves Sparkle"
-[ -n "${NOTARY_PROFILE:-}" ] ||
-    die "NOTARY_PROFILE names no notarytool keychain profile (README, Publishing an update)"
+if [ -n "${NOTARY_KEY:-}" ]; then
+    [ -f "$NOTARY_KEY" ] && [ -n "${NOTARY_KEY_ID:-}" ] ||
+        die "NOTARY_KEY needs NOTARY_KEY_ID and the .p8 file it names"
+    notary=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID")
+    # An individual key has no issuer.
+    [ -z "${NOTARY_ISSUER:-}" ] || notary+=(--issuer "$NOTARY_ISSUER")
+elif [ -n "${NOTARY_APPLE_ID:-}" ]; then
+    [ -n "${NOTARY_PASSWORD:-}" ] && [ -n "${NOTARY_TEAM_ID:-}" ] ||
+        die "NOTARY_APPLE_ID needs NOTARY_PASSWORD, an app-specific password, and NOTARY_TEAM_ID"
+    notary=(--apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID")
+elif [ -n "${NOTARY_PROFILE:-}" ]; then
+    notary=(--keychain-profile "$NOTARY_PROFILE")
+else
+    die "no notary credentials: set NOTARY_PROFILE, NOTARY_KEY or NOTARY_APPLE_ID (README, Publishing an update)"
+fi
 
 version=$(info CFBundleShortVersionString)
 build=$(info CFBundleVersion)
@@ -33,6 +48,9 @@ trap 'rm -rf "$work"' EXIT
 
 # The HTTP status GitHub answers a GET with; empty when it could not be asked.
 http_status() { { gh api --include "$1" 2>/dev/null || true; } | sed -n '1s|^HTTP/[0-9.]* \([0-9]*\).*|\1|p'; }
+
+# A workflow's own token reaches no repository but its own, so the tap's calls carry $TAP_TOKEN when set.
+tap_api() { if [ -n "${TAP_TOKEN:-}" ]; then GH_TOKEN=$TAP_TOKEN gh api "$@"; else gh api "$@"; fi; }
 
 # Every install updates from the latest release: outnumber its build and keep its signing identity.
 check_latest() {
@@ -70,12 +88,12 @@ check_latest() {
 notarize() {
     local answer id status exited=0
     echo "Notarizing $(basename "$1"): waiting for the notary service's answer."
-    answer=$(xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json) ||
+    answer=$(xcrun notarytool submit "$1" "${notary[@]}" --wait --output-format json) ||
         exited=$?
     id=$(plutil -extract id raw -o - - <<<"$answer" 2>/dev/null) || id=
     status=$(plutil -extract status raw -o - - <<<"$answer" 2>/dev/null) || status=
     [ "$exited" = 0 ] && [ "$status" = Accepted ] && return
-    [ -z "$id" ] || xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" >&2 || true
+    [ -z "$id" ] || xcrun notarytool log "$id" "${notary[@]}" >&2 || true
     die "the notary service did not accept $(basename "$1"): ${status:-no status}, notarytool exited $exited"
 }
 
@@ -103,8 +121,8 @@ stage_cask() {
 # GitHub replaces a file only when told which blob it replaces, and creates one when told none.
 write_cask() {
     local path=repos/$tap/contents/Casks/$name.rb blob
-    blob=$(gh api "$path" --jq .sha 2>/dev/null) || blob=
-    gh api --method PUT "$path" -f message="$name $version" -f content="$(base64 <"$dir/$name.rb")" \
+    blob=$(tap_api "$path" --jq .sha 2>/dev/null) || blob=
+    tap_api --method PUT "$path" -f message="$name $version" -f content="$(base64 <"$dir/$name.rb")" \
         ${blob:+-f sha="$blob"} >/dev/null
 }
 
@@ -132,7 +150,7 @@ if [ "$mode" = publish ]; then
         *) die "could not read $repo's latest release" ;;
     esac
     # Asked before the release exists: afterwards a cask that cannot be written leaves the tap a version behind.
-    [ -z "$tap" ] || [ "$(gh api "repos/$tap" --jq .permissions.push 2>/dev/null)" = true ] ||
+    [ -z "$tap" ] || [ "$(tap_api "repos/$tap" --jq .permissions.push 2>/dev/null)" = true ] ||
         die "cannot push to $tap, the Homebrew tap this release's cask goes to (README, Publishing an update)"
 fi
 

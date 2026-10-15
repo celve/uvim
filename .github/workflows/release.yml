@@ -1,0 +1,77 @@
+# Builds, signs and notarizes a release of main on a GitHub-hosted runner with `make dist`, keeping what it
+# stages as the run's artifact, or `make publish`. The job waits for a reviewer of the release environment,
+# whose secrets it reads only then (README, Publishing an update).
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run stages the release as this run's artifact; publish releases it
+        type: choice
+        options: [dry-run, publish]
+        default: dry-run
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The build number is the commit count, which a shallow clone would make 1.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Xcode and XcodeGen
+        run: scripts/release-runner.sh tools
+      - name: Import the Developer ID identity
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          scripts/release-runner.sh identity 'Developer ID Application: .* \(8TDYAWS6VC\)'
+      - name: Build
+        run: make release
+      - name: Write the Sparkle and notary keys
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          NOTARY_API_KEY: ${{ secrets.NOTARY_API_KEY }}
+        run: scripts/release-runner.sh keys
+      - name: Notarize, then ${{ inputs.mode == 'publish' && 'publish' || 'stage' }}
+        env:
+          MODE: ${{ inputs.mode }}
+          GH_TOKEN: ${{ github.token }}
+          TAP_TOKEN: ${{ inputs.mode == 'publish' && secrets.TAP_TOKEN || '' }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: 8TDYAWS6VC
+        # -o release: the step before built the app, without the secrets this one holds.
+        run: |
+          case $MODE in
+          dry-run) make -o release dist ;;
+          publish) make -o release publish ;;
+          *) echo "unknown mode: $MODE" >&2; exit 1 ;;
+          esac
+      - name: Keep what the dry run staged
+        if: inputs.mode == 'dry-run'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove the keychain and the keys
+        if: always()
+        run: scripts/release-runner.sh cleanup
