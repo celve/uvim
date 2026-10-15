@@ -180,7 +180,7 @@ public extension PhysicalPlanner {
     /// `ending` holds those lines where they end the text, for `undoFallback`.
     static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?)? {
         guard let model = Context(snapshot: snapshot).model,
-              let (lines, ending) = model.restoredLines(from: before, near: snapshot.selection?.lowerBound) else { return nil }
+              let (lines, ending) = model.restoredLines(from: before, selection: snapshot.selection) else { return nil }
         var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
         // Lines that end the text are reached from its end, as no key need cross the break above them, which Lark pulls a caret back over.
         if ending {

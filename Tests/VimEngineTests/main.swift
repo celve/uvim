@@ -7180,21 +7180,24 @@ for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile]
 
 // Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
 let restored = TextModel("one\ntwo\nthree")
-precondition(restored.restoredLines(from: "one\ntwo", near: 7)?.lines == 8..<13 && restored.restoredLines(from: "one\nthree", near: 4)?.lines == 4..<8)
-precondition(restored.restoredLines(from: "two\nthree", near: 0)?.lines == 0..<4 && restored.restoredLines(from: "", near: 0)?.lines == 0..<13)
-precondition(restored.restoredLines(from: "one\ntwo", near: 7)?.ending == true && restored.restoredLines(from: "one\nthree", near: 4)?.ending == false)
-precondition(restored.restoredLines(from: "one\ntwo three", near: 7) == nil, "J's undo")
-precondition(restored.restoredLines(from: "one\nwo\nthree", near: 4) == nil && restored.restoredLines(from: "one\ntwo\nthree", near: 0) == nil)
-precondition(TextModel("one\nnew\ntwo").restoredLines(from: "one\nTWO", near: 4) == nil, "lines back, and a line changed")
-precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 4)?.lines == 4..<8)
-precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", near: 8)?.lines == 8..<12)
-precondition(TextModel("\n\n").restoredLines(from: "\n", near: 0)?.lines == 0..<1 && TextModel("\n\n").restoredLines(from: "", near: 0)?.lines == 1..<2)
-precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", near: 9)?.lines == 10..<10, "the break above an empty last line")
-precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", near: 9)?.lines == 10..<15)
-precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", near: 0) == nil, "gJ's undo")
-precondition(TextModel("one \n\ntwo").restoredLines(from: "one \ntwo", near: 0) == nil, "J's undo after a trailing space")
-precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", near: 4)?.lines == 4..<5)
-precondition(restored.restoredLines(from: "one\nthree", near: 3)?.lines == 4..<8, "a caret read on the paragraph above's side")
+precondition(restored.restoredLines(from: "one\ntwo", selection: 7..<7)?.lines == 8..<13 && restored.restoredLines(from: "one\nthree", selection: 4..<4)?.lines == 4..<8)
+precondition(restored.restoredLines(from: "two\nthree", selection: 0..<0)?.lines == 0..<4 && restored.restoredLines(from: "", selection: 0..<0)?.lines == 0..<13)
+precondition(restored.restoredLines(from: "one\ntwo", selection: 7..<7)?.ending == true && restored.restoredLines(from: "one\nthree", selection: 4..<4)?.ending == false)
+precondition(restored.restoredLines(from: "one\ntwo three", selection: 7..<7) == nil, "J's undo")
+precondition(restored.restoredLines(from: "one\nwo\nthree", selection: 4..<4) == nil && restored.restoredLines(from: "one\ntwo\nthree", selection: 0..<0) == nil)
+precondition(TextModel("one\nnew\ntwo").restoredLines(from: "one\nTWO", selection: 4..<4) == nil, "lines back, and a line changed")
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", selection: 4..<4)?.lines == 4..<8)
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", selection: 8..<8)?.lines == 8..<12)
+precondition(TextModel("\n\n").restoredLines(from: "\n", selection: 0..<0)?.lines == 0..<1 && TextModel("\n\n").restoredLines(from: "", selection: 0..<0)?.lines == 1..<2)
+precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", selection: 9..<9)?.lines == 10..<10, "the break above an empty last line")
+precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", selection: 9..<9)?.lines == 10..<15)
+precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", selection: 0..<4) == nil, "gJ's undo")
+precondition(TextModel("one \n\ntwo").restoredLines(from: "one \ntwo", selection: 0..<5) == nil, "J's undo after a trailing space")
+precondition(TextModel("one\n\n").restoredLines(from: "one\n", selection: 0..<4) == nil, "gJ's undo before an empty last line")
+precondition(TextModel("one\n\n").restoredLines(from: "one\n", selection: 4..<5)?.lines == 5..<5)
+precondition(restored.restoredLines(from: "one\ntwo", selection: 4..<4)?.lines == 8..<13, "a caret left on the line above")
+precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", selection: 4..<4)?.lines == 4..<5)
+precondition(restored.restoredLines(from: "one\nthree", selection: 3..<3)?.lines == 4..<8, "a caret read on the paragraph above's side")
 let landing = PhysicalPlanner.undoLanding(
     before: "one\ntwo", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
 )
@@ -7267,10 +7270,11 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
                              "\(keys)udd with a failed landing, \(context): \(failing.text.debugDescription)")
             }
         }
-        for (text, keys) in [("one\n\ntwo", "gJudd"), ("one \n\ntwo", "Judd")] {
+        for (text, keys, after) in [("one\n\ntwo", "gJudd", "\ntwo"), ("one \n\ntwo", "Judd", "\ntwo"), ("one\n\n", "gJudd", "\n"),
+                                    ("one \n\n", "Judd", "\n")] {
             var join = host(text, 0)
             join.type(keys)
-            precondition(join.text == "\ntwo", "\(keys) in \(text.debugDescription), \(context): \(join.text.debugDescription)")
+            precondition(join.text == after, "\(keys) in \(text.debugDescription), \(context): \(join.text.debugDescription)")
         }
         var upward = host(lastThree, 10)
         upward.type("dku")

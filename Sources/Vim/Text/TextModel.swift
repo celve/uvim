@@ -214,8 +214,8 @@ public struct TextModel: Equatable, Sendable {
     }
 
     /// The lines `before` lacks, where this text is `before` with whole lines put back as an undone linewise delete leaves it, placed
-    /// nearest `near`, then as the break above lines ending the text (`ending`), then as lines with their own breaks beside `near`.
-    public func restoredLines(from before: String, near: Int?) -> (lines: Range<Int>, ending: Bool)? {
+    /// nearest the app's `selection` after the undo, then as the break above lines ending the text (`ending`), then as lines with breaks.
+    public func restoredLines(from before: String, selection: Range<Int>?) -> (lines: Range<Int>, ending: Bool)? {
         let after = Array(text.utf16), old = Array(before.utf16)
         let added = after.count - old.count
         guard added > 0 else { return nil }
@@ -224,16 +224,19 @@ public struct TextModel: Equatable, Sendable {
         guard after[(latest + added)...].elementsEqual(old[latest...]) else { return nil }
         var earliest = latest
         while earliest > 0, after[earliest - 1] == after[earliest - 1 + added] { earliest -= 1 }
+        let near = selection?.lowerBound
         var best: (rank: [Int], lines: Range<Int>, ending: Bool)?
         for at in earliest...latest {
             let end = at + added
+            // An app selects what its undo put back from where it starts, so an undone join, selected from the joined line's start,
+            // put back no lines; one off is a paragraph's side.
+            let beside = near.map { abs($0 - at) <= 1 } ?? true
             var found: [(form: Int, lines: Range<Int>)] = []
-            if after[at] == 10, lineEnd(of: end) == end, lineBreak(of: end) == length {
+            // A caret may sit anywhere after an undo, and lines that end the text must still be found from it.
+            if after[at] == 10, lineEnd(of: end) == end, lineBreak(of: end) == length, beside || selection?.isEmpty == true {
                 found.append((0, (at + 1)..<end))
             }
-            // An app selects an undone join from the joined line's start, away from the break it put back; one off is a paragraph's side.
-            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count,
-               near.map({ abs($0 - at) <= 1 }) ?? true {
+            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count, beside {
                 found.append((1, at..<end))
             }
             for (form, lines) in found {
