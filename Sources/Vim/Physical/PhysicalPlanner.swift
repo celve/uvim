@@ -192,18 +192,21 @@ public extension PhysicalPlanner {
         return landing.rejection == nil ? (landing.plan, ending ? lines : nil) : nil
     }
 
-    /// After a landing that failed, keys onto restored `lines` that end the text from wherever the app or the landing left the cursor above:
-    /// ↓ crosses a break Lark pulls a caret back over, → covers a ↓ the field ignored, and ⌘↓ covers both.
-    static func undoFallback(onto lines: Range<Int>, snapshot: FieldSnapshot) -> PhysicalPlan? {
+    /// After a failed landing, keys onto restored `lines` that end the text from where the cursor stopped above: ↓, → and ⌘↓, or,
+    /// `selecting`, ⇧↓ and ⌘→ for a cursor those left above (each crosses the break where others cannot); nil once it is on them.
+    static func undoFallback(onto lines: Range<Int>, snapshot: FieldSnapshot, selecting: Bool = false) -> PhysicalPlan? {
         var context = Context(snapshot: snapshot)
         guard let model = context.model else { return nil }
         if let selection = snapshot.selection, selection.lowerBound >= lines.lowerBound { return nil }
+        guard snapshot.selection != nil || !selecting else { return nil }
         let above = snapshot.selection?.lowerBound ?? lines.lowerBound - 1
-        var keys: [PhysicalStep] = [
-            .press(.down, count: max(1, model.newlineCount(in: above..<lines.lowerBound))),
+        let down = max(1, model.newlineCount(in: above..<lines.lowerBound))
+        // ⌘↓ is the chord the blind lane presses for `G` unlearned; the settle, and the selecting stage after it, check what it did.
+        let keys: [PhysicalStep] = selecting ? [.press(.selectDown, count: down), .press(.lineEnd, count: 1)] : [
+            .press(.down, count: down),
             .press(.right, count: max(1, model.graphemes(in: above..<lines.lowerBound))),
+            .press(.documentEnd, count: 1),
         ]
-        if snapshot.capabilities.has(.documentEndKey) { keys.append(.press(.documentEnd, count: 1)) }
         guard snapshot.selection != nil else { return PhysicalPlan(steps: keys) }
         context.selection = model.length..<model.length
         return PhysicalPlan(steps: keys + settle(
@@ -1967,7 +1970,7 @@ private extension PhysicalPlanner {
         ]
     }
 
-    /// Keys to the first non-blank from wherever the unconfirmed delete left the caret, → first collapsing lines it left selected to their end.
+    /// Keys to the first non-blank from where the unconfirmed delete left the caret, → first collapsing lines it left selected to their end.
     static func relativeLanding(context: inout Context, profile: CapabilityProfile) -> [PhysicalStep] {
         var steps: [PhysicalStep] = [.press(.right, count: 1)]
         steps += settle(context, profile: profile, hard: false)

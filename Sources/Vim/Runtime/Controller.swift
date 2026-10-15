@@ -448,15 +448,18 @@ public final class Controller {
         let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
         let evidence = executor.lastRun
         // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
-        var fallback: PhysicalPlan?
+        var fallbacks: [PhysicalPlan] = []
         if landed == false, let lines = landing?.ending {
-            let field = snapshotAside(binding)
-            fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field)
-            if let fallback { executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil) }
+            for selecting in [false, true] {
+                let field = snapshotAside(binding)
+                guard let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
+                executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil)
+                fallbacks.append(fallback)
+            }
         }
         Diag.undoLanding(
             tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
-            lengths: (before.utf16.count, after.text?.utf16.count), fallback: fallback
+            lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks
         )
     }
 

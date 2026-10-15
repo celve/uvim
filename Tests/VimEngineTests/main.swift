@@ -6947,19 +6947,26 @@ larkKeys.runsAreNewlines = true
 larkKeys.type("ddu")
 precondition(larkKeys.text == "one\(zw)\ntwo\(zw)\nthree\(zw)" && larkKeys.caret == 10, "\(larkKeys.caret)")
 // A landing that fails in Lark's field still ends on the restored line, since ↓ crosses the break → cannot.
-for (shape, late, keys) in [(Sim.UndoSelection.toBreak, true, false), (.toBreak, false, false), (.restored, true, false), (.toBreak, true, true)] {
-    for probe in ["dd", "iX"] where !(keys && probe == "dd") {
-        var lark = keys ? blankSim(["one\(zw)", "two\(zw)", "three\(zw)"], caret: 12) : larkSim("one\(zw)\ntwo\(zw)\nthree\(zw)", caret: 12)
+// With keys alone the fallback's ⌘↓, or its ⇧↓ and ⌘→, reach the restored line where ↓ (or ↓ and ⌘↓) were ignored.
+let larkFaults: [(UndoSelection: Sim.UndoSelection, late: Bool, profile: CapabilityProfile?, ignored: Set<Chord>)] = [
+    (.toBreak, true, nil, []), (.toBreak, false, nil, []), (.restored, true, nil, []), (.toBreak, true, keyProfile, [.documentEnd]),
+    (.toBreak, true, readProfile, [.down]), (.restored, false, readProfile, [.down, .selectDown]),
+    (.toBreak, true, keyProfile, [.down, .documentEnd]),
+]
+for (shape, late, profile, ignored) in larkFaults {
+    for probe in ["dd", "iX"] where !(profile != nil && probe == "dd") {
+        var lark = profile.map { blankSim(["one\(zw)", "two\(zw)", "three\(zw)"], caret: 12, profile: $0) }
+            ?? larkSim("one\(zw)\ntwo\(zw)\nthree\(zw)", caret: 12)
         (lark.webContent, lark.pullsBackFromLineEnds, lark.runsAreNewlines) = (true, true, true)
         (lark.undoSelection, lark.undoesLate) = (shape, late)
         lark.type("dd")
-        if keys { lark.ignoredChords = [.documentEnd] } else { lark.swallowsSelect = true }
+        if profile != nil { lark.ignoredChords = ignored } else { lark.swallowsSelect = true }
         lark.type("u")
         (lark.swallowsSelect, lark.ignoredChords) = (false, [])
         lark.type(probe)
         lark.feed("<Esc>")
         let landed = probe == "dd" ? lark.text == "one\(zw)\ntwo\(zw)" : lark.text.hasPrefix("one\(zw)\ntwo\(zw)\nthree") && lark.text.contains("X")
-        precondition(landed, "\(shape) late=\(late) keys=\(keys) u, then \(probe): \(lark.text.debugDescription)")
+        precondition(landed, "\(shape) late=\(late) ignored=\(ignored) u, then \(probe): \(lark.text.debugDescription)")
     }
 }
 var larkYank = larkSim("one\(zw)\ntwo\(zw)", caret: 1)
@@ -7233,16 +7240,24 @@ precondition(PhysicalPlanner.undoLanding(
 )?.ending == nil, "a middle line restored")
 let onLines = PhysicalStep.softSettle(Expectation(landing: .caretWithin(8...13), length: 13))
 let fallen = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
-precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [.press(.down, count: 1), .press(.right, count: 1), onLines])
-precondition(PhysicalPlanner.undoFallback(
-    onto: 8..<13, snapshot: FieldSnapshot(capabilities: keyProfile, text: "one\ntwo\nthree", selection: 3..<3, length: 13)
-)?.steps == [.press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), onLines])
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [
+    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1), onLines,
+])
+let twoAbove = FieldSnapshot(capabilities: keyProfile, text: "one\ntwo\nthree", selection: 3..<3, length: 13)
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove)?.steps == [
+    .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), onLines,
+])
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove, selecting: true)?.steps == [
+    .press(.selectDown, count: 2), .press(.lineEnd, count: 1), onLines,
+])
 precondition(PhysicalPlanner.undoFallback(
     onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 9..<9, length: 13)
 ) == nil)
-precondition(PhysicalPlanner.undoFallback(
-    onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", length: 13)
-)?.steps == [.press(.down, count: 1), .press(.right, count: 1)])
+let selectionUnread = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", length: 13)
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: selectionUnread)?.steps == [
+    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1),
+])
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: selectionUnread, selecting: true) == nil)
 precondition(PhysicalPlanner.undoLanding(
     before: "one\ntwo\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<8)
 ) == nil)
@@ -7281,6 +7296,7 @@ for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, 
         let faults: [(inout Sim) -> Void] = [
             { $0.swallowsSelect = true }, { $0.ignoredChords = [.documentEnd] }, { $0.ignoredChords = [.down] },
             { $0.swallowsSelect = true; $0.ignoredChords = [.right] }, { $0.ignoredChords = [.documentEnd, .right] },
+            { $0.ignoredChords = [.down, .right] }, { $0.ignoredChords = [.down, .documentEnd] },
         ]
         for fault in faults {
             for (caret, keys, after) in [(10, "dd", "one\ntwo"), (10, "dk", "one\nthree"), (0, "jdd", "one\nthree")] {

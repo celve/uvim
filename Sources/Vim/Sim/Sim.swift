@@ -371,9 +371,11 @@ private extension Sim {
         // A late ⌘Z has landed by now, as the Controller waits for it to.
         if logical.steps.contains(.history(.undo)), let text = snapshot.text,
            let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()),
-           !executeAside(landing.plan), let lines = landing.ending,
-           let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside()) {
-            executeAside(fallback)
+           !executeAside(landing.plan), let lines = landing.ending {
+            for selecting in [false, true] {
+                guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
+                executeAside(next)
+            }
         }
     }
 
