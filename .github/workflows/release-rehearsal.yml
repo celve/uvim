@@ -37,12 +37,8 @@ jobs:
             -keyout rehearsal.key -out rehearsal.pem
           /usr/bin/openssl pkcs12 -export -inkey rehearsal.key -in rehearsal.pem -passout pass:rehearsal \
             -out rehearsal.p12
-          # Admin trust settings take no prompt only while this right is open.
-          sudo security authorizationdb read com.apple.trust-settings.admin >rights.plist
-          sudo security authorizationdb write com.apple.trust-settings.admin allow
-          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain \
+          sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain \
             rehearsal.pem
-          sudo security authorizationdb write com.apple.trust-settings.admin <rights.plist
           P12=$(base64 -i rehearsal.p12) P12_PASSWORD=rehearsal \
             "$GITHUB_WORKSPACE/scripts/release-runner.sh" identity 'uvim release rehearsal'
           rm rehearsal.key rehearsal.p12
