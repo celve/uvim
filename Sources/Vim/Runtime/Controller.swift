@@ -336,8 +336,9 @@ public final class Controller {
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
+        var visual = false
         if case .visual(let context) = state.field.mode {
-            anchor = context.anchor
+            (anchor, visual) = (context.anchor, true)
         }
         let reading = Snapshotter.snapshot(
             of: binding.element,
@@ -366,7 +367,7 @@ public final class Controller {
         fieldBreaks = snapshot.breaks
         let paragraphs = snapshot.breaks != nil
         let planned = PhysicalPlanner.planning(
-            logical, snapshot: snapshot, missed: missedRoutes(on: binding, under: reading.observed.after)
+            logical, snapshot: snapshot, missed: missedRoutes(on: binding, under: reading.observed.after), visual: visual
         )
         let physical = planned.plan
         let epoch = tracker.epoch

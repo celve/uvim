@@ -1430,12 +1430,14 @@ for profile in [axProfile, removing([.insertText], from: axProfile)] {
 }
 precondition(checkedText(physical("x", text: "one two", selection: 4..<5, profile: readProfile).steps.first) == "t",
              "a lane that cannot write takes the selection as it reads, as before")
-var visualWords = VimState.initial
-visualWords.field.mode = .visual(VimState.VisualContext(kind: .character, anchor: 4))
-precondition(PhysicalPlanner.plan(
-    LogicalPlanner.plan(RawCommand("iw"), state: visualWords),
-    snapshot: FieldSnapshot(capabilities: axProfile, text: "one two three", selection: 4..<7, anchor: 4)
-).steps.isEmpty, "Visual's own selection is the word already")
+for anchor in [4, nil] {
+    var visualWords = VimState.initial
+    visualWords.field.mode = .visual(VimState.VisualContext(kind: .character, anchor: anchor))
+    precondition(PhysicalPlanner.planning(
+        LogicalPlanner.plan(RawCommand("iw"), state: visualWords),
+        snapshot: FieldSnapshot(capabilities: axProfile, text: "one two three", selection: 4..<7, anchor: anchor), visual: true
+    ).plan.steps.isEmpty, "Visual's own selection is the word already, with or without the anchor a block crossing drops")
+}
 
 precondition(paras.replacing(1..<4, with: "") == ParagraphBreaks(offsets: [2]))
 precondition(paras.replacing(0..<0, with: "x\n") == ParagraphBreaks(offsets: [1, 4, 7]))

@@ -302,8 +302,9 @@ private extension Sim {
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
+        var visual = false
         if case .visual(let context) = state.field.mode {
-            anchor = context.anchor
+            (anchor, visual) = (context.anchor, true)
         }
         var memo = foundEmptyParagraphs
         var unreachable = foundUnreachable
@@ -332,7 +333,7 @@ private extension Sim {
         let snapshot = built.snapshot
         fieldBreaks = snapshot.breaks
         let missed = learner.map { $0.strikes.missed(judgedUnder: observed.after, app: $0.versions.app) } ?? []
-        let planned = PhysicalPlanner.planning(logical, snapshot: snapshot, missed: missed)
+        let planned = PhysicalPlanner.planning(logical, snapshot: snapshot, missed: missed, visual: visual)
         let physical = planned.plan
         let before = state.field.mode
 

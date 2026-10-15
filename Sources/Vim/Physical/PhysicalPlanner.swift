@@ -75,11 +75,12 @@ public enum PhysicalPlanner {
 
     /// `plan` plus what only the planner knows: why it rejected, and the operand; `missed` routes are planned without.
     public static func planning(
-        _ logical: LogicalPlan, snapshot: FieldSnapshot, missed: Set<Route> = []
+        _ logical: LogicalPlan, snapshot: FieldSnapshot, missed: Set<Route> = [], visual: Bool = false
     ) -> Planning {
         let profile = snapshot.capabilities
         var context = Context(snapshot: snapshot)
         context.missed = missed
+        context.visual = visual
         var steps: [PhysicalStep] = []
         // Writes in a folded field mix with keys at its line edges (LIN-1685).
         let foldedWrites = profile.has(.writeSelection) && context.folded
@@ -272,6 +273,9 @@ private extension PhysicalPlanner {
         var selectionWise: VisualKind?
         var anchor: Int?
         var nextSlot = 0
+
+        /// Visual mode, whose selection is its own even where a block crossing left it no `anchor`.
+        var visual = false
 
         /// The selection is lines that end the text, and a delete takes this line break above them too.
         var breakAbove: Range<Int>?
@@ -1752,7 +1756,7 @@ private extension PhysicalPlanner {
         // Pressed even where nothing is to select, so a settle checks the caret the command starts from.
         return nativeSelect(target, range: range, context: &context, profile: profile).or {
             // Outside Visual, a write lane's selection can be a failed command's whose collapse write has yet to show (LIN-1931).
-            let collapsing = profile.has(.writeSelection) && context.anchor == nil && !range.isEmpty
+            let collapsing = profile.has(.writeSelection) && !context.visual && !range.isEmpty
             if range == context.selection, !collapsing {
                 return .steps([])   // already selected (Visual operators)
             }
