@@ -50,10 +50,14 @@ public enum PhysicalPlanner {
         /// The range the plan meant to replace, in field offsets; nil in the blind lane, which has no offsets.
         public let operand: Range<Int>?
 
-        public init(plan: PhysicalPlan, rejection: Rejection?, operand: Range<Int>?) {
+        /// The run deletes lines that end the text, so a selection it strands collapses to its end, on the last line.
+        public let collapsesToEnd: Bool
+
+        public init(plan: PhysicalPlan, rejection: Rejection?, operand: Range<Int>?, collapsesToEnd: Bool = false) {
             self.plan = plan
             self.rejection = rejection
             self.operand = operand
+            self.collapsesToEnd = collapsesToEnd
         }
 
         /// Whether the run died checking the selected text: other text is selected, however its offsets read.
@@ -120,7 +124,9 @@ public enum PhysicalPlanner {
            [.paragraphStart, .paragraphEnd].contains(chord) {
             uncover = []
         }
-        return Planning(plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand)
+        return Planning(
+            plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand, collapsesToEnd: context.collapsesToEnd
+        )
     }
 
     /// Marks the first settle after a selection write and the keys `write` added to finish it, which checks that write.
@@ -170,13 +176,60 @@ public enum PhysicalPlanner {
 // MARK: - Repair and release
 
 public extension PhysicalPlanner {
-    /// Collapses a selection an aborted run left to its start, in field offsets; `snapshot` reads the field as it is.
+    /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
+    /// `ending` holds those lines where they end the text, for `undoFallback`.
+    static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?)? {
+        guard let model = Context(snapshot: snapshot).model,
+              let (lines, ending) = model.restoredLines(from: before, selection: snapshot.selection) else { return nil }
+        var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
+        // Lines that end the text are reached from its end, as no key need cross the break above them, which Lark pulls a caret back over.
+        if ending {
+            let up = model.newlineCount(in: lines.lowerBound..<model.length)
+            moves = [.moveCaret(.motion(.fileEnd, count: 1))]
+                + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
+        }
+        let landing = planning(LogicalPlan(steps: moves + [.renderCursor]), snapshot: snapshot)
+        return landing.rejection == nil ? (landing.plan, ending ? lines : nil) : nil
+    }
+
+    /// After a failed landing, keys onto restored `lines` that end the text from where the cursor stopped above: ↓, → and ⌘↓, or,
+    /// `selecting`, ⇧↓ and → for a cursor those left above (each crosses the break where others cannot); nil once it is on them.
+    static func undoFallback(onto lines: Range<Int>, snapshot: FieldSnapshot, selecting: Bool = false) -> PhysicalPlan? {
+        var context = Context(snapshot: snapshot)
+        guard let model = context.model else { return nil }
+        if let selection = snapshot.selection, selection.lowerBound >= lines.lowerBound { return nil }
+        guard snapshot.selection != nil || !selecting else { return nil }
+        let above = snapshot.selection?.lowerBound ?? lines.lowerBound - 1
+        let down = max(1, model.newlineCount(in: above..<lines.lowerBound))
+        // ⌘↓ is the chord the blind lane presses for `G` unlearned; the settle, and the selecting stage after it, check what it did.
+        // → collapses a selection at its end, where AppKit's ⌘→ took an undo's selection to its first line's end, the line above.
+        let keys: [PhysicalStep] = selecting ? [.press(.selectDown, count: down), .press(.right, count: 1)] : [
+            .press(.down, count: down),
+            .press(.right, count: max(1, model.graphemes(in: above..<lines.lowerBound))),
+            .press(.documentEnd, count: 1),
+        ]
+        guard snapshot.selection != nil else { return PhysicalPlan(steps: keys) }
+        context.selection = model.length..<model.length
+        return PhysicalPlan(steps: keys + settle(
+            context, profile: snapshot.capabilities, hard: false, landing: .caretWithin(lines.lowerBound...model.length)
+        ))
+    }
+
+    /// Collapses a selection an aborted run left to its start, or `toEnd` its end, in field offsets; `snapshot` reads the field as it is.
     static func collapse(
         _ selection: Range<Int>, misread: Bool = false, side: ParagraphBreaks.Side? = nil, paragraphs: Bool = false,
-        snapshot: FieldSnapshot? = nil, profile: CapabilityProfile
+        snapshot: FieldSnapshot? = nil, toEnd: Bool = false, profile: CapabilityProfile
     ) -> PhysicalPlan {
-        // After a failed text check the offsets name other text than is selected, and ← collapses whatever is.
-        guard !misread else { return PhysicalPlan(.press(.left, count: 1)) }
+        // After a failed text check the offsets name other text than is selected, and ← or → collapses whatever is.
+        guard !misread else { return PhysicalPlan(.press(toEnd ? .right : .left, count: 1)) }
+        // → needs no paragraph side, which a write would, and a selection it leaves still starts on the lines.
+        guard !toEnd else {
+            var context = Context(snapshot: FieldSnapshot(
+                capabilities: profile, selection: selection.upperBound..<selection.upperBound, breaks: paragraphs ? ParagraphBreaks() : nil
+            ))
+            context.unknown.insert(.length)
+            return PhysicalPlan(steps: [.press(.right, count: 1)] + settle(context, profile: profile))
+        }
         var start = selection.lowerBound
         var field = FieldSnapshot(capabilities: profile, selection: start..<start, breaks: paragraphs ? ParagraphBreaks() : nil)
         // A `<br>` Linear drew for its caret leaves in its own time, and every offset behind it moves then.
@@ -219,6 +272,12 @@ private extension PhysicalPlanner {
         var selectionWise: VisualKind?
         var anchor: Int?
         var nextSlot = 0
+
+        /// The selection is lines that end the text, and a delete takes this line break above them too.
+        var breakAbove: Range<Int>?
+
+        /// The plan deletes lines that end the text.
+        var collapsesToEnd = false
 
         /// Non-nil when the snapshot's selection is our drawn block cursor:
         /// the gap to collapse to before the plan acts.
@@ -450,7 +509,8 @@ private extension PhysicalPlanner {
                 let plainLine = replacement.isEmpty && ownRuns.isEmpty && before?.lineStart(of: range.lowerBound) == range.lowerBound
                 let ownMarker = ownRuns.contains { !$0.text.isEmpty }
                 let coversMarker = current.hidden.contains { range.lowerBound < $0.at && $0.at <= range.upperBound && $0.isMarker }
-                breaks = current.replacing(range, with: replacement, keepingCovered: plainLine)
+                let endsLine = model.map { $0.lineEnd(of: range.lowerBound) == range.lowerBound } ?? false
+                breaks = current.replacing(range, with: replacement, keepingCovered: plainLine, endsLine: endsLine)
                 // A typed `\n` may have made a paragraph or a line break.
                 if replacement.contains("\n") { unknown.formUnion([.selection, .edge]) }
                 // An item made or merged gains or loses `AXValue` lines, and its list renumbers.
@@ -1117,18 +1177,18 @@ private extension PhysicalPlanner {
         guard !profile.has(.writeSelection) else { return .next }
         let groups: [KeyGroup]
         switch target {
-        case .lines(let count, let interior) where repeats(count):
-            groups = linesDown(count, newline: !interior)
-        case .lineSpan(to: .motion(.line(.down, _), let count), let interior) where repeats(count):
-            groups = linesDown(count + 1, newline: !interior)
-        case .lineSpan(to: .motion(.line(.up, _), let count), let interior) where repeats(count):
-            groups = [([.paragraphEnd], .lineEndKey), (interior ? [] : [.right, .selectLeft], nil),
+        case .lines(let count, let extent) where repeats(count):
+            groups = linesDown(count, newline: extent != .interior)
+        case .lineSpan(to: .motion(.line(.down, _), let count), let extent) where repeats(count):
+            groups = linesDown(count + 1, newline: extent != .interior)
+        case .lineSpan(to: .motion(.line(.up, _), let count), let extent) where repeats(count):
+            groups = [([.paragraphEnd], .lineEndKey), (extent == .interior ? [] : [.right, .selectLeft], nil),
                       ([Chord.paragraphStart.shifted], .lineStartKey),
                       (repeated([.selectLeft, Chord.paragraphStart.shifted], count), nil)]
         case .lineSpan(to: .motion(.fileEnd, _), _):
             groups = [([.paragraphStart], .lineStartKey), ([Chord.documentEnd.shifted], .documentEndKey)]
-        case .lineSpan(to: .motion(.fileStart, _), let interior):
-            groups = [([.paragraphEnd], .lineEndKey), (interior ? [] : [.right], nil),
+        case .lineSpan(to: .motion(.fileStart, _), let extent):
+            groups = [([.paragraphEnd], .lineEndKey), (extent == .interior ? [] : [.right], nil),
                       ([Chord.documentStart.shifted], .documentStartKey)]
         case .toLineEnd:
             groups = [([Chord.paragraphEnd.shifted], .lineEndKey)]
@@ -1585,11 +1645,11 @@ private extension PhysicalPlanner {
             if inclusive { end = model.visibleOffset(model.advance(end, byGraphemes: 1)) }
             let start = model.visibleOffset(position)
             return min(start, end)..<max(start, end)
-        case .lineSpan(let destination, let interior):
+        case .lineSpan(let destination, let extent):
             guard let end = resolve(destination, model: model, from: position) else { return nil }
-            return model.lineSpan(from: position, to: end, includingTerminator: !interior)
-        case .lines(let count, let interior):
-            return model.lines(from: position, count: count, includingTerminator: !interior)
+            return model.lineSpan(from: position, to: end, extent: extent)
+        case .lines(let count, let extent):
+            return model.lines(from: position, count: count, extent: extent)
         case .textObject(let object, let count):
             guard case .word(let big) = object.kind else { return nil }
             var range = model.wordObject(at: position, around: object.scope == .around, big: big)
@@ -1617,9 +1677,9 @@ private extension PhysicalPlanner {
             guard case .motion(let motion, let count) = destination,
                   let blind = blindMoveChord(motion), !blind.counted || repeats(count) else { return nil }
             return [.press(blind.chord.shifted, count: blind.counted ? count : 1)]
-        case .lines(let count, let interior):
+        case .lines(let count, let extent):
             guard repeats(count) else { return nil }
-            if interior {
+            if extent == .interior {
                 var steps: [PhysicalStep] = [.press(.lineStart, count: 1)]
                 if count > 1 { steps.append(.press(.selectDown, count: count - 1)) }
                 steps.append(.press(.selectLineEnd, count: 1))
@@ -1631,11 +1691,12 @@ private extension PhysicalPlanner {
         case .textObject(let object, _):
             guard case .word = object.kind else { return nil }
             return [.press(.wordLeft, count: 1), .press(.selectWordRight, count: 1)]
-        case .lineSpan(let destination, let interior):
+        case .lineSpan(let destination, let extent):
             // `dj`, `dG`: whole lines from here through the destination's
             // line. Only vertical destinations have a blind spelling — a
             // lineSpan to a mark has none and rings.
             guard case .motion(let motion, let count) = destination else { return nil }
+            let interior = extent == .interior
             var steps: [PhysicalStep] = [.press(.lineStart, count: 1)]
             switch motion {
             case .line(.down, _):
@@ -1663,7 +1724,8 @@ private extension PhysicalPlanner {
         context: inout Context,
         profile: CapabilityProfile
     ) -> [PhysicalStep]? {
-        appSelect(target, context: &context, profile: profile)
+        context.breakAbove = nil
+        return appSelect(target, context: &context, profile: profile)
             .or { exactSelect(target, context: &context, profile: profile) }
             .or { blindSelect(target, context: &context) }
             .lowered
@@ -1674,8 +1736,16 @@ private extension PhysicalPlanner {
         _ target: LogicalStep.SelectionTarget, context: inout Context, profile: CapabilityProfile
     ) -> Lane {
         guard let model = context.model(for: target, profile), let selection = context.selection else { return .next }
-        guard let range = selectionRange(for: target, model: model, at: selection.lowerBound, context: context) else {
+        guard var range = selectionRange(for: target, model: model, at: selection.lowerBound, context: context) else {
             return .reject
+        }
+        var target = target
+        // Lines that end the text are selected without the line break above them, which the delete takes last.
+        if let lines = kept(target), let whole = selectionRange(for: lines, model: model, at: selection.lowerBound, context: context),
+           whole.lowerBound > range.lowerBound {
+            context.breakAbove = range.lowerBound..<whole.lowerBound
+            context.collapsesToEnd = true
+            (target, range) = (lines, whole)
         }
         context.selectionWise = target.wise ?? context.selectionWise ?? .character
         context.selectionOpaque = false
@@ -1690,10 +1760,34 @@ private extension PhysicalPlanner {
                 return .steps(write(range, from: caret, context: context) + settle(context, profile: profile))
             }
             return lineSelect(range, model: model, context: &context, profile: profile).or {
+                if context.breakAbove != nil {
+                    let reaching = keyPath(from: selection, to: range.upperBound, model: model, context: context)
+                    return .steps(selectingBack(range, reaching: reaching, model: model, context: &context, profile: profile))
+                }
                 let keys = selectKeys(range, from: selection, model: model, context: context)
                 context.selection = range
                 return .steps(keys.presses + settle(context, profile: profile, route: keys.route))
             }
+        }
+    }
+
+    /// Lines that end the text, selected back from its end once a check finds the caret there, so no partial selection starts above them.
+    static func selectingBack(
+        _ range: Range<Int>, reaching: [PhysicalStep], model: TextModel, context: inout Context, profile: CapabilityProfile
+    ) -> [PhysicalStep] {
+        context.selection = range.upperBound..<range.upperBound
+        let reached = reaching + settle(context, profile: profile)
+        guard !range.isEmpty else { return reached }
+        context.selection = range
+        return reached + [.press(.selectLeft, count: model.graphemes(in: range))] + settle(context, profile: profile)
+    }
+
+    /// A delete's lines as whole lines, which take the newline after them where the delete takes the one before.
+    static func kept(_ target: LogicalStep.SelectionTarget) -> LogicalStep.SelectionTarget? {
+        switch target {
+        case .lines(let count, .removed): .lines(count: count, extent: .whole)
+        case .lineSpan(let destination, .removed): .lineSpan(to: destination, extent: .whole)
+        default: nil
         }
     }
 
@@ -1828,20 +1922,40 @@ private extension PhysicalPlanner {
         let wise = registerWise(context.selectionWise)
         let blackhole = register?.name == "_"
         if let model = context.model, let selection = context.selection {
-            guard !selection.isEmpty else { return [] }
+            let breakAbove = context.breakAbove
+            let ending = breakAbove != nil
+            guard !selection.isEmpty || ending else { return [] }
             let text = model.substring(selection)
-            let content = context.content(selection, text)
-            var steps = checkSelectedText(text, context: context, profile: profile)
-            let held = context.expectation(.exact(selection), profile: profile)
-            steps.append(profile.has(.insertText) ? .replaceSelection("") : .press(.deleteBack, count: 1))
-            context.applyEdit(range: selection, replacement: "")
-            // A rich editor's ⌫ lands inexactly, so its settle is soft, unless the field reads as if ⌫ were ignored.
-            steps += settle(context, profile: profile, hard: profile.has(.insertText),
-                            deleting: profile.has(.insertText) ? nil : held)
+            // The register holds lines that ended the text as it holds any: the newline after them.
+            let content = context.content(selection, text) + (ending ? "\n" : "")
+            var steps: [PhysicalStep] = []
+            if !selection.isEmpty {
+                let writes = breakAbove == nil && profile.has(.insertText)
+                steps += checkSelectedText(text, context: context, profile: profile)
+                let held = context.expectation(.exact(selection), profile: profile)
+                steps.append(writes ? .replaceSelection("") : .press(.deleteBack, count: 1))
+                context.applyEdit(range: selection, replacement: "")
+                // A rich editor's ⌫ lands inexactly, so its settle is soft, unless the field reads as if ⌫ were ignored.
+                steps += settle(context, profile: profile, hard: writes, deleting: writes ? nil : held)
+            }
+            if let above = breakAbove {
+                // The line break above goes last, by one ⌫ from a caret on the emptied lines, so nothing above them is ever selected;
+                // Chrome makes a further ⌫ over an invisible character its own undo step.
+                steps.append(.press(.deleteBack, count: 1))
+                context.applyEdit(range: above, replacement: "")
+                // Rich editors differ on whether invisible characters ending the line above go with its newline (Lark's do).
+                if context.breaks != nil, above.count > 1 { context.unknown.insert(.length) }
+                steps += settle(context, profile: profile, hard: context.breaks == nil)
+            }
             if !blackhole {
                 steps.append(.commit(.deleted(into: register, content: .literal(content), wise: wise)))
             }
-            return steps
+            guard ending else { return steps }
+            context.breakAbove = nil
+            // Nothing reads whether Chromium's line break went, so the caret moves from wherever it is.
+            guard context.breaks == nil else { return steps + relativeLanding(context: &context, profile: profile) }
+            return lowerMove(.motion(.lineStart(firstNonBlank: true), count: 1), context: &context, profile: profile)
+                .map { steps + $0 }
         }
         guard context.selectionOpaque else { return nil }
         context.selectionOpaque = false
@@ -1855,6 +1969,21 @@ private extension PhysicalPlanner {
             .clipboardCut,
             .commit(.deleted(into: register, content: .pasteboard, wise: wise)),
         ]
+    }
+
+    /// Keys to the first non-blank from where the unconfirmed delete left the caret, → first collapsing lines it left selected to their end.
+    static func relativeLanding(context: inout Context, profile: CapabilityProfile) -> [PhysicalStep] {
+        var steps: [PhysicalStep] = [.press(.right, count: 1)]
+        steps += settle(context, profile: profile, hard: false)
+        guard profile.has(.lineStartKey), let model = context.model, let caret = context.caret else { return steps }
+        let target = model.firstNonBlank(inLineOf: caret)
+        let column = model.graphemes(in: model.lineStart(of: caret)..<target)
+        context.selection = target..<target
+        steps.append(.press(.paragraphStart, count: 1))
+        if column > 0 {
+            steps += run(.right, count: column, selecting: context.arrowsSelect, normalizing: context.normalizes(target))
+        }
+        return steps + settle(context, profile: profile)
     }
 
     static func lowerYank(
@@ -1980,7 +2109,7 @@ private extension PhysicalPlanner {
         // chord approximation cannot compute them. Scoped fields ring.
         guard let model = context.linewiseModel(profile), let selection = context.selection else { return nil }
         let position = selection.lowerBound
-        let range = model.lines(from: position, count: count, includingTerminator: false)
+        let range = model.lines(from: position, count: count, extent: .interior)
         guard !context.retypesStructure(range) else { return nil }
         let lines = model.visibleText(in: range)
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -2000,7 +2129,7 @@ private extension PhysicalPlanner {
         if profile.has(.writeSelection) {
             steps += write(range, from: selection.isEmpty ? selection.lowerBound : nil, context: context)
         } else {
-            switch nativeSelect(.lines(count: count, interior: true), range: range,
+            switch nativeSelect(.lines(count: count, extent: .interior), range: range,
                                 context: &context, profile: profile) {
             case .steps(let keys):
                 steps += keys

@@ -106,12 +106,12 @@ precondition(plan("ciw").steps == [
 
 // dd takes whole lines; cc keeps the line it empties.
 precondition(plan("dd").steps == [
-    .select(.lines(count: 1, interior: false)),
+    .select(.lines(count: 1, extent: .removed)),
     .deleteSelection(into: nil),
     .renderCursor
 ])
 precondition(plan("cc").steps == [
-    .select(.lines(count: 1, interior: true)),
+    .select(.lines(count: 1, extent: .interior)),
     .deleteSelection(into: nil),
     .setMode(.insert)
 ])
@@ -127,7 +127,7 @@ precondition(plan("\"a2d3w").steps == [
 precondition(plan("de").steps.first ==
     .select(.span(to: .motion(.word(.forward, end: true, bigWord: false), count: 1), inclusive: true)))
 precondition(plan("dj").steps.first ==
-    .select(.lineSpan(to: .motion(.line(.down, firstNonBlank: false), count: 1), interior: false)))
+    .select(.lineSpan(to: .motion(.line(.down, firstNonBlank: false), count: 1), extent: .removed)))
 precondition(plan("cw").steps.first ==
     .select(.span(to: .motion(.word(.forward, end: true, bigWord: false), count: 1), inclusive: true)))
 
@@ -266,7 +266,7 @@ precondition(sample.wordObject(at: 6, around: false, big: false) == 4..<9)
 precondition(sample.wordObject(at: 6, around: true, big: false) == 4..<10)
 precondition(sample.findCharacter("w", from: 0, forward: true, before: false, count: 1) == 10)
 precondition(TextModel("one\ntwo").verticalMove(from: 1, by: 1, firstNonBlank: false) == 5)
-precondition(TextModel("one\ntwo").lines(from: 1, count: 1, includingTerminator: true) == 0..<4)
+precondition(TextModel("one\ntwo").lines(from: 1, count: 1, extent: .whole) == 0..<4)
 
 // MARK: - PhysicalPlanner
 
@@ -6338,7 +6338,7 @@ do {
     let after = PutAction(position: .after)
     precondition(lowered(.moveCaret(.motion(down, count: limit))) == PhysicalPlan(.press(.down, count: limit)))
     precondition(lowered(.moveCaret(.motion(.lineEnd, count: .max))) == PhysicalPlan(.press(.lineEnd, count: 1)))
-    precondition(lowered(.select(.lineSpan(to: .motion(down, count: limit), interior: false)))
+    precondition(lowered(.select(.lineSpan(to: .motion(down, count: limit), extent: .whole)))
         == PhysicalPlan(.press(.lineStart, count: 1), .press(.selectDown, count: limit + 1)))
     precondition(lowered(.put(.content(twice), after, count: limit), text: "x", profile: axProfile).steps
         .contains(.replaceSelection(String(repeating: "ab", count: limit))))
@@ -6346,8 +6346,8 @@ do {
         for step: LogicalStep in [
             .moveCaret(.motion(down, count: count)), .extendSelection(.motion(.character(.right), count: count)),
             .select(.span(to: .motion(nextWord, count: count), inclusive: false)),
-            .select(.lines(count: count, interior: false)), .select(.lines(count: count, interior: true)),
-            .select(.lineSpan(to: .motion(down, count: count), interior: false)),
+            .select(.lines(count: count, extent: .whole)), .select(.lines(count: count, extent: .interior)),
+            .select(.lineSpan(to: .motion(down, count: count), extent: .whole)),
             .put(.pasteboard(wise: .character), after, count: count), .put(.content(twice), after, count: count),
         ] {
             precondition(lowered(step) == .rejected, "\(step)")
@@ -6374,9 +6374,9 @@ do {
     }
     for step: LogicalStep in [
         .moveCaret(.motion(nextWord, count: .max)), .moveCaret(.motion(.lineEnd, count: .max)),
-        .select(.lines(count: .max, interior: false)), .joinLines(count: .max, keepWhitespace: false),
-        .select(.lineSpan(to: .motion(down, count: .max), interior: false)),
-        .select(.lineSpan(to: .motion(.line(.up, firstNonBlank: false), count: .max), interior: false)),
+        .select(.lines(count: .max, extent: .whole)), .joinLines(count: .max, keepWhitespace: false),
+        .select(.lineSpan(to: .motion(down, count: .max), extent: .whole)),
+        .select(.lineSpan(to: .motion(.line(.up, firstNonBlank: false), count: .max), extent: .whole)),
         .select(.span(to: .motion(.lineEnd, count: .max), inclusive: false)),
         .select(.textObject(TextObject(scope: .around, kind: .word(bigWord: false)), count: .max)),
     ] {
@@ -6669,10 +6669,12 @@ for (keys, after) in [("vld", "one\ntwo"), ("vlcX", "Xne\ntwo")] {
 let closedLines = TextModel("hello\u{200B}\nworld\u{200B}")
 precondition(closedLines.lineEnd(of: 2) == 5 && closedLines.lineBreak(of: 2) == 6)
 precondition(closedLines.lineEnd(of: 6) == 6 && closedLines.visibleOffset(6) == 5 && closedLines.visibleOffset(4) == 4)
-precondition(closedLines.lines(from: 2, count: 1, includingTerminator: true) == 0..<7)
-precondition(closedLines.lines(from: 8, count: 1, includingTerminator: true) == 7..<12)
-precondition(closedLines.lines(from: 2, count: 2, includingTerminator: false) == 0..<12)
-precondition(closedLines.lineSpan(from: 8, to: 1, includingTerminator: false) == 0..<12)
+precondition(closedLines.lines(from: 2, count: 1, extent: .whole) == 0..<7)
+precondition(closedLines.lines(from: 8, count: 1, extent: .whole) == 7..<12)
+precondition(closedLines.lines(from: 8, count: 1, extent: .removed) == 6..<12)
+precondition(TextModel("hello\u{200B}\nworld\u{200B}", paragraphBreaks: [6]).lines(from: 8, count: 1, extent: .removed) == 5..<12)
+precondition(closedLines.lines(from: 2, count: 2, extent: .interior) == 0..<12)
+precondition(closedLines.lineSpan(from: 8, to: 1, extent: .interior) == 0..<12)
 precondition(closedLines.destination(of: .lineEnd, from: 9, count: 1) == 12)
 precondition(closedLines.destination(of: .lastNonBlank, from: 6, count: 1) == 4)
 precondition(closedLines.verticalMove(from: 5, by: 1, firstNonBlank: false) == 12)
@@ -6877,16 +6879,17 @@ func larkSim(_ text: String, caret: Int) -> Sim {
     var host = blankSim([text], caret: caret, profile: larkProfile)
     host.swallowsReplace = true
     host.pullsBackFromLineEnds = true
+    host.runsAreNewlines = true
     return host
 }
 let zw = "\u{200B}"
 for (text, caret, keys, typed, after) in [
     ("hello world\(zw)", 6, "D", nil, "hello \(zw)"), ("hello\(zw)", 2, "dd", nil, zw),
-    ("one\(zw)\ntwo\(zw)", 5, "dd", nil, "one\(zw)\n\(zw)"), ("one\(zw)\ntwo\(zw)", 1, "dd", nil, "two\(zw)"),
+    ("one\(zw)\ntwo\(zw)", 5, "dd", nil, "one\(zw)"), ("one\(zw)\ntwo\(zw)", 1, "dd", nil, "two\(zw)"),
     ("hello\(zw)", 4, "x", nil, "hell\(zw)"), ("hello\(zw)", 2, "C", "!", "he!\(zw)"), ("hello\(zw)", 2, "A", "!", "hello!\(zw)"),
     ("hello\(zw)", 2, "o", "new", "hello\nnew\(zw)"), ("one\(zw)\ntwo\(zw)", 1, "J", nil, "one two\(zw)"),
     ("hello\(zw)", 2, "cc", "X", "X\(zw)"), (zw, 0, "A", "hi", "hi\(zw)"), (zw, 0, "a", "hi", "hi\(zw)"),
-    ("one\(zw)\ntwo\(zw)", 1, "yyjp", nil, "one\(zw)\ntwo\none\(zw)"), ("one\(zw)\n\(zw)", 5, "dd", nil, "one\(zw)\n\(zw)"),
+    ("one\(zw)\ntwo\(zw)", 1, "yyjp", nil, "one\(zw)\ntwo\none\(zw)"), ("one\(zw)\n\(zw)", 5, "dd", nil, "one\(zw)"),
     ("hello\(zw)", 1, "v$d", nil, "h\(zw)"),
 ] as [(String, Int, String, String?, String)] {
     var lark = larkSim(text, caret: caret)
@@ -6931,6 +6934,42 @@ for text in ["hello\(zw)", "hi there\(zw)\nworld\(zw)", "a\(zw)\u{2060}\nb c", z
         }
     }
 }
+var larkUndo = larkSim("one\(zw)\ntwo\(zw)", caret: 6)
+larkUndo.type("ddu")
+precondition(larkUndo.text == "one\(zw)\ntwo\(zw)" && larkUndo.caret >= 5, "\(larkUndo.caret)")
+larkUndo.type("dd")
+precondition(larkUndo.text == "one\(zw)" && larkUndo.settleFailures == 0, larkUndo.text.debugDescription)
+// With keys alone, → cannot cross Lark's newline from the line above, so `u` lands from the text's end.
+var larkKeys = blankSim(["one\(zw)", "two\(zw)", "three\(zw)"], caret: 12, profile: keyProfile)
+larkKeys.webContent = true
+larkKeys.pullsBackFromLineEnds = true
+larkKeys.runsAreNewlines = true
+larkKeys.type("ddu")
+precondition(larkKeys.text == "one\(zw)\ntwo\(zw)\nthree\(zw)" && larkKeys.caret == 10, "\(larkKeys.caret)")
+// A landing that fails in Lark's field still ends on the restored line, since ↓ crosses the break → cannot.
+// With keys alone the fallback's ⌘↓, or its ⇧↓ and →, reach the restored line where ↓ (or ↓ and ⌘↓) were ignored.
+let larkFaults: [(UndoSelection: Sim.UndoSelection, late: Bool, profile: CapabilityProfile?, ignored: Set<Chord>)] = [
+    (.toBreak, true, nil, []), (.toBreak, false, nil, []), (.restored, true, nil, []), (.toBreak, true, keyProfile, [.documentEnd]),
+    (.toBreak, true, readProfile, [.down]), (.restored, false, readProfile, [.down, .selectDown]),
+    (.toBreak, true, keyProfile, [.down, .documentEnd]),
+]
+for (shape, late, profile, ignored) in larkFaults {
+    for probe in ["dd", "iX"] where !(profile != nil && probe == "dd") {
+        var lark = profile.map { blankSim(["one\(zw)", "two\(zw)", "three\(zw)"], caret: 12, profile: $0) }
+            ?? larkSim("one\(zw)\ntwo\(zw)\nthree\(zw)", caret: 12)
+        (lark.webContent, lark.pullsBackFromLineEnds, lark.runsAreNewlines) = (true, true, true)
+        (lark.undoSelection, lark.undoesLate) = (shape, late)
+        lark.type("dd")
+        if profile != nil { lark.ignoredChords = ignored } else { lark.swallowsSelect = true }
+        lark.type("u")
+        (lark.swallowsSelect, lark.ignoredChords) = (false, [])
+        lark.type(probe)
+        lark.feed("<Esc>")
+        let rows = lark.text.split(separator: "\n", omittingEmptySubsequences: false)
+        let landed = probe == "dd" ? lark.text == "one\(zw)\ntwo\(zw)" : rows.count == 3 && rows[0] == "one\(zw)" && rows[1] == "two\(zw)" && rows[2].contains("X")
+        precondition(landed, "\(shape) late=\(late) ignored=\(ignored) u, then \(probe): \(lark.text.debugDescription)")
+    }
+}
 var larkYank = larkSim("one\(zw)\ntwo\(zw)", caret: 1)
 larkYank.type("yy")
 precondition(larkYank.state.session.register("\"") == .content(RegisterContent(text: "one\n", wise: .line)))
@@ -6943,9 +6982,10 @@ for (text, caret, keys, landing) in [
     precondition(lark.caret == landing && lark.settleFailures == 0 && lark.bells == 0, "\(keys) from \(caret) in \(text.debugDescription)")
 }
 
+// Outside paragraphs the line break above a last line goes alone, so the line above keeps its own run.
 for profile in [axProfile, readProfile, keyProfile] {
     for (caret, keys, after) in [
-        (2, "D", "he\(zw)\nworld\(zw)"), (8, "dd", "hello\(zw)\n\(zw)"), (2, "dd", "world\(zw)"), (2, "J", "hello world\(zw)"),
+        (2, "D", "he\(zw)\nworld\(zw)"), (8, "dd", "hello\(zw)\(zw)"), (2, "dd", "world\(zw)"), (2, "J", "hello world\(zw)"),
     ] {
         var native = Sim(text: "hello\(zw)\nworld\(zw)", caret: caret, profile: profile)
         native.emulatesKeys = true
@@ -6953,6 +6993,407 @@ for profile in [axProfile, readProfile, keyProfile] {
         precondition(native.text == after && native.settleFailures == 0 && native.softMisses == 0 && native.bells == 0,
                      "\(keys) from \(caret) under \(profile): \(native.text.debugDescription)")
     }
+}
+
+// MARK: - Deleting the text's last lines
+
+let lastThree = "one\ntwo\nthree"
+let lastModel = TextModel(lastThree)
+precondition(lastModel.lines(from: 10, count: 1, extent: .removed) == 7..<13 && lastModel.lines(from: 5, count: 1, extent: .removed) == 4..<8)
+precondition(lastModel.lines(from: 5, count: 9, extent: .removed) == 3..<13 && lastModel.lines(from: 1, count: 3, extent: .removed) == 0..<13)
+precondition(lastModel.lines(from: 10, count: 1, extent: .whole) == 8..<13 && lastModel.lines(from: 10, count: 1, extent: .interior) == 8..<13)
+precondition(TextModel("one\ntwo\n").lines(from: 8, count: 1, extent: .removed) == 7..<8)
+precondition(TextModel("one\ntwo\n").lines(from: 4, count: 1, extent: .removed) == 4..<8)
+precondition(TextModel("one\ntwo\n").lineSpan(from: 4, to: 8, extent: .removed) == 3..<8)
+precondition(plan("yy").steps.first == .select(.lines(count: 1, extent: .whole)))
+precondition(plan("dk").steps.first == .select(.lineSpan(to: .motion(.line(.up, firstNonBlank: false), count: 1), extent: .removed)))
+precondition(plan("cj").steps.first == .select(.lineSpan(to: .motion(.line(.down, firstNonBlank: false), count: 1), extent: .interior)))
+
+precondition(physical("dd", text: "one\ntwo", caret: 5, profile: axProfile).steps == [
+    .setSelection(4..<7),
+    .settle(Expectation(selection: 4..<7, length: 7)),
+    .settle(Expectation(selection: 4..<7, length: 7, selectedText: "two")),
+    .press(.deleteBack, count: 1),
+    .softSettle(deleting(Expectation(selection: 4..<4, length: 4), 4..<7, before: 7)),
+    .press(.deleteBack, count: 1),
+    .settle(Expectation(selection: 3..<3, length: 3)),
+    .commit(.deleted(into: nil, content: .literal("two\n"), wise: .line)),
+    .setSelection(0..<0),
+    .settle(Expectation(selection: 0..<0, length: 3)),
+    .setSelection(0..<1),
+    .commit(.setCursor(0..<1)),
+])
+let down = [Chord.paragraphStart, Chord.paragraphEnd.shifted, .selectRight]
+for (keys, caret, expected) in [
+    ("dd", 10, down), ("2dd", 5, down + [Chord.paragraphEnd.shifted, .selectRight]), ("dG", 5, [.paragraphStart, Chord.documentEnd.shifted]),
+    ("dk", 10, [.paragraphEnd, .right, .selectLeft, Chord.paragraphStart.shifted, .selectLeft, Chord.paragraphStart.shifted]),
+] {
+    precondition(chords(physical(keys, text: lastThree, caret: caret, profile: keyProfile)) == expected + [.deleteBack, .deleteBack, .paragraphStart], keys)
+}
+let longAbove = String(repeating: "word ", count: 40) + "\nlast"
+precondition(chords(physical("dd", text: longAbove, caret: 202, profile: readProfile))
+             == [.right, .right, .right] + Array(repeating: .selectLeft, count: 4) + [.deleteBack, .deleteBack] + Array(repeating: .left, count: 200))
+
+for profile in [axProfile, keyProfile, readProfile, noInsertProfile] {
+    for (text, caret, keys, after, cursor, register) in [
+        ("one\ntwo", 5, "dd", "one", 0, "two\n"), ("one\ntwo\n", 8, "dd", "one\ntwo", 4, "\n"),
+        ("one\n  two\nthree", 13, "dd", "one\n  two", 6, "three\n"), (lastThree, 5, "2dd", "one", 0, "two\nthree\n"),
+        (lastThree, 5, "dj", "one", 0, "two\nthree\n"), (lastThree, 10, "dk", "one", 0, "two\nthree\n"),
+        (lastThree, 5, "dG", "one", 0, "two\nthree\n"), ("one\ntwo\n", 4, "dG", "one", 0, "two\n\n"),
+        ("one\n\n", 5, "dd", "one\n", 4, "\n"), ("one", 1, "dd", "", 0, "one"), (lastThree, 10, "dd.", "one", 0, "two\n"),
+        (lastThree, 10, "ddp", lastThree, 13, "three\n"), (lastThree, 10, "ddP", "one\nthree\ntwo", 10, "three\n"),
+        ("one\ntwo", 5, "yy", "one\ntwo", 4, "two"),
+    ] {
+        var sim = Sim(text: text, caret: caret, profile: profile)
+        sim.emulatesKeys = true
+        sim.type(keys)
+        let context = "\(keys) in \(text.debugDescription)"
+        precondition(sim.text == after && sim.caret == cursor && sim.settleFailures == 0 && sim.softMisses == 0, context)
+        precondition(sim.state.session.register("\"") == .content(RegisterContent(text: register, wise: .line)), context)
+    }
+    var blackHole = Sim(text: lastThree, caret: 10, profile: profile)
+    blackHole.emulatesKeys = true
+    blackHole.type("\"_dd")
+    precondition(blackHole.text == "one\ntwo" && blackHole.state.session.register("\"") == nil)
+    var changed = Sim(text: "one\ntwo", caret: 5, profile: profile)
+    changed.emulatesKeys = true
+    changed.type("ccX")
+    changed.feed("<Esc>")
+    precondition(changed.text == "one\nX")
+}
+
+// The delete writes no text, so a field that ignores text writes deletes the last line at once.
+for mode in ["plain", "markers", "emptyParagraphs"] {
+    let profile = adding([.lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey], to: axProfile)
+    var refused = Sim(text: lastThree, caret: 10, profile: profile)
+    refused.swallowsReplace = true
+    refused.emulatesKeys = true
+    if mode == "markers" {
+        refused.reads = omitsBreaks
+        refused.writesInReadOffsets = true
+        refused.markers = true
+    } else if mode == "emptyParagraphs" {
+        refused.emptyParagraphs = true
+        refused.readModel = .textContent
+    }
+    refused.learn(with: Sim.Learner(chromium: mode != "plain", probed: profile))
+    refused.type("dd")
+    precondition(refused.text == "one\ntwo" && refused.caret == 4 && refused.settleFailures == 0, mode)
+}
+var refusedEmpty = Sim(text: "one\ntwo\n", caret: 8, profile: adding([.lineStartKey, .lineEndKey], to: axProfile))
+refusedEmpty.swallowsReplace = true
+refusedEmpty.emulatesKeys = true
+refusedEmpty.emptyParagraphs = true
+refusedEmpty.readModel = .textContent
+refusedEmpty.type("dd")
+precondition(refusedEmpty.text == "one\ntwo" && refusedEmpty.caret == 4 && refusedEmpty.settleFailures == 0)
+
+let chipEnds = ParagraphBreaks(hidden: [.init(at: 7, text: " LIN-1 chip", kind: .atom), .init(at: 7, text: "\n", kind: .trailingBreak)])
+precondition(chipEnds.replacing(7..<17, with: "", endsLine: true) == chipEnds)
+precondition(chipEnds.replacing(7..<8, with: "").hidden == [.init(at: 7, text: " LIN-1 chip", kind: .atom)])
+for profile in [writeKeys, keyProfile] {
+    var chipAbove = Sim(text: "Intro \u{2060}\nlast line", caret: 12, profile: profile)
+    chipAbove.emptyParagraphs = true
+    chipAbove.listLines = [Sim.ListLine(), Sim.ListLine()]
+    chipAbove.emulatesKeys = true
+    chipAbove.readModel = .textContent
+    chipAbove.type("dd")
+    precondition(chipAbove.text == "Intro \u{2060}" && chipAbove.caret == 0 && chipAbove.settleFailures == 0 && chipAbove.softMisses == 0)
+}
+
+// A removal that fails leaves the caret on the lines it was to delete.
+let backspaceLane = CapabilityProfile(available: [
+    .readText, .readLength, .readCaret, .readSelectedText, .wholeDocument, .writeSelection, .drawCursor,
+    .lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey,
+])
+var ignoredBackspace = Sim(text: "one\ntwo", caret: 7, profile: backspaceLane)
+ignoredBackspace.emulatesKeys = true
+ignoredBackspace.ignoredChords = [.deleteBack]
+ignoredBackspace.type("dd")
+precondition(ignoredBackspace.text == "one\ntwo" && ignoredBackspace.caret == 7 && ignoredBackspace.settleFailures == 1)
+ignoredBackspace.ignoredChords = []
+ignoredBackspace.type("dd")
+precondition(ignoredBackspace.text == "one" && ignoredBackspace.caret == 0)
+var ignoredInBreaks = Sim(text: "one\ntwo\n", caret: 8, profile: adding([.drawCursor], to: writeKeys))
+ignoredInBreaks.emptyParagraphs = true
+ignoredInBreaks.readModel = .textContent
+ignoredInBreaks.webContent = true
+ignoredInBreaks.emulatesKeys = true
+ignoredInBreaks.ignoredChords = [.deleteBack]
+ignoredInBreaks.type("dd")
+precondition(ignoredInBreaks.text == "one\ntwo\n" && ignoredInBreaks.caret == 8 && ignoredInBreaks.settleFailures == 1)
+ignoredInBreaks.ignoredChords = []
+ignoredInBreaks.type("dd")
+precondition(ignoredInBreaks.text == "one\ntwo" && ignoredInBreaks.caret == 4)
+var partly = Sim(text: "one\n\u{2060}last", caret: 9, profile: adding([.drawCursor], to: writeKeys))
+partly.emptyParagraphs = true
+partly.listLines = [Sim.ListLine(), Sim.ListLine()]
+partly.readModel = .textContent
+partly.emulatesKeys = true
+partly.swallowsReplace = true
+partly.ignoredChords = [.right]
+partly.type("dd")
+precondition(partly.text == "one" && partly.caret == 0 && partly.settleFailures == 0)
+for ignored in [Chord.paragraphStart, Chord.paragraphEnd.shifted, .deleteBack] {
+    var stuck = Sim(text: lastThree, caret: 10, profile: keyProfile)
+    stuck.emulatesKeys = true
+    stuck.ignoredChords = [ignored]
+    stuck.type("dd")
+    precondition(stuck.text == lastThree && stuck.caret >= 8 && stuck.settleFailures == 1, "\(ignored)")
+    stuck.ignoredChords = []
+    stuck.type("dd")
+    precondition(stuck.text == "one\ntwo", "\(ignored)")
+}
+var upward = Sim(text: lastThree, caret: 10, profile: adding([.drawCursor], to: writeKeys))
+upward.emptyParagraphs = true
+upward.readModel = .textContent
+upward.webContent = true
+upward.emulatesKeys = true
+upward.ignoredChords = [.deleteBack]
+upward.type("dk")
+precondition(upward.text == lastThree && upward.caret >= 8)
+upward.ignoredChords = []
+upward.type("dk")
+precondition(upward.text == "one")
+var emptyUpward = Sim(text: "one\n\n", caret: 5, profile: axProfile)
+emptyUpward.emptyParagraphs = true
+emptyUpward.readModel = .textContent
+emptyUpward.webContent = true
+emptyUpward.emulatesKeys = true
+emptyUpward.ignoredChords = [.deleteBack]
+emptyUpward.type("dk")
+precondition(emptyUpward.text == "one\n\n" && emptyUpward.caret == 5)
+emptyUpward.ignoredChords = []
+emptyUpward.type("dk")
+precondition(emptyUpward.text == "one")
+var belowEmpty = Sim(text: "one\n\nthree", caret: 5, profile: readProfile)
+belowEmpty.emptyParagraphs = true
+belowEmpty.readModel = .textContent
+belowEmpty.webContent = true
+belowEmpty.emulatesKeys = true
+belowEmpty.ignoredChords = [.right]
+belowEmpty.type("dd")
+precondition(belowEmpty.text == "one\n\nthree" && belowEmpty.caret >= 5)
+belowEmpty.ignoredChords = []
+belowEmpty.type("dd")
+precondition(belowEmpty.text == "one\n")
+precondition(PhysicalPlanner.collapse(3..<6, toEnd: true, profile: writeKeys) == PhysicalPlan(.press(.right, count: 1), .settle(Expectation(selection: 6..<6))))
+precondition(PhysicalPlanner.collapse(3..<6, misread: true, toEnd: true, profile: writeKeys) == PhysicalPlan(.press(.right, count: 1)))
+for (text, caret, keys) in [("one\ntwo", 7, "dd"), ("one\ntwo\n", 4, "2dd"), (lastThree, 5, "dG")] {
+    var unread = Sim(text: text, caret: caret, profile: axProfile)
+    unread.emulatesKeys = true
+    unread.unreadableSelection = true
+    unread.type(keys)
+    unread.unreadableSelection = false
+    unread.type(keys)
+    precondition(unread.text == "one", keys)
+}
+for profile in [adding([.drawCursor], to: writeKeys), backspaceLane, keyProfile] {
+    var deaf = Sim(text: "one\ntwo\n", caret: 8, profile: profile)
+    deaf.emptyParagraphs = true
+    deaf.readModel = .textContent
+    deaf.webContent = true
+    deaf.emulatesKeys = true
+    deaf.ignoredChords = [.deleteBack, .right]
+    deaf.type("dd")
+    precondition(deaf.text == "one\ntwo\n" && deaf.caret == 8)
+    deaf.ignoredChords = []
+    deaf.type("dd")
+    precondition(deaf.text == "one\ntwo")
+}
+
+// Undoing a linewise delete puts the cursor on the first restored line's first non-blank, as Vim does, whatever the host selects.
+let restored = TextModel("one\ntwo\nthree")
+precondition(restored.restoredLines(from: "one\ntwo", selection: 7..<7)?.lines == 8..<13 && restored.restoredLines(from: "one\nthree", selection: 4..<4)?.lines == 4..<8)
+precondition(restored.restoredLines(from: "two\nthree", selection: 0..<0)?.lines == 0..<4 && restored.restoredLines(from: "", selection: 0..<0)?.lines == 0..<13)
+precondition(restored.restoredLines(from: "one\ntwo", selection: 7..<7)?.ending == true && restored.restoredLines(from: "one\nthree", selection: 4..<4)?.ending == false)
+precondition(restored.restoredLines(from: "one\ntwo three", selection: 7..<7) == nil, "J's undo")
+precondition(restored.restoredLines(from: "one\nwo\nthree", selection: 4..<4) == nil && restored.restoredLines(from: "one\ntwo\nthree", selection: 0..<0) == nil)
+precondition(TextModel("one\nnew\ntwo").restoredLines(from: "one\nTWO", selection: 4..<4) == nil, "lines back, and a line changed")
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", selection: 4..<4)?.lines == 4..<8)
+precondition(TextModel("one\ntwo\ntwo\nthree").restoredLines(from: "one\ntwo\nthree", selection: 8..<8)?.lines == 8..<12)
+precondition(TextModel("\n\n").restoredLines(from: "\n", selection: 0..<0)?.lines == 0..<1 && TextModel("\n\n").restoredLines(from: "", selection: 0..<0)?.lines == 1..<2)
+precondition(TextModel("one\ntwo\n\n\n").restoredLines(from: "one\ntwo\n\n", selection: 9..<9)?.lines == 10..<10, "the break above an empty last line")
+precondition(TextModel("one\u{200B}\ntwo\u{200B}\nthree\u{200B}").restoredLines(from: "one\u{200B}\ntwo\u{200B}\u{200B}", selection: 9..<9)?.lines == 10..<15)
+precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", selection: 0..<4) == nil, "gJ's undo")
+precondition(TextModel("one \n\ntwo").restoredLines(from: "one \ntwo", selection: 0..<5) == nil, "J's undo after a trailing space")
+precondition(TextModel("one\n\n").restoredLines(from: "one\n", selection: 0..<4) == nil, "gJ's undo before an empty last line")
+precondition(TextModel("one\n\n").restoredLines(from: "one\n", selection: 4..<5)?.lines == 5..<5)
+precondition(TextModel("a\n").restoredLines(from: "a", selection: 0..<2) == nil && TextModel(" \n").restoredLines(from: " ", selection: 0..<2) == nil,
+             "joins of a one-character line")
+precondition(TextModel("a\n").restoredLines(from: "a", selection: 1..<2)?.lines == 2..<2)
+precondition(TextModel("one\u{200B}\ntwo\u{200B}").restoredLines(from: "one\u{200B}", selection: 3..<4)?.lines == 5..<9,
+             "a selection pulled back before the line's U+200B")
+precondition(restored.restoredLines(from: "one\ntwo", selection: 4..<4)?.lines == 8..<13, "a caret left on the line above")
+precondition(TextModel("one\n\ntwo").restoredLines(from: "one\ntwo", selection: 4..<4)?.lines == 4..<5)
+precondition(restored.restoredLines(from: "one\nthree", selection: 3..<3)?.lines == 4..<8, "a caret read on the paragraph above's side")
+let landing = PhysicalPlanner.undoLanding(
+    before: "one\ntwo", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
+)
+precondition(landing?.ending == 8..<13 && landing?.plan.steps == [
+    .setSelection(8..<8),
+    .settle(Expectation(selection: 8..<8, length: 13)),
+    .setSelection(8..<9),
+    .commit(.setCursor(8..<9)),
+])
+precondition(PhysicalPlanner.undoLanding(
+    before: "one\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 4..<8, length: 13)
+)?.ending == nil, "a middle line restored")
+let onLines = PhysicalStep.softSettle(Expectation(landing: .caretWithin(8...13), length: 13))
+let fallen = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [
+    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1), onLines,
+])
+let twoAbove = FieldSnapshot(capabilities: keyProfile, text: "one\ntwo\nthree", selection: 3..<3, length: 13)
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove)?.steps == [
+    .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), onLines,
+])
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove, selecting: true)?.steps == [
+    .press(.selectDown, count: 2), .press(.right, count: 1), onLines,
+])
+precondition(PhysicalPlanner.undoFallback(
+    onto: 8..<13, snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 9..<9, length: 13)
+) == nil)
+let selectionUnread = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", length: 13)
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: selectionUnread)?.steps == [
+    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1),
+])
+precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: selectionUnread, selecting: true) == nil)
+precondition(PhysicalPlanner.undoLanding(
+    before: "one\ntwo\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<8)
+) == nil)
+precondition(physical("u", text: "one\ntwo", caret: 4, profile: axProfile).steps == [.press(.undo, count: 1), .commit(.setCursor(nil))])
+for (rich, shape, late) in [(false, Sim.UndoSelection.restored, false), (false, .throughBreak, true), (true, .toBreak, true),
+                            (true, .restored, false)] {
+    for profile in [axProfile, writeKeys, keyProfile, readProfile] {
+        func host(_ text: String, _ caret: Int) -> Sim {
+            var sim = Sim(text: text, caret: caret, profile: profile)
+            sim.emulatesKeys = true
+            sim.undoSelection = shape
+            sim.undoesLate = late
+            if rich {
+                sim.emptyParagraphs = true
+                sim.readModel = .textContent
+                sim.webContent = true
+            }
+            return sim
+        }
+        let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys")"
+        for (text, caret, keys, restoredLine, after) in [
+            (lastThree, 10, "ddu", 8, "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", 10, "one\ntwo"),
+            (lastThree, 5, "dGu", 4, "one\nthree"), (lastThree, 1, "jddu", 4, "one\nthree"),
+            ("one\ntwo\n", 8, "ddu", 8, "one\ntwo"), ("one\n\nthree", 4, "ddu", 4, "one\nthree"),
+            ("one\n  two\nthree", 6, "ddu", 6, "one\nthree"),
+        ] {
+            var sim = host(text, caret)
+            sim.type(keys)
+            precondition(sim.text == text && sim.settleFailures == 0, "\(keys) in \(text.debugDescription), \(context)")
+            precondition(sim.caret == restoredLine, "\(keys) in \(text.debugDescription), \(context): \(sim.caret)")
+            if keys.hasPrefix("dd") || keys.hasPrefix("j"), profile.has(.writeSelection) || profile.has(.lineStartKey) {
+                sim.type("dd")
+                precondition(sim.text == after, "\(keys)dd in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
+            }
+        }
+        let faults: [(inout Sim) -> Void] = [
+            { $0.swallowsSelect = true }, { $0.ignoredChords = [.documentEnd] }, { $0.ignoredChords = [.down] },
+            { $0.swallowsSelect = true; $0.ignoredChords = [.right] }, { $0.ignoredChords = [.documentEnd, .right] },
+            { $0.ignoredChords = [.down, .right] }, { $0.ignoredChords = [.down, .documentEnd] },
+        ]
+        for fault in faults {
+            for (caret, keys, after) in [(10, "dd", "one\ntwo"), (10, "dk", "one\nthree"), (0, "jdd", "one\nthree")] {
+                var failing = host(lastThree, caret)
+                failing.type(keys)
+                fault(&failing)
+                failing.type("u")
+                (failing.swallowsSelect, failing.ignoredChords) = (false, [])
+                failing.type("dd")
+                precondition(failing.text == after || keys == "dk" && failing.text == "one\ntwo",
+                             "\(keys)udd with a failed landing, \(context): \(failing.text.debugDescription)")
+            }
+        }
+        for (text, keys, after) in [("one\n\ntwo", "gJudd", "\ntwo"), ("one \n\ntwo", "Judd", "\ntwo"), ("one\n\n", "gJudd", "\n"),
+                                    ("one \n\n", "Judd", "\n"), ("a\n", "gJudd", ""), (" \n", "Judd", "")] {
+            var join = host(text, 0)
+            join.type(keys)
+            precondition(join.text == after, "\(keys) in \(text.debugDescription), \(context): \(join.text.debugDescription)")
+        }
+        var upward = host(lastThree, 10)
+        upward.type("dku")
+        upward.type("dd")
+        precondition(["one\nthree", "one\ntwo"].contains(upward.text), "dkudd, \(context): \(upward.text.debugDescription)")
+        var twice = host("one\ntwo\nthree\nfour", 14)
+        twice.type("dddduu")
+        precondition(twice.text == "one\ntwo\nthree\nfour" && TextModel(twice.text).lineStart(of: twice.caret) == 14, "dddduu, \(context)")
+        twice.type("dd")
+        precondition(twice.text == "one\ntwo\nthree", "dddduudd, \(context): \(twice.text.debugDescription)")
+        // An app that groups the second delete's lone ⌫ with the first's undoes both at once, which still end the text.
+        var grouped = host("one\ntwo\n", 4)
+        grouped.type("ddddudd")
+        precondition(grouped.text.hasPrefix("one"), "ddddudd, \(context): \(grouped.text.debugDescription)")
+        var redone = host(lastThree, 10)
+        redone.type("ddu")
+        redone.feed("<C-r>")
+        precondition(redone.text == "one\ntwo", "ddu⌃R, \(context): \(redone.text.debugDescription)")
+        redone.type("udd")
+        precondition(redone.text == "one\ntwo", "ddu⌃Rudd, \(context): \(redone.text.debugDescription)")
+        let zw = "\u{200B}"
+        var invisible = host("one\(zw)\ntwo\(zw)", 6)
+        invisible.type("ddu")
+        precondition(invisible.text == "one\(zw)\ntwo\(zw)" && invisible.caret >= 5, "ddu with line-end runs, \(context): \(invisible.caret)")
+        invisible.type("dd")
+        precondition(invisible.text == "one\(zw)\(zw)" && invisible.settleFailures == 0,
+                     "dduddd with line-end runs, \(context): \(invisible.text.debugDescription)")
+        var stale = host(lastThree, 10)
+        stale.type("dd0x")
+        stale.type("u")
+        precondition(stale.text == "one\ntwo", "\(context): \(stale.text.debugDescription)")
+        stale.type("u")
+        stale.type("dd")
+        precondition(stale.text == "one\ntwo" && stale.settleFailures == 0, "dd0xuudd, \(context): \(stale.text.debugDescription)")
+        var obsolete = host("one\ntwo\nthree\nfour", 14)
+        obsolete.type("ddddux")
+        obsolete.feed("<C-r>")
+        obsolete.type("uudd")
+        precondition(obsolete.text == "one\ntwo\nthree", "ddddux⌃Ruudd, \(context): \(obsolete.text.debugDescription)")
+        var ignored = host(lastThree, 10)
+        ignored.type("dd")
+        ignored.ignoredChords = [.undo]
+        ignored.type("u")
+        ignored.ignoredChords = []
+        ignored.type("udd")
+        precondition(ignored.text == "one\ntwo", "dd, u ignored, udd, \(context): \(ignored.text.debugDescription)")
+        // Hosts that group the last two Backspaces restore both empty lines at the first `u`, so the second restores the last.
+        var coalesced = host("one\ntwo\n\n\n", 10)
+        coalesced.type("ddkjdddduu")
+        let undone = coalesced.text
+        coalesced.type("iX")
+        coalesced.feed("<Esc>")
+        precondition(coalesced.text == undone + "X", "ddkjdddduuiX, \(context): \(coalesced.text.debugDescription)")
+    }
+}
+let hundred = (0...101).map { "line-\($0)" }
+for profile in [axProfile, keyProfile] {
+    var deep = Sim(text: hundred.joined(separator: "\n"), caret: 0, profile: profile)
+    deep.emulatesKeys = true
+    deep.type("G")
+    for _ in 0...100 { deep.type("dd") }
+    for _ in 0...100 { deep.type("u") }
+    deep.type("dd")
+    precondition(deep.text == hundred.dropLast().joined(separator: "\n"), deep.text.suffix(30).debugDescription)
+}
+for (rich, profile) in [(true, adding([.lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey], to: readProfile)),
+                        (false, adding([.writeSelection, .insertText, .drawCursor], to: readProfile))] {
+    var unmeasured = Sim(text: "one\ntwo\nthree\nfour", caret: 14, profile: removing([.readLength], from: profile))
+    unmeasured.emulatesKeys = true
+    unmeasured.undoesLate = true
+    unmeasured.undoSelection = rich ? .toBreak : .restored
+    if rich {
+        unmeasured.emptyParagraphs = true
+        unmeasured.readModel = .textContent
+        unmeasured.webContent = true
+    }
+    unmeasured.type("ddudd")
+    precondition(unmeasured.text == "one\ntwo\nthree", "without readLength, rich=\(rich): \(unmeasured.text.debugDescription)")
 }
 
 print("Vim engine tests passed")

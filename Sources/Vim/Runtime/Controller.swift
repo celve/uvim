@@ -403,13 +403,16 @@ public final class Controller {
             if planned.abortedAtTextCheck(evidence.abortedAt) {
                 // Other text than the plan meant was selected, so the mode it asked for goes too.
                 if let read = selection(of: binding.element, paragraphs: paragraphs), !read.caret {
-                    let collapse = PhysicalPlanner.collapse(read.range, misread: true, profile: binding.capabilities)
+                    let collapse = PhysicalPlanner.collapse(
+                        read.range, misread: true, toEnd: planned.collapsesToEnd, profile: binding.capabilities
+                    )
                     executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
                 }
                 if state.field.mode.isInserting {
                     executor.commit(.setMode(before.nonVisual), state: &state)
                 }
-            } else if !repairStrandedSelection(on: binding, operand: planned.operand, reading: reading),
+            } else if !repairStrandedSelection(on: binding, operand: planned.operand, toEnd: planned.collapsesToEnd,
+                                               reading: reading),
                       state.field.mode.isInserting {
                 // A selection we could not collapse is one the app would type over.
                 executor.commit(.setMode(before.nonVisual), state: &state)
@@ -427,6 +430,46 @@ public final class Controller {
         }
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
+            landUndo(from: text, reading: reading, on: binding, seq: commandSeq)
+        }
+    }
+
+    /// Puts the cursor on the lines `u` put back, as Vim does, from the field as the undo left it.
+    private func landUndo(from before: String, reading: Snapshotter.Reading, on binding: FocusTracker.Binding, seq: UInt64) {
+        // Chrome can apply ⌘Z after reads that follow it, and a read it cannot answer yet is no change (LIN-1980).
+        var waited = 0
+        while waited < 25, (AX.value(of: binding.element) ?? reading.value) == reading.value {
+            Thread.sleep(forTimeInterval: 0.01)
+            waited += 1
+        }
+        let after = snapshotAside(binding)
+        let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after)
+        let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+        let evidence = executor.lastRun
+        // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
+        var fallbacks: [PhysicalPlan] = []
+        if landed == false, let lines = landing?.ending {
+            for selecting in [false, true] {
+                let field = snapshotAside(binding)
+                guard let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
+                executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil)
+                fallbacks.append(fallback)
+            }
+        }
+        Diag.undoLanding(
+            tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
+            lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks
+        )
+    }
+
+    /// The field as it reads now, outside a command, as the Sim's `snapshotAside` reads it.
+    private func snapshotAside(_ binding: FocusTracker.Binding) -> FieldSnapshot {
+        Snapshotter.snapshot(
+            of: binding.element, capabilities: binding.capabilities, anchor: nil, cursor: state.field.cursor,
+            chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
+            sampling: sampling, known: emptyParagraphs, knownUnreachable: unreachable
+        ).snapshot
     }
 
     /// Fold a just-ended Insert session into the dot memories.
@@ -522,7 +565,7 @@ public final class Controller {
 
     /// Collapse a stranded selection, and report whether the field is safe to type into.
     private func repairStrandedSelection(
-        on binding: FocusTracker.Binding, operand: Range<Int>?, reading: Snapshotter.Reading
+        on binding: FocusTracker.Binding, operand: Range<Int>?, toEnd: Bool, reading: Snapshotter.Reading
     ) -> Bool {
         let paragraphs = reading.snapshot.breaks != nil
         // Unknown is not empty: a settle can fail *because* the read went dark.
@@ -542,7 +585,7 @@ public final class Controller {
             ).snapshot
         }
         let collapse = PhysicalPlanner.collapse(
-            read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, profile: binding.capabilities
+            read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, toEnd: toEnd, profile: binding.capabilities
         )
         let writes = binding.capabilities.has(.writeSelection)
         let settled = executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)

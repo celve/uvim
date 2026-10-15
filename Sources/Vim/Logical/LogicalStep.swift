@@ -108,13 +108,11 @@ public extension LogicalStep {
         /// only does arithmetic.
         case span(to: Destination, inclusive: Bool)
 
-        /// Linewise span: whole lines from the caret's line through the
-        /// destination's line (`dj`, `dG`, `d'a`). `interior` excludes the
-        /// final line terminator — change keeps the line it empties.
-        case lineSpan(to: Destination, interior: Bool)
+        /// Whole lines from the caret's line through the destination's line (`dj`, `dG`, `d'a`).
+        case lineSpan(to: Destination, extent: LineExtent)
 
         /// Whole lines starting at the caret's line (`dd`, `yy`, `3cc`).
-        case lines(count: Int, interior: Bool)
+        case lines(count: Int, extent: LineExtent)
 
         case textObject(TextObject, count: Int)
 

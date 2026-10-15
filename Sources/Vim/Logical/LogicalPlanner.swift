@@ -256,6 +256,7 @@ private extension LogicalPlanner {
 
         let isChange = operation.kind == .change
         let total = Count.product(count, operation.targetCount ?? 1)   // 2d3w deletes six words
+        let extent: LineExtent = isChange ? .interior : operation.kind == .delete ? .removed : .whole
 
         let target: LogicalStep.SelectionTarget
         var remember: LogicalStep?
@@ -264,7 +265,7 @@ private extension LogicalPlanner {
             return .bell(.unsupported(source))
 
         case .line:
-            target = .lines(count: total, interior: isChange)
+            target = .lines(count: total, extent: extent)
 
         case .textObject(let object):
             target = .textObject(object, count: total)
@@ -276,7 +277,7 @@ private extension LogicalPlanner {
                 return .bell(reason)
             case .value(let destination):
                 if isLinewise(destination) {
-                    target = .lineSpan(to: destination, interior: isChange)
+                    target = .lineSpan(to: destination, extent: extent)
                 } else {
                     target = .span(to: destination, inclusive: isInclusive(destination))
                 }
@@ -321,7 +322,7 @@ private extension LogicalPlanner {
 
         case .substituteLine:
             return LogicalPlan(
-                .select(.lines(count: count, interior: true)),
+                .select(.lines(count: count, extent: .interior)),
                 .deleteSelection(into: register),
                 .setMode(.insert)
             )
@@ -338,7 +339,7 @@ private extension LogicalPlanner {
 
         case .yankLine:
             return LogicalPlan(
-                .select(.lines(count: count, interior: false)),
+                .select(.lines(count: count, extent: .whole)),
                 .yankSelection(into: register),
                 .collapseSelection(.start)
             )

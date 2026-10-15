@@ -70,6 +70,25 @@ public struct Sim {
     /// The caret stopped between two lists, before the line after it.
     private var inListGap = false
 
+    /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
+    /// in Chrome's textarea, up to that break in Chrome's rich text.
+    public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak }
+    public var undoSelection = UndoSelection.restored
+
+    /// Each undo group's text before it and its first edit's offset, newest last, as the host's undo stack holds them.
+    private var undoGroups: [UndoGroup] = []
+    private typealias UndoGroup = (before: String, at: Int, listLines: [ListLine]?, codeSpans: [Range<Int>])
+
+    /// Groups ⌘Z undid, with the text each left, which ⇧⌘Z puts back until a new edit.
+    private var redoGroups: [(group: UndoGroup, after: String, listLines: [ListLine]?, codeSpans: [Range<Int>])] = []
+
+    /// Hosts group consecutive typed edits for undo until the caret moves some other way.
+    private var coalescing = false
+
+    /// Chrome's ⌘Z and ⇧⌘Z, as measured: a key sent right behind one runs first, and a read or write waits for it.
+    public var undoesLate = false
+    private var lateHistory: [Chord] = []
+
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
     private var snapshotting = false
@@ -135,6 +154,9 @@ public struct Sim {
 
     /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
     public var pullsBackFromLineEnds = false
+
+    /// Lark's editor: ⌫ at a line's start deletes the line above's closing invisible characters with the `\n`, as its newline.
+    public var runsAreNewlines = false
 
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
@@ -322,13 +344,14 @@ private extension Sim {
         guard abortedAt == nil else {
             // Abort hygiene, mirroring the Controller down to the stand-down.
             if planned.abortedAtTextCheck(abortedAt) {
-                if !unreadableSelection, !readSelection.isEmpty {
-                    executeAside(PhysicalPlanner.collapse(readSelection, misread: true, profile: profile))
+                if !unreadableSelection, !readsCaret(paragraphs: snapshot.breaks != nil) {
+                    executeAside(PhysicalPlanner.collapse(readSelection, misread: true, toEnd: planned.collapsesToEnd, profile: profile))
                 }
                 if state.field.mode.isInserting {
                     state = VimReducer.reduce(state, .setMode(before.nonVisual))
                 }
-            } else if !repairStrandedSelection(operand: planned.operand, snapshot: snapshot, value: value),
+            } else if !repairStrandedSelection(operand: planned.operand, toEnd: planned.collapsesToEnd, snapshot: snapshot,
+                                               value: value),
                       state.field.mode.isInserting {
                 state = VimReducer.reduce(state, .setMode(before.nonVisual))
             }
@@ -345,25 +368,41 @@ private extension Sim {
         }
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
+        // A late ⌘Z has landed by now, as the Controller waits for it to.
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text,
+           let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()),
+           !executeAside(landing.plan), let lines = landing.ending {
+            for selecting in [false, true] {
+                guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
+                executeAside(next)
+            }
+        }
     }
 
     /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.
-    mutating func repairStrandedSelection(operand: Range<Int>?, snapshot: FieldSnapshot, value: String?) -> Bool {
+    mutating func repairStrandedSelection(
+        operand: Range<Int>?, toEnd: Bool, snapshot: FieldSnapshot, value: String?
+    ) -> Bool {
         guard !unreadableSelection else { return false }   // unknown is not empty
-        guard !readSelection.isEmpty else { return true }
-        if state.field.mode.isInserting, readSelection == operand { return true }
         let paragraphs = snapshot.breaks != nil
+        guard !readsCaret(paragraphs: paragraphs) else { return true }
+        if state.field.mode.isInserting, readSelection == operand { return true }
         let read = readSelection
         // As the Controller: the markers answer for the side, and the field is read again once `AXValue` has changed.
         let marked = paragraphs && (markers || emptyParagraphs)
         let collapse = PhysicalPlanner.collapse(
             read, side: marked ? chromium.side(selection.lowerBound) : nil, paragraphs: paragraphs,
-            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, profile: profile
+            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, toEnd: toEnd, profile: profile
         )
         if !executeAside(collapse), profile.has(.writeSelection) {
             executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, profile: profile))
         }
-        return readSelection.isEmpty
+        return readsCaret(paragraphs: paragraphs)
+    }
+
+    /// As the Controller reads a caret: through the markers where it reads paragraphs, where selected breaks alone are no caret.
+    func readsCaret(paragraphs: Bool) -> Bool {
+        paragraphs && (markers || emptyParagraphs) ? selection.isEmpty : readSelection.isEmpty
     }
 
     /// Fold a just-ended Insert session into the dot memories.
@@ -443,8 +482,13 @@ private extension Sim {
         var kept: [Int: Int] = [:]
         var generated = generated
         attribution = RunAttribution()
+        defer { landLateHistory() }
         for (index, step) in steps.enumerated() {
             if case .settle = step {} else { attribution.record(step) }
+            switch step {
+            case .press, .commit: break
+            default: landLateHistory()
+            }
             switch step {
             case .setSelection(let range):
                 guard !swallowsSelect else { break }
@@ -462,6 +506,7 @@ private extension Sim {
                 atWrittenCodeEnd = codeInside
                 inListGap = false
                 backward = false
+                coalescing = false
 
             case .replaceSelection(let replacement):
                 if !swallowsReplace { applyReplace(replacement) }
@@ -470,12 +515,18 @@ private extension Sim {
                 applyReplace(typed)
 
             case .press(let chord, let count):
+                if undoesLate, [.undo, .redo].contains(chord) {
+                    lateHistory += repeatElement(chord, count: count)
+                    break
+                }
                 for _ in 0..<count where !ignoredChords.contains(chord) {
-                    guard emulatesKeys || Self.countedKeys.contains(chord), press(reboundChords[chord] ?? chord) else {
+                    guard emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord),
+                          press(reboundChords[chord] ?? chord) else {
                         unsupportedSteps += 1
                         break
                     }
                 }
+                landLateHistory()
 
             case .clipboardCut:
                 pasteboard = TextModel(text).substring(selection)
@@ -558,6 +609,8 @@ private extension Sim {
     /// One key as `KeyModel` has Cocoa's bindings do it, which is how LIN-1533 measured Chromium's arrows; false for
     /// a key the model does not know.
     mutating func press(_ chord: Chord) -> Bool {
+        if chord == .undo { return undo() }
+        if chord == .redo { return redo() }
         if atChipStart, [Key.arrowLeft, .arrowRight].contains(chord.key), !chord.modifiers.contains(.option) {
             atChipStart = false
             return true
@@ -584,6 +637,12 @@ private extension Sim {
                 return true
             }
         }
+        if chord == .deleteBack, runsAreNewlines, selection.isEmpty, selection.lowerBound > 0 {
+            let model = TextModel(text)
+            if model.lineStart(of: selection.lowerBound) == selection.lowerBound {
+                selection = model.lineEnd(of: model.lineStart(of: selection.lowerBound - 1))..<selection.lowerBound
+            }
+        }
         let shown = chromium
         var keys = KeyModel(
             text: text,
@@ -597,10 +656,12 @@ private extension Sim {
         guard keys.press(chord) else { return false }
         inListGap = keys.inGap
         if keys.text != text {
+            noteEdit(at: keys.selection.lowerBound, typing: true)
             let deleted = keys.selection.lowerBound..<(keys.selection.lowerBound + text.utf16.count - keys.text.utf16.count)
             listLines = listLines.map { ListLine.carried($0, in: text, replacing: deleted, with: "") }
             codeSpans = Self.carried(codeSpans, replacing: deleted, with: "", into: keys.text)
         }
+        if keys.text == text, keys.selection != selection { coalescing = false }
         text = keys.text
         selection = pulledBack(keys.selection)
         backward = keys.focus < keys.anchor
@@ -706,7 +767,52 @@ private extension Sim {
         }
     }
 
+    mutating func noteEdit(at offset: Int, typing: Bool) {
+        if typing, coalescing, let last = undoGroups.indices.last {
+            undoGroups[last].at = min(undoGroups[last].at, offset)
+        } else {
+            undoGroups.append((before: text, at: offset, listLines: listLines, codeSpans: codeSpans))
+        }
+        redoGroups = []
+        coalescing = typing
+    }
+
+    mutating func landLateHistory() {
+        for chord in lateHistory where !ignoredChords.contains(chord) { _ = press(chord) }
+        lateHistory = []
+    }
+
+    /// ⌘Z: the newest group's text back, selected as `undoSelection` has this host select it.
+    mutating func undo() -> Bool {
+        guard let group = undoGroups.popLast() else { return true }
+        redoGroups.append((group: group, after: text, listLines: listLines, codeSpans: codeSpans))
+        let restored = group.before.utf16.count - text.utf16.count
+        (text, listLines, codeSpans) = (group.before, group.listLines, group.codeSpans)
+        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
+        let put = TextModel(text).substring(group.at..<group.at + max(0, restored)).utf16
+        let toBreak = put.firstIndex(of: 10).map { put.distance(from: put.startIndex, to: $0) }
+        let length = switch undoSelection {
+        case .restored: put.count
+        case .throughBreak: toBreak.map { $0 + 1 } ?? put.count
+        case .toBreak: toBreak ?? put.count
+        }
+        selection = group.at..<group.at + length
+        return true
+    }
+
+    /// ⇧⌘Z: the newest undone group's edit again, the caret where it began.
+    mutating func redo() -> Bool {
+        guard let undone = redoGroups.popLast() else { return true }
+        undoGroups.append(undone.group)
+        (text, listLines, codeSpans) = (undone.after, undone.listLines, undone.codeSpans)
+        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
+        let at = TextModel(text).clamp(undone.group.at)
+        selection = at..<at
+        return true
+    }
+
     mutating func applyReplace(_ replacement: String) {
+        noteEdit(at: selection.lowerBound, typing: false)
         listLines = listLines.map { ListLine.carried($0, in: text, replacing: selection, with: replacement) }
         let replaced = TextModel(text).replacing(selection, with: replacement)
         codeSpans = Self.carried(codeSpans, replacing: selection, with: replacement, into: replaced)

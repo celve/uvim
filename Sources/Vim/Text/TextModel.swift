@@ -184,28 +184,68 @@ public struct TextModel: Equatable, Sendable {
         return offset(i)
     }
 
-    /// Whole lines from the line containing `a` through the line containing
-    /// `b`, in either order.
-    public func lineSpan(from a: Int, to b: Int, includingTerminator: Bool) -> Range<Int> {
-        lines(from: min(a, b), through: lineBreak(of: max(a, b)), includingTerminator: includingTerminator)
+    /// Whole lines from the line containing `a` through the line containing `b`, in either order.
+    public func lineSpan(from a: Int, to b: Int, extent: LineExtent) -> Range<Int> {
+        lines(from: min(a, b), through: lineBreak(of: max(a, b)), extent)
     }
 
     /// N whole lines starting at the line containing `o`.
-    public func lines(from o: Int, count: Int, includingTerminator: Bool) -> Range<Int> {
+    public func lines(from o: Int, count: Int, extent: LineExtent) -> Range<Int> {
         var end = lineBreak(of: o)
         var remaining = count - 1
         while remaining > 0, end < length {
             end = lineBreak(of: end + 1)
             remaining -= 1
         }
-        return lines(from: o, through: end, includingTerminator: includingTerminator)
+        return lines(from: o, through: end, extent)
     }
 
-    /// From `o`'s line start to the break at `end`, the break taken whole or left with its invisible characters.
-    private func lines(from o: Int, through end: Int, includingTerminator: Bool) -> Range<Int> {
+    /// From `o`'s line start to the break at `end`, the break taken whole or left with its invisible characters; lines that end
+    /// the text, removed, take the newline above them instead, in paragraphs with the line above's invisible characters, which
+    /// an editor that closes its lines with one (Lark's) deletes with the newline.
+    private func lines(from o: Int, through end: Int, _ extent: LineExtent) -> Range<Int> {
         let start = lineStart(of: o)
-        guard includingTerminator, end < length else { return start..<lineEnd(of: lineStart(of: end)) }
+        guard extent != .interior, end < length else {
+            let last = lineEnd(of: lineStart(of: end))
+            guard extent == .removed, start > 0 else { return start..<last }
+            return (paragraphBreaks == nil ? start - 1 : lineEnd(of: lineStart(of: start - 1)))..<last
+        }
         return start..<(end + 1)
+    }
+
+    /// The lines `before` lacks, where this text is `before` with whole lines put back as an undone linewise delete leaves it, placed
+    /// nearest the app's `selection` after the undo, then as the break above lines ending the text (`ending`), then as lines with breaks.
+    public func restoredLines(from before: String, selection: Range<Int>?) -> (lines: Range<Int>, ending: Bool)? {
+        let after = Array(text.utf16), old = Array(before.utf16)
+        let added = after.count - old.count
+        guard added > 0 else { return nil }
+        var latest = 0
+        while latest < old.count, after[latest] == old[latest] { latest += 1 }
+        guard after[(latest + added)...].elementsEqual(old[latest...]) else { return nil }
+        var earliest = latest
+        while earliest > 0, after[earliest - 1] == after[earliest - 1 + added] { earliest -= 1 }
+        let near = selection?.lowerBound
+        var best: (rank: [Int], lines: Range<Int>, ending: Bool)?
+        for at in earliest...latest {
+            let end = at + added
+            // An app selects what its undo put back from where that starts, give or take a paragraph's side or a line's invisible end,
+            // so an undone join, selected from the joined line's start, put back no lines.
+            func beside(_ low: Int) -> Bool { near.map { (low...(at + 1)).contains($0) } ?? true }
+            var found: [(form: Int, lines: Range<Int>)] = []
+            // A caret may sit anywhere after an undo, and lines that end the text must still be found from it.
+            if after[at] == 10, lineEnd(of: end) == end, lineBreak(of: end) == length,
+               selection?.isEmpty == true || beside(lineEnd(of: lineStart(of: at))) {
+                found.append((0, (at + 1)..<end))
+            }
+            if after[end - 1] == 10 && (at == 0 || after[at - 1] == 10) || at == 0 && end == after.count, beside(at - 1) {
+                found.append((1, at..<end))
+            }
+            for (form, lines) in found {
+                let rank = [near.map { abs($0 - at) } ?? latest - at, form, -at]
+                if best.map({ rank.lexicographicallyPrecedes($0.rank) }) ?? true { best = (rank, lines, form == 0) }
+            }
+        }
+        return best.map { ($0.lines, $0.ending) }
     }
 
     /// `j`/`k`: move whole lines, preserving the grapheme column, clamped to

@@ -7,6 +7,18 @@ public enum VisualKind: String, Equatable, Hashable, Sendable {
     case block
 }
 
+/// What a linewise target takes besides its lines' text.
+public enum LineExtent: Equatable, Hashable, Sendable {
+    /// No final line terminator: change keeps the line it empties.
+    case interior
+
+    /// The terminator after each line (yank, case, shift).
+    case whole
+
+    /// As `whole`, but lines that end the text take the newline before them: a delete leaves no empty line.
+    case removed
+}
+
 /// A remembered Visual selection (`gv`): its kind and text range.
 public struct VisualMemory: Equatable, Hashable, Sendable {
     public let kind: VisualKind

@@ -206,7 +206,7 @@ A subset of Vim. In a field uvim can read and write, as in most native Mac apps:
 | **Search** | `/` or `?`, the text, ⏎; then `n` `N`. Literal text, case-sensitive, wrapping around the end |
 | **Marks** | `m` and a letter; then `'` or `` ` `` and the letter to jump back, in the same field, until its text is edited |
 | **Operators** | `d` `c` `y` `g~` `gu` `gU` with a motion, `iw` `aw` `iW` `aW`, or doubled (`dd` `cc` `yy` `g~~` `guu` `gUU`), but not yet with `gg`, `g_` or a search as the motion |
-| **Edit** | `x` `X` `s` `S` `r` `C` `D` `Y` `J` `gJ` `~` `p` `P` `.`, and `u` and ⌃R, which press the app's own ⌘Z and ⇧⌘Z |
+| **Edit** | `x` `X` `s` `S` `r` `C` `D` `Y` `J` `gJ` `~` `p` `P` `.`, and `u` and ⌃R, which press the app's own ⌘Z and ⇧⌘Z; after `u` puts lines back, the cursor goes to the first of them, as in Vim |
 | **Insert** | `i` `a` `I` `A` `o` `O` `gi` |
 | **Visual** | `v`, motions or `iw` `aw`, then `d` `c` `y` `~` `u` `U` `>` `<`. A selection can end one character short of Vim's, and `V` and ⌃V select characters, not lines or blocks |
 | **Counts** | Most commands take one, up to 999,999,999 as in Vim. `gg` `G` `C` `D`, the Insert commands, `u` and ⌃R ignore it, and `r` `p` `P` beep above 1,000 |
@@ -810,7 +810,8 @@ does not stop a uvim that is already running.
 When a field can be read but not written, uvim moves by line and document with the standard
 Cocoa bindings instead of counting arrow presses: ⌃A/⌃E to the start and end of the caret's
 paragraph, which is uvim's line, ⇧⌃A/⇧⌃E to select there, and ⌘↑/⌘↓ (⇧ to select) for the
-document. `dd` is ⌃A, ⇧⌃E, ⇧→; `j` is ⌃E, → and then the column counted on the new line; `0`,
+document. `dd` is ⌃A, ⇧⌃E, ⇧→, and on the last line a second ⌫ after the delete takes the line
+break above it, as Vim does; `j` is ⌃E, → and then the column counted on the new line; `0`,
 `$`, `gg`, `G`, `D`, `C`, `cc`, `yy`, `o`, `O`, `J` and linewise puts follow the same pattern.
 `x` and `X` still select one character and check it before deleting, because ⌦ and ⌫ would
 delete first and join lines at a line end. Where a field is written but a write cannot land a line's
