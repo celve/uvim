@@ -6156,7 +6156,7 @@ precondition((1...400).contains { budget in
 let listsThenBlocks = fakeTree("0/L/0/2 0.0/G/0/2 1/L/2/4 1.0/G/2/4 2/B/4/8 2.0/N/4/6 2.1/D/6/8 3/Q/8/10 3.0/G/8/10")
 let rootsOnly = UnreachableLines.Candidates(markers: [], chips: [], roots: true, stops: true)
 precondition(unreachableScanned(listsThenBlocks, rootsOnly)
-             == UnreachableLines.Found(markers: [], chips: [], joins: [2, 4, 8], controls: [4..<6]))
+             == UnreachableLines.Found(markers: [], chips: [], joins: [2, 4, 8], controls: [4..<6], containers: [[3]]))
 // The roots and the second list's start are 6 reads, the code block's two children and three more starts 8, the quote's child 1.
 precondition((6...14).allSatisfy { budget in
     unreachableScanned(listsThenBlocks, rootsOnly, budget: budget) == UnreachableLines.Found(markers: [], chips: [], joins: [2])
@@ -6460,6 +6460,25 @@ precondition(openFound.joins == [67, 106, 132, 180, 271] && openFound.stops.isEm
 let openModel = folded(openValue, openRaw, fakeTree(openSpec))
 precondition(linearKeys("j", "Section body delta", openModel) == [.paragraphEnd, .selectRight, .right]
              && linearKeys("j", "Bullet in section golf", openModel) == [.paragraphEnd, .selectRight, .right])
+precondition(openFound.containers == [[2], [4], [4, 2], [6], [7]] && tablesFound.containers == [[9], [15], [19], [19, 3]])
+
+// A paragraph inside a section made a quote keeps every root and the text, so the containers' children witness it.
+let openTree = fakeTree(openSpec)
+func openWitness(_ children: @escaping (FakeNode) -> [FakeNode]?, roots: [FakeNode] = openTree) -> Int? {
+    UnreachableLines.witness(roots: roots, containers: openFound.containers, children: children, identity: ObjectIdentifier.init)
+}
+let quotedChild = openTree[4].children.enumerated().map { $0.offset == 1 ? fakeTree("0/Q/157/180")[0] : $0.element }
+precondition(openWitness(\.children) == openWitness(\.children)
+             && openWitness { $0 === openTree[4] ? quotedChild : $0.children } != openWitness(\.children)
+             && openWitness(\.children, roots: Array(openTree.prefix(5))) == nil
+             && UnreachableLines.witness(roots: openTree, containers: [], children: \.children, identity: ObjectIdentifier.init)
+                == openTree.reduce(into: Hasher()) { $0.combine(ObjectIdentifier($1)) }.finalize())
+
+// An `AXSplitter` is a rule only where the roots show Linear's classes.
+let ruledSpec = "0/G/0/5 0.0/T/0/5 1/R/5/5 2/G/5/10 2.0/T/5/10 3/R/10/10 4/R/10/10 5/G/10/15 5.0/T/10/15"
+let ruleCandidates = UnreachableLines.Candidates(markers: [], chips: [], stops: true)
+precondition(unreachableScanned(fakeTree(ruledSpec), ruleCandidates)?.stops.map(\.kind) == [.rule, .rule, .ruleGap, .rule]
+             && unreachableScanned(fakeTree(ruledSpec, linear: false), ruleCandidates)?.stops == [])
 
 // The keys between and around rules, stops and tables, as measured in Linear.
 var ruleKeys = KeyModel(text: "a\nb\nc", anchor: 1, focus: 1, stops: [2: [.rule], 4: [.rule, .ruleGap, .rule]])

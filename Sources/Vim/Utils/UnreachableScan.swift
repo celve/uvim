@@ -48,7 +48,8 @@ public struct UnreachableScan<Node> {
         }
         return UnreachableLines.Found(
             markers: markers, chips: chips, carets: carets, joins: Array(Set((lists ?? []) + (blocks?.joins ?? []))).sorted(),
-            controls: blocks?.controls ?? [], stops: blocks?.stops ?? [], tables: blocks?.tables ?? []
+            controls: blocks?.controls ?? [], stops: blocks?.stops ?? [], tables: blocks?.tables ?? [],
+            containers: blocks?.containers ?? []
         )
     }
 
@@ -74,6 +75,9 @@ public struct UnreachableScan<Node> {
         var controls: [Range<Int>] = []
         var stops: [UnreachableLines.Stop] = []
         var tables: [UnreachableLines.Table] = []
+        var containers: [[Int]] = []
+        /// A root carries one of Linear's classes, without which a rule is not known to be Linear's.
+        var linear = false
     }
 
     /// A block as its own classes tell it.
@@ -89,6 +93,12 @@ public struct UnreachableScan<Node> {
     /// Judges `nodes`, a ProseMirror editor's roots or a quote's or open section's children, each by its own classes, and
     /// records the stops between them; false on a failed read or past the budget.
     private mutating func stops(among nodes: [Node], path: [Int], level: Int, into blocks: inout Blocks) -> Bool {
+        if path.isEmpty {
+            for (index, node) in nodes.enumerated() where !blocks.linear {
+                guard let read = read(node, at: [index]) else { return false }
+                blocks.linear = !UnreachableLines.rootClasses.isDisjoint(with: read.classes)
+            }
+        }
         var previous: Kind?
         for (index, node) in nodes.enumerated() {
             let here = path + [index]
@@ -117,6 +127,7 @@ public struct UnreachableScan<Node> {
             }
             // A quote's and an open section's blocks have the same stops among themselves, past the section's heading.
             if kind == .quote || kind == .section(open: true) {
+                blocks.containers.append(here)
                 guard stops(among: read.children, path: here, level: read.quoteLevel, into: &blocks) else { return false }
             }
             previous = kind
@@ -129,7 +140,7 @@ public struct UnreachableScan<Node> {
         of node: Node, _ read: EmptyBlockScan<Node>.Block, at path: [Int], level: Int, into blocks: inout Blocks
     ) -> Kind? {
         if read.role == "AXList" { return read.classes.contains(UnreachableLines.listClass) ? .list : .other }
-        if read.role == "AXSplitter" { return .rule }
+        if read.role == "AXSplitter" { return blocks.linear ? .rule : .other }
         if read.classes.contains(UnreachableLines.tableClass) {
             guard let table = table(node, read, at: path) else { return nil }
             blocks.tables.append(table)

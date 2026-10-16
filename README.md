@@ -849,7 +849,7 @@ classes: any other editor's quote or list gets no stop it did not get before. A 
 section have the stop too, as do two blocks side by side inside a quote or an open section; below a
 collapsed section only ↑ stops. In a table uvim goes from cell to cell with ⌥→, since → leaves a table's
 last row, and `k` from the line below a table presses ↑, since ← skips the whole table. A horizontal rule
-takes one more arrow either way, and two side by side one more again for the stop between them.
+among them takes one more arrow either way, and two side by side one more again for the stop between them.
 
 Each key is a row in the Capabilities menu — **Line start key (⌃A)**, **Line end key (⌃E)**,
 **Document start key (⌘↑)**, **Document end key (⌘↓)** — claimed for every field whose text

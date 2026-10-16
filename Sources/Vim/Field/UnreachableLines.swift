@@ -99,10 +99,12 @@ public enum UnreachableLines {
         /// The other stops, top first, beside rules, tables and collapsed sections (LIN-1780).
         public let stops: [Stop]
         public let tables: [Table]
+        /// Tree paths of the quotes and open sections whose children the stops were judged among, each after its parent's.
+        public let containers: [[Int]]
 
         public init(
             markers: [Int], chips: [Chip], carets: [Caret] = [], joins: [Int] = [], controls: [Range<Int>] = [],
-            stops: [Stop] = [], tables: [Table] = []
+            stops: [Stop] = [], tables: [Table] = [], containers: [[Int]] = []
         ) {
             self.markers = markers
             self.chips = chips
@@ -111,7 +113,25 @@ public enum UnreachableLines {
             self.controls = controls
             self.stops = stops
             self.tables = tables
+            self.containers = containers
         }
+    }
+
+    /// The roots by identity, then the children of each container found by path from them; nil where a path leads nowhere.
+    public static func witness<Node, ID: Hashable>(
+        roots: [Node], containers: [[Int]], children: (Node) -> [Node]?, identity: (Node) -> ID
+    ) -> Int? {
+        var hasher = Hasher()
+        for root in roots { hasher.combine(identity(root)) }
+        var known: [[Int]: [Node]] = [[]: roots]
+        for path in containers {
+            guard let index = path.last, let siblings = known[Array(path.dropLast())], siblings.indices.contains(index),
+                  let nodes = children(siblings[index]) else { return nil }
+            known[path] = nodes
+            hasher.combine(path)
+            for node in nodes { hasher.combine(identity(node)) }
+        }
+        return hasher.finalize()
     }
 
     /// A stop of `kind` before the line starting at the plain offset `at`.
@@ -215,6 +235,9 @@ public enum UnreachableLines {
     /// Linear's classes on a table's root and on a collapsible section (LIN-1780).
     public static let tableClass = "tableContainer"
     public static let sectionClass = "collapsible-section"
+
+    /// Linear's classes on its root blocks; a rule's `AXSplitter` has none, so only a root with one shows a rule is Linear's.
+    public static let rootClasses: Set<String> = [listClass, blockClass, tableClass, sectionClass, "text-node", "heading-node"]
 
     /// Linear's class on the group that holds a code block's language label and buttons, before its code.
     public static let controlsClass = "node-controls"
