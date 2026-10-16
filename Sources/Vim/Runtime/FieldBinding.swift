@@ -221,10 +221,11 @@ public enum Snapshotter {
                 let walked = UnreachableDiscovery.found(
                     in: element, markers: markers, candidates: candidates, budget: UnreachableLines.readBudget
                 )
+                // The build checks the memo against these reads, which the next snapshot takes by the walk's containers.
+                if snapshotReads.proseMirror { snapshotReads.roots = witness(walked.found) }
                 unreachable = UnreachableLines.Memo(
-                    value: value, markers: markers, blocks: blocks, roots: snapshotReads.proseMirror ? witness(walked.found) : nil,
-                    found: walked.found, exhausted: walked.exhausted, candidates: candidates, reads: walked.reads,
-                    origin: .walked(why)
+                    value: value, markers: markers, blocks: blocks, roots: snapshotReads.roots, found: walked.found,
+                    exhausted: walked.exhausted, candidates: candidates, reads: walked.reads, origin: .walked(why)
                 )
             }
         }
