@@ -6371,7 +6371,7 @@ precondition(linearKeys("j", "Quote after rule kilo", tablesModel) == [.paragrap
              == [.paragraphStart] + Array(repeating: .left, count: 4) + [.paragraphStart], "two rules and the stop between them")
 precondition(linearKeys("j", "Bullet in quote november", tablesModel) == [.paragraphEnd, .selectRight, .right]
              && linearKeys("j", "Numbered in quote oscar", tablesModel) == [.paragraphEnd, .selectRight, .right])
-// A landing on the other side of a table's edge from the caret leaves the length unchecked: the table's controls come and go.
+// In a table the length goes unchecked: the table's controls come and go with how the caret got there.
 func settledLengths(_ plan: PhysicalPlan) -> [Int?] {
     plan.steps.compactMap { if case .settle(let expectation) = $0 { return .some(expectation.length) } else { return nil } }
 }
@@ -6380,8 +6380,9 @@ func tablesPlan(_ keys: String, _ line: String) -> PhysicalPlan {
                 breaks: tablesModel.breaks)
 }
 precondition(settledLengths(tablesPlan("j", "Bullet before table delta")).last == .some(nil)
-             && settledLengths(tablesPlan("j", "Cell five")).allSatisfy { $0 != nil }
-             && settledLengths(tablesPlan("j", "Cell eight")).last == .some(nil))
+             && settledLengths(tablesPlan("j", "Cell five")).allSatisfy { $0 == nil }
+             && settledLengths(tablesPlan("j", "Cell eight")).last == .some(nil)
+             && settledLengths(tablesPlan("j", "Paragraph before table bravo")).first != .some(nil))
 
 // softlash/LIN-1780 scripts/live/evidence/tree-c.jsonl: rules beside code blocks and tables, two tables, a section, a to-do.
 let combosValue = "Probe C: plain opening paragraph alpha.\nCSS\n\n\ncode before rule bravo\n\nCSS\n\n\ncode after rule charlie\nQuote before rule delta\n\nCell one\nCell two\nCell three\nCell four\n\n\nCell five\nCell six\nCell seven\nCell eight\n\n\n\n\n\u{2022}\nBullet after two rules echo\n\nSection foxtrot\nCell nine\nCell ten\nCell eleven\nCell twelve\n\n\n\n\nTodo after table hotel\nPlain closing paragraph india."

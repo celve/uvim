@@ -437,7 +437,7 @@ private extension PhysicalPlanner {
             return offset == candidates.lowerBound ? .paragraphEnd : .paragraphStart
         }
 
-        /// The snapshot's caret was in a table, where Linear shows the table's controls as `AXValue` lines of their own.
+        /// The snapshot's caret was in a table.
         var startsInTable = false
 
         /// `offset` is on a table line.
@@ -451,7 +451,7 @@ private extension PhysicalPlanner {
             _ landing: Landing, blame: Expectation.Blame? = nil, selectedText: String? = nil,
             keeps: Int? = nil, within: Range<Int>? = nil, profile: CapabilityProfile
         ) -> Expectation {
-            // A landing on the other side of a table's edge from the snapshot's caret shows or hides the table's controls.
+            // Linear shows a table's controls as `AXValue` lines while the caret is in it, once keys brought it there.
             let at: Int?
             switch landing {
             case .exact(let range): at = range.upperBound
@@ -459,8 +459,8 @@ private extension PhysicalPlanner {
             case .caretWithin(let range): at = range.lowerBound
             case .between: at = nil
             }
-            let crossesTable = at.map { inTable($0) != startsInTable } ?? false
-            let length = profile.has(.readLength) && !unknown.contains(.length) && !crossesTable
+            let inTables = startsInTable || at.map(inTable) == true
+            let length = profile.has(.readLength) && !unknown.contains(.length) && !inTables
                 ? text.map { $0.utf16.count - valueGap } : nil
             // Without a landing no selection is read, so its edge and slots would check nothing.
             guard !unknown.contains(.selection) else {
