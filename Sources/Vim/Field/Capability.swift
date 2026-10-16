@@ -39,7 +39,7 @@ public enum Capability: String, CaseIterable, Equatable, Hashable, Sendable {
     /// transient command selections keep using regardless. Subtractive only.
     case drawCursor
 
-    /// False in block editors (Notion), whose `AXValue` is one block: the probe's enclosing field or a seed says so, as no settle can tell.
+    /// False in block editors (Notion), whose `AXValue` is one block: the probe's enclosing field or the user says so, as no settle can tell.
     case wholeDocument
 
     /// Is each focused field its own vim session?

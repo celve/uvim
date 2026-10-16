@@ -284,8 +284,8 @@ let noCursorProfile = CapabilityProfile(available: [
     .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .insertText, .wholeDocument,
 ])
 /// The block-editor shape (Notion): the readable text is one block — exact
-/// locally, a lie about the page. Also without drawCursor, mirroring how the
-/// two are seeded together.
+/// locally, a lie about the page. Also without drawCursor, as the page's read
+/// turns both off.
 let blockProfile = CapabilityProfile(available: [
     .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .insertText,
 ])
@@ -571,7 +571,7 @@ precondition(physical("j", text: "one", caret: 0, profile: enclosedField.profile
 ])
 for keys in ["j", "k", "3j", "gg", "G", "l", "w", "x", "ciw", "dd", "dj", "yj", "J"] {
     precondition(physical(keys, text: "say hello world", caret: 6, profile: enclosedField.profile).steps
-        == physical(keys, text: "say hello world", caret: 6, profile: blockProfile).steps, "\(keys) plans as in Notion's seeded block")
+        == physical(keys, text: "say hello world", caret: 6, profile: blockProfile).steps, "\(keys) plans as blockProfile does")
 }
 precondition(physical("j", text: "one", caret: 0, profile: CapabilityResolver.resolve(probed: axProfile, config: shippedSeeds, learned: []).profile)
     .steps.contains(.setSelection(0..<0)), "without the read the caret is written where it is")
@@ -629,10 +629,8 @@ for keys in ["j", "k", "3j", "gg", "G"] {
 //
 // That makes `drawCursor` and column stability mutually exclusive in a block
 // editor: permit the cursor and every `j` re-seeds the app's sticky column
-// from the current caret, losing it across a short block. Notion is seeded
-// with `drawCursor` off, which resolves the tension in favor of the column —
-// by luck rather than design, so this pins the coupling before someone
-// "fixes" the seed.
+// from the current caret, losing it across a short block. So the page's read
+// turns `drawCursor` off with the other two (LIN-1855), and this pins why.
 let drawnCursorSnapshot = FieldSnapshot(
     capabilities: blockDrawProfile, text: "one", selection: 1..<2, cursor: 1..<2
 )
@@ -2588,34 +2586,34 @@ precondition(!opaqueYank.contains(where: {
 
 // The whole point: one app, two engines. Dia's own search box is native; the
 // <input> in the page it is showing is not; both are AXTextField.
-let diaChrome = Surface(bundleID: "com.dia.app", role: "AXTextField", identifier: "address-bar")
-let diaPage = Surface(bundleID: "com.dia.app", origin: "notion.so", role: "AXTextField")
+let diaChrome = Surface(bundleID: "company.thebrowser.dia", role: "AXTextField", identifier: "address-bar")
+let diaPage = Surface(bundleID: "company.thebrowser.dia", origin: "app.notion.com", role: "AXTextField")
 let diaPageField = Surface(
-    bundleID: "com.dia.app", origin: "notion.so", role: "AXTextField", identifier: "search-input"
+    bundleID: "company.thebrowser.dia", origin: "app.notion.com", role: "AXTextField", identifier: "search-input"
 )
 
 // Narrowest first, and both element rungs coexist so an identified field still
 // inherits from "all text fields on this site".
 precondition(diaPageField.rungs == [
-    "com.dia.app|notion.so|id:search-input",
-    "com.dia.app|notion.so|role:AXTextField",
-    "com.dia.app|notion.so",
-    "web:notion.so",
-    "com.dia.app",
+    "company.thebrowser.dia|app.notion.com|id:search-input",
+    "company.thebrowser.dia|app.notion.com|role:AXTextField",
+    "company.thebrowser.dia|app.notion.com",
+    "web:app.notion.com",
+    "company.thebrowser.dia",
 ])
 // No identifier: the id rung simply drops out.
 precondition(diaPage.rungs == [
-    "com.dia.app|notion.so|role:AXTextField",
-    "com.dia.app|notion.so",
-    "web:notion.so",
-    "com.dia.app",
+    "company.thebrowser.dia|app.notion.com|role:AXTextField",
+    "company.thebrowser.dia|app.notion.com",
+    "web:app.notion.com",
+    "company.thebrowser.dia",
 ])
 // Native: no origin, so no site rung and no web: rung. The element rungs hang
 // off the app instead.
 precondition(diaChrome.rungs == [
-    "com.dia.app|id:address-bar",
-    "com.dia.app|role:AXTextField",
-    "com.dia.app",
+    "company.thebrowser.dia|id:address-bar",
+    "company.thebrowser.dia|role:AXTextField",
+    "company.thebrowser.dia",
 ])
 // The bare bundle ID is still the last rung, which is what makes every override
 // written before surfaces existed keep resolving.
@@ -2636,12 +2634,12 @@ precondition(Surface(bundleID: "a", role: "R", identifier: "x|y").rungs.first ==
 // The menu never offers the app-independent web: rung — that is curation's
 // claim, not one a user makes standing in one app.
 precondition(diaPageField.writableScopes.map(\.scope) == [
-    .field(identifier: "search-input"), .fieldsOfRole("AXTextField"), .site("notion.so"), .app,
+    .field(identifier: "search-input"), .fieldsOfRole("AXTextField"), .site("app.notion.com"), .app,
 ])
 precondition(diaChrome.writableScopes.map(\.scope) == [
     .field(identifier: "address-bar"), .fieldsOfRole("AXTextField"), .app,
 ])
-precondition(!diaPageField.writableScopes.contains { $0.rung == "web:notion.so" })
+precondition(!diaPageField.writableScopes.contains { $0.rung == "web:app.notion.com" })
 
 // `site` drops the element half. transition() compares THIS: every Notion block
 // is a different element, so comparing whole surfaces would end the session on
@@ -2652,38 +2650,38 @@ precondition(diaPage != diaPageField)
 // --- The two walks -------------------------------------------------------
 
 let seeds: SurfaceLadder.Seeds = [
-    "web:notion.so": ["wholeDocument", "drawCursor"],
-    "com.dia.app": ["fieldIsSession"],
+    "web:app.notion.com": ["wholeDocument", "drawCursor"],
+    "company.thebrowser.dia": ["fieldIsSession"],
 ]
 
 // Seeds resolve at whichever rung names them, narrowest first.
 precondition(SurfaceLadder.seedEntry("wholeDocument", rungs: diaPageField.rungs, seeds: seeds)
-             == "web:notion.so")
+             == "web:app.notion.com")
 precondition(SurfaceLadder.seedEntry("fieldIsSession", rungs: diaPageField.rungs, seeds: seeds)
-             == "com.dia.app")
+             == "company.thebrowser.dia")
 precondition(SurfaceLadder.seedEntry("readText", rungs: diaPageField.rungs, seeds: seeds) == nil)
 // A native field in the same app never sees the site's seed.
 precondition(SurfaceLadder.seedEntry("wholeDocument", rungs: diaChrome.rungs, seeds: seeds) == nil)
 
 // The narrowest user entry wins over wider ones.
 let layered: SurfaceLadder.UserStore = [
-    "com.dia.app": ["insertText": "off"],
-    "com.dia.app|notion.so": ["insertText": "on"],
+    "company.thebrowser.dia": ["insertText": "off"],
+    "company.thebrowser.dia|app.notion.com": ["insertText": "on"],
 ]
 precondition(SurfaceLadder.userEntry("insertText", rungs: diaPageField.rungs, store: layered)?.rung
-             == "com.dia.app|notion.so")
+             == "company.thebrowser.dia|app.notion.com")
 // ...and the app-level entry is what a native field in the same app still sees.
 precondition(SurfaceLadder.userEntry("insertText", rungs: diaChrome.rungs, store: layered)?.rung
-             == "com.dia.app")
+             == "company.thebrowser.dia")
 precondition(SurfaceLadder.userEntry("readText", rungs: diaChrome.rungs, store: layered) == nil)
 
 // THE law a single merged walk would have broken: a user's `.on` at the app
 // rung must still un-seed curation at the narrower web: rung. The walks stay
 // separate precisely so the existing precedence table can see both and apply
 // "`.on` un-seeds" itself.
-let unseeding: SurfaceLadder.UserStore = ["com.dia.app": ["wholeDocument": "on"]]
+let unseeding: SurfaceLadder.UserStore = ["company.thebrowser.dia": ["wholeDocument": "on"]]
 precondition(SurfaceLadder.seedEntry("wholeDocument", rungs: diaPageField.rungs, seeds: seeds)
-             == "web:notion.so")
+             == "web:app.notion.com")
 precondition(SurfaceLadder.userEntry("wholeDocument", rungs: diaPageField.rungs, store: unseeding)?.value
              == "on")
 
@@ -2692,27 +2690,27 @@ precondition(SurfaceLadder.userEntry("wholeDocument", rungs: diaPageField.rungs,
 // "The picker must never show a lie": writing at a rung clears the same atom at
 // every narrower one, so the choice just made is the choice that resolves.
 let conflicted: SurfaceLadder.UserStore = [
-    "com.dia.app|notion.so|id:search-input": ["insertText": "on"],
-    "com.dia.app|notion.so": ["insertText": "on"],
+    "company.thebrowser.dia|app.notion.com|id:search-input": ["insertText": "on"],
+    "company.thebrowser.dia|app.notion.com": ["insertText": "on"],
 ]
 let widened = SurfaceLadder.setting(
-    "off", "insertText", at: "com.dia.app", rungs: diaPageField.rungs, store: conflicted
+    "off", "insertText", at: "company.thebrowser.dia", rungs: diaPageField.rungs, store: conflicted
 )
 precondition(SurfaceLadder.userEntry("insertText", rungs: diaPageField.rungs, store: widened)?.value
              == "off", "a wider write must not be shadowed by the narrow entries it replaces")
-precondition(widened["com.dia.app|notion.so|id:search-input"] == nil)
-precondition(widened["com.dia.app|notion.so"] == nil)
+precondition(widened["company.thebrowser.dia|app.notion.com|id:search-input"] == nil)
+precondition(widened["company.thebrowser.dia|app.notion.com"] == nil)
 
 // Writing narrow leaves wider rungs alone — nothing below them to clear.
 let narrowed = SurfaceLadder.setting(
-    "off", "insertText", at: "com.dia.app|notion.so", rungs: diaPageField.rungs, store: layered
+    "off", "insertText", at: "company.thebrowser.dia|app.notion.com", rungs: diaPageField.rungs, store: layered
 )
-precondition(narrowed["com.dia.app"]?["insertText"] == "off")
-precondition(narrowed["com.dia.app|notion.so"]?["insertText"] == "off")
+precondition(narrowed["company.thebrowser.dia"]?["insertText"] == "off")
+precondition(narrowed["company.thebrowser.dia|app.notion.com"]?["insertText"] == "off")
 
 // The Dia shape, end to end: denying the page must leave the chrome untouched.
 let scoped = SurfaceLadder.setting(
-    "off", "insertText", at: "com.dia.app|notion.so|role:AXTextField",
+    "off", "insertText", at: "company.thebrowser.dia|app.notion.com|role:AXTextField",
     rungs: diaPage.rungs, store: [:]
 )
 precondition(SurfaceLadder.userEntry("insertText", rungs: diaPage.rungs, store: scoped)?.value == "off")
@@ -2721,30 +2719,30 @@ precondition(SurfaceLadder.userEntry("insertText", rungs: diaChrome.rungs, store
 
 // Auto clears the atom at every rung, and touches nothing else.
 let mixed: SurfaceLadder.UserStore = [
-    "com.dia.app|notion.so": ["insertText": "off", "drawCursor": "off"],
-    "com.dia.app": ["insertText": "on"],
+    "company.thebrowser.dia|app.notion.com": ["insertText": "off", "drawCursor": "off"],
+    "company.thebrowser.dia": ["insertText": "on"],
 ]
 let autoed = SurfaceLadder.setting(
     nil, "insertText", at: nil, rungs: diaPageField.rungs, store: mixed
 )
 precondition(SurfaceLadder.userEntry("insertText", rungs: diaPageField.rungs, store: autoed) == nil)
-precondition(autoed["com.dia.app|notion.so"]?["drawCursor"] == "off", "Auto must be per-atom")
+precondition(autoed["company.thebrowser.dia|app.notion.com"]?["drawCursor"] == "off", "Auto must be per-atom")
 
 // Emptied rungs are pruned, so `defaults read` shows exactly what was chosen.
 precondition(SurfaceLadder.setting(
     nil, "insertText", at: nil, rungs: diaChrome.rungs,
-    store: ["com.dia.app": ["insertText": "off"]]
+    store: ["company.thebrowser.dia": ["insertText": "off"]]
 ).isEmpty)
 
 // The clear actions wipe a scope and everything narrower than it.
 let cleared = SurfaceLadder.clearing(
-    atAndBelow: "com.dia.app|notion.so", rungs: diaPageField.rungs, store: conflicted
+    atAndBelow: "company.thebrowser.dia|app.notion.com", rungs: diaPageField.rungs, store: conflicted
 )
 precondition(cleared.isEmpty)
 // ...but never a wider one.
 precondition(SurfaceLadder.clearing(
-    atAndBelow: "com.dia.app|notion.so", rungs: diaPageField.rungs, store: layered
-)["com.dia.app"]?["insertText"] == "off")
+    atAndBelow: "company.thebrowser.dia|app.notion.com", rungs: diaPageField.rungs, store: layered
+)["company.thebrowser.dia"]?["insertText"] == "off")
 
 // Every capability the shipped seeds name must still exist, and the rungs they
 // are keyed by must be rungs some surface can actually produce. A renamed atom
@@ -2764,8 +2762,14 @@ precondition(SurfaceLadder.seedEntry("nativeMotions", rungs: diaPageField.rungs,
              == Surface.everywhere)
 precondition(SurfaceLadder.seedEntry("nativeMotions", rungs: [], seeds: CapabilitySeeds.denied)
              == Surface.everywhere)
-precondition(SurfaceLadder.seedEntry("wholeDocument", rungs: diaPageField.rungs, seeds: CapabilitySeeds.denied)
-             == "web:notion.so")
+precondition(CapabilitySeeds.denied.keys.allSatisfy { $0 == Surface.everywhere }, "a shipped default names no app or host")
+for bundleID in ["company.thebrowser.dia", "notion.id"] {
+    let block = Surface(bundleID: bundleID, origin: "app.notion.com", role: "AXTextArea")
+    for capability in Capability.blockScoped {
+        precondition(!CapabilityConfig.resolve(block, capability: capability.rawValue, overrides: [:]).isSeededOff,
+                     "a Notion block in \(bundleID) takes \(capability) from the page's read, not a default")
+    }
+}
 precondition(SurfaceLadder.seedEntry("wholeDocument", rungs: diaChrome.rungs, seeds: CapabilitySeeds.denied) == nil)
 precondition(!diaPageField.rungs.contains(Surface.everywhere))
 precondition(!diaPageField.writableScopes.contains { $0.rung == Surface.everywhere })
@@ -2945,18 +2949,18 @@ precondition(target(of: deadRow, bound: plainInput, refocus: menuRow) == deadRow
 // The learner writes at the ROLE learnRung, never the identifier rung: a key per
 // individual field would scatter the evidence so thinly its strikes in a row
 // would never add up.
-precondition(diaPageField.roleRung == "com.dia.app|notion.so|role:AXTextField")
+precondition(diaPageField.roleRung == "company.thebrowser.dia|app.notion.com|role:AXTextField")
 precondition(diaPageField.roleRung != diaPageField.rungs.first,
              "the learner must not write at the identifier learnRung")
-precondition(diaChrome.roleRung == "com.dia.app|role:AXTextField")
-precondition(Surface(bundleID: "com.dia.app").roleRung == nil)   // no role: nothing to learn against
+precondition(diaChrome.roleRung == "company.thebrowser.dia|role:AXTextField")
+precondition(Surface(bundleID: "company.thebrowser.dia").roleRung == nil)   // no role: nothing to learn against
 precondition(Surface(role: "AXTextField").roleRung == nil)       // no app: likewise
 // The role learnRung is always a learnRung the ladder actually produces, or a demotion
 // would be written where no lookup could ever find it.
 precondition(diaPageField.rungs.contains(diaPageField.roleRung!))
 precondition(diaChrome.rungs.contains(diaChrome.roleRung!))
 
-let learnRung = "com.dia.app|notion.so|role:AXTextField"
+let learnRung = "company.thebrowser.dia|app.notion.com|role:AXTextField"
 let otherRung = "com.other.app|role:AXTextField"
 
 // The store commits at once; `true` asks to persist and re-resolve.
@@ -4002,10 +4006,10 @@ var policyVerdict = BeliefStore()
 precondition(committing(&policyVerdict, .drawCursor))
 precondition(taught(policyVerdict).isEmpty, "the resolver applies no verdict to a policy")
 var twoRungs = BeliefStore()
-precondition(committing(&twoRungs, .insertText) && committing(&twoRungs, .insertText, at: "com.dia.app"))
-precondition(taught(twoRungs).first?.beliefs.map(\.rung) == [learnRung, "com.dia.app"])
+precondition(committing(&twoRungs, .insertText) && committing(&twoRungs, .insertText, at: "company.thebrowser.dia"))
+precondition(taught(twoRungs).first?.beliefs.map(\.rung) == [learnRung, "company.thebrowser.dia"])
 var mixedRungs = BeliefStore()
-precondition(committing(&mixedRungs, .insertText) && committing(&mixedRungs, .insertText, at: "com.dia.app", under: .textContent))
+precondition(committing(&mixedRungs, .insertText) && committing(&mixedRungs, .insertText, at: "company.thebrowser.dia", under: .textContent))
 precondition(taught(mixedRungs).first?.beliefs.count == 2, "Try Again leaves no reopened verdict behind")
 
 // MARK: - Beliefs end to end (the Sim's Chromium read fault)

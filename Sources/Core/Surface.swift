@@ -5,10 +5,7 @@
 /// search box is AppKit; the `<input>` in the page it is showing is not; both
 /// report `AXTextField`. Keyed by bundle ID alone, denying a capability for
 /// the page also denies it for the chrome, and there is no way to say
-/// otherwise. The shipped `notion.id` seed shows the same category error from
-/// the other side: it earns its denials because each Notion block is its own
-/// contenteditable — a fact about *notion.so*, expressible today only because
-/// Notion ships an Electron wrapper.
+/// otherwise.
 ///
 /// A surface expands into a **ladder** of string rungs, narrowest first, and
 /// every lookup is a walk down it. A bare bundle ID is still the last rung, so
@@ -237,8 +234,8 @@ public enum SurfaceLadder {
     /// The narrowest rung seeding `capability` off.
     ///
     /// **Deliberately a separate walk from `userEntry`.** A single first-hit
-    /// walk over a merged view would let a seed at `web:notion.so` beat a
-    /// user's `.on` at the app rung, contradicting the law that an explicit
+    /// walk over a merged view would let a seed at a site's `web:` rung beat
+    /// a user's `.on` at the app rung, contradicting the law that an explicit
     /// `.on` un-seeds curation. Resolving the two independently and feeding
     /// them to the existing precedence table keeps that law verbatim.
     public static func seedEntry(
