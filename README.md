@@ -409,10 +409,13 @@ uvim/
 ├── Info.plist                  # Sparkle's feed and key, merged into the generated plist
 ├── uvim.entitlements           # intentionally empty — uvim runs non-sandboxed
 ├── LICENSE                     # GPL-3.0
+├── .github/workflows/          # release.yml: a release from GitHub's runners; release-rehearsal.yml
+│                               #   rehearses it on pull requests, short of notarizing
 ├── docs/
 │   ├── images/                 # the README's icon and demo
 │   └── release-notes/          # <version>.md: what that version's release notes open with
 ├── scripts/
+│   ├── release-runner.sh       # the release workflows' Xcode, XcodeGen, keychain and keys
 │   └── sparkle-release.sh      # notarizes, stages and publishes updates (make dist / publish)
 ├── Sources/
 │   ├── Core/                   # Core framework — what the engine stands on: InputHub
@@ -549,9 +552,13 @@ Once, on the Mac you will publish from:
 1. Check at [developer.apple.com](https://developer.apple.com/account) → Membership that the Apple
    Developer Program membership of the team in `project.yml` is active. Without it there is no
    Developer ID certificate and no notarizing.
-2. Create the team's **Developer ID Application** certificate: Xcode → Settings → Accounts →
-   Manage Certificates… → **+**. Only the team's Account Holder can, and its private key stays in
-   this Mac's keychain.
+2. Create the team's **Developer ID Application** certificate at
+   [developer.apple.com](https://developer.apple.com/account/resources/certificates/add), choosing
+   **G2 Sub-CA**: a certificate from Apple's original Developer ID authority, which Xcode's Manage
+   Certificates may still issue, signs nothing after 2027-02-01. Keychain Access → Certificate
+   Assistant → Request a Certificate From a Certificate Authority, saved to disk, makes the request it
+   asks for; open the certificate it returns to put it beside its private key in this Mac's keychain.
+   Only the team's Account Holder can, and a G2 certificate lasts a year.
 3. Store credentials for Apple's notary service in the keychain, under a profile name you choose:
 
    ```sh
@@ -589,8 +596,8 @@ For each release, from a clean checkout of `main` on that Mac:
 Both notarize the app as a zip, staple the ticket to the app, which a zip cannot carry, and zip it
 again, so Sparkle signs the archive that ships. `make dist` and `make publish` both stop when:
 
-- `gh` is missing, `NOTARY_PROFILE` is not set, `SUPublicEDKey` is empty, or the feed is not a GitHub
-  latest-release asset;
+- `gh` is missing, no notary credentials are given, `SUPublicEDKey` is empty, or the feed is not a
+  GitHub latest-release asset;
 - the app is not signed with a Developer ID Application certificate, which a `SIGN` build and a
   Debug build are not;
 - GitHub can write no release notes for `HEAD` because it is not pushed;
@@ -627,10 +634,43 @@ The cask is written last, after the release exists, so Homebrew never names a zi
 yet. If that write fails, `make publish` says so and exits 1 with the release already made: commit
 `dist/uvim.rb` to the tap as `Casks/uvim.rb` by hand.
 
-`SPARKLE_KEY_FILE=<file>` signs with a key file instead of the keychain.
+`SPARKLE_KEY_FILE=<file>` signs with a key file instead of the keychain. `NOTARY_KEY=<.p8 file>` with
+`NOTARY_KEY_ID`, and `NOTARY_ISSUER` for a team key, notarizes with an App Store Connect API key instead
+of a keychain profile, and `NOTARY_APPLE_ID` with `NOTARY_PASSWORD` and `NOTARY_TEAM_ID` with an Apple
+ID; the first of the three given wins. `TAP_TOKEN` writes the cask with a token of its own.
 
 The zip holds the app with its ticket stapled, so Gatekeeper needs no network to check a copy
 downloaded in a browser, and macOS opens it after its one confirmation for an app from the Internet.
+
+**From GitHub Actions.** [`release.yml`](.github/workflows/release.yml) runs the same `make dist` or
+`make publish` on one of GitHub's macOS runners, for `main` alone, once a reviewer of the repository's
+`release` environment approves the run; only then can the job read the environment's secrets. Once:
+
+1. Under Settings → Environments, create `release` before adding any secret: a run that names an
+   environment the repository lacks creates it unprotected. Name yourself its required reviewer,
+   allow deployments from `main` alone, and turn off the administrators' bypass. Leave **Prevent
+   self-review** off while the account that starts runs is the one that approves them.
+2. Make a Developer ID Application certificate for the workflow alone, as in step 2 above, so that
+   revoking it after a leak stops only the releases it signed, and export it with its private key
+   from Keychain Access as a `.p12`.
+3. Add these secrets to the environment:
+
+   | Secret | Holds |
+   | --- | --- |
+   | `DEVELOPER_ID_P12` | that `.p12` in base64, which `base64 -i <file>.p12` prints |
+   | `DEVELOPER_ID_P12_PASSWORD` | its export password |
+   | `SPARKLE_PRIVATE_KEY` | the backup of step 5 |
+   | `NOTARY_API_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER` | an App Store Connect team API key with the Developer role: the `.p8` file's text, its key ID and the issuer ID, from Users and Access → Integrations once Apple has granted the team API access |
+   | `NOTARY_APPLE_ID`, `NOTARY_PASSWORD` | or an Apple ID and an app-specific password made for the workflow alone |
+   | `TAP_TOKEN` | a fine-grained token for the tap alone, with Contents read and write |
+
+Then, with `MARKETING_VERSION` bumped on `main`, `gh workflow run release.yml` stages the release as
+the run's `dist` artifact and `gh workflow run release.yml -f mode=publish` publishes it, each once
+approved on the run's page. The build has the certificate in its keychain but no other secret, and
+each later step holds only those it needs; the job deletes its keychain and key files when it ends and
+stops after an hour, and a run that stops before the release is created publishes nothing.
+[`release-rehearsal.yml`](.github/workflows/release-rehearsal.yml) runs the same steps short of
+notarizing, with a throwaway identity and no secrets, on pull requests that change them.
 
 </details>
 

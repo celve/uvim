@@ -1,0 +1,70 @@
+# Rehearses release.yml's runner up to notarizing, with no secrets: its Xcode, XcodeGen and history, a
+# throwaway identity through the same keychain steps, a Release build signed with it, and the cleanup.
+name: Release rehearsal
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-rehearsal.yml
+      - scripts/release-runner.sh
+      - Makefile
+      - project.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Xcode and XcodeGen
+        run: scripts/release-runner.sh tools
+      - name: Import a throwaway identity, trusted for code signing
+        run: |
+          cd "$RUNNER_TEMP"
+          printf '%s\n' '[req]' 'distinguished_name = dn' 'prompt = no' '[dn]' 'CN = uvim release rehearsal' \
+            '[ext]' 'basicConstraints = critical,CA:false' 'keyUsage = critical,digitalSignature' \
+            'extendedKeyUsage = critical,codeSigning' >rehearsal.cnf
+          # LibreSSL's: security import cannot read a .p12 in OpenSSL 3's default ciphers.
+          /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config rehearsal.cnf -extensions ext \
+            -keyout rehearsal.key -out rehearsal.pem
+          /usr/bin/openssl pkcs12 -export -inkey rehearsal.key -in rehearsal.pem -passout pass:rehearsal \
+            -out rehearsal.p12
+          sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain \
+            rehearsal.pem
+          P12=$(base64 -i rehearsal.p12) P12_PASSWORD=rehearsal \
+            "$GITHUB_WORKSPACE/scripts/release-runner.sh" identity 'uvim release rehearsal'
+          rm rehearsal.key rehearsal.p12
+      - name: Build Release signed with it
+        run: make release SIGN='uvim release rehearsal'
+      - name: Check the build
+        run: |
+          test "$(xcodebuild -version | sed -n 1p)" = 'Xcode 27.0'
+          signature=$(codesign -dvv .release/uvim.app 2>&1)
+          grep -qx 'Authority=uvim release rehearsal' <<<"$signature"
+          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' .release/uvim.app/Contents/Info.plist)
+          test "$build" = "$(git rev-list --count HEAD)"
+      - name: Write stand-in keys
+        env:
+          SPARKLE_PRIVATE_KEY: stand-in
+          NOTARY_API_KEY: stand-in
+        run: |
+          scripts/release-runner.sh keys
+          test "$(stat -f %Lp "$RUNNER_TEMP/sparkle-key")" = 600 -a "$(stat -f %Lp "$RUNNER_TEMP/notary.p8")" = 600
+          grep -qx "SPARKLE_KEY_FILE=$RUNNER_TEMP/sparkle-key" "$GITHUB_ENV"
+          grep -qx "NOTARY_KEY=$RUNNER_TEMP/notary.p8" "$GITHUB_ENV"
+      - name: Remove the keychain and the keys
+        if: always()
+        run: scripts/release-runner.sh cleanup
+      - name: Check that they are gone
+        run: |
+          test ! -e "$RUNNER_TEMP/release.keychain-db" -a ! -e "$RUNNER_TEMP/sparkle-key" -a ! -e "$RUNNER_TEMP/notary.p8"
+          keychains=$(security list-keychains -d user)
+          ! grep -q release.keychain <<<"$keychains"
