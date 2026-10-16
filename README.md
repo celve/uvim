@@ -240,7 +240,8 @@ What else differs there:
 
 - `o` and `O` paste their new line, because ⏎ could send a message.
 - `j` and `k` count the lines Linear shows: a list's markers, to-do boxes and a code block's language label
-  are not lines, and a mention chip is one character on its paragraph's line.
+  are not lines, a mention chip is one character on its paragraph's line, and a table's cells are lines in
+  reading order.
 - In a field uvim cannot read at all, and under **Force**, moves are approximate, deletes and yanks go
   through ⌘X and ⌘C so the clipboard is the register, and search, marks, Visual mode and a count above
   1,000 on a key uvim would repeat beep.
@@ -844,8 +845,11 @@ no stop. uvim marks the first line after each stop, so `j`, `w`, a counted `$` a
 it: ⇧→ →, or → → into a to-do, which ⇧→ will not extend into. Two quotes side by side show nothing in
 the text, so in a ProseMirror editor uvim reads the document's blocks whenever the text has more than one
 line, and again when a block changes kind, and marks a stop only between blocks that carry Linear's own
-classes: any other editor's quote or list gets no stop it did not get before. A table or a collapsible
-section has the stop too and is not marked, nor is one between blocks inside a quote.
+classes: any other editor's quote or list gets no stop it did not get before. A table and a collapsible
+section have the stop too, as do two blocks side by side inside a quote or an open section; below a
+collapsed section only ↑ stops. In a table uvim goes from cell to cell with ⌥→, since → leaves a table's
+last row, and `k` from the line below a table presses ↑, since ← skips the whole table. A horizontal rule
+takes one more arrow either way, and two side by side one more again for the stop between them.
 
 Each key is a row in the Capabilities menu — **Line start key (⌃A)**, **Line end key (⌃E)**,
 **Document start key (⌘↑)**, **Document end key (⌘↓)** — claimed for every field whose text

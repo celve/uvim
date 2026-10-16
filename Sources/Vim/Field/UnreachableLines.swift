@@ -94,15 +94,45 @@ public enum UnreachableLines {
         public let carets: [Caret]
         /// Plain starts of root lists, code blocks and quotes right after another, where a plain → ↓ or ↑ stops between them first.
         public let joins: [Int]
-        /// The plain range before each root code block's code: its language label, which no caret reaches (LIN-1726).
+        /// The plain range before each code block's code: its language label, which no caret reaches (LIN-1726).
         public let controls: [Range<Int>]
+        /// The other stops, top first, beside rules, tables and collapsed sections (LIN-1780).
+        public let stops: [Stop]
+        public let tables: [Table]
 
-        public init(markers: [Int], chips: [Chip], carets: [Caret] = [], joins: [Int] = [], controls: [Range<Int>] = []) {
+        public init(
+            markers: [Int], chips: [Chip], carets: [Caret] = [], joins: [Int] = [], controls: [Range<Int>] = [],
+            stops: [Stop] = [], tables: [Table] = []
+        ) {
             self.markers = markers
             self.chips = chips
             self.carets = carets
             self.joins = joins
             self.controls = controls
+            self.stops = stops
+            self.tables = tables
+        }
+    }
+
+    /// A stop of `kind` before the line starting at the plain offset `at`.
+    public struct Stop: Equatable, Sendable {
+        public let at: Int
+        public let kind: ParagraphBreaks.Hidden.Kind
+
+        public init(at: Int, kind: ParagraphBreaks.Hidden.Kind) {
+            self.at = at
+            self.kind = kind
+        }
+    }
+
+    /// A table's plain range, each of its lines a cell's, and the plain start of its last row where read.
+    public struct Table: Equatable, Sendable {
+        public let range: Range<Int>
+        public let lastRow: Int?
+
+        public init(range: Range<Int>, lastRow: Int?) {
+            self.range = range
+            self.lastRow = lastRow
         }
     }
 
@@ -181,6 +211,10 @@ public enum UnreachableLines {
 
     /// Linear's own DOM class on a code block, a quote and a collapsible section, which no other editor's quote carries.
     public static let blockClass = "block-node"
+
+    /// Linear's classes on a table's root and on a collapsible section (LIN-1780).
+    public static let tableClass = "tableContainer"
+    public static let sectionClass = "collapsible-section"
 
     /// Linear's class on the group that holds a code block's language label and buttons, before its code.
     public static let controlsClass = "node-controls"
@@ -327,7 +361,8 @@ public enum UnreachableLines {
                 textSinceBreak = false
             }
         }
-        guard !dropped.isEmpty || !converted.isEmpty || !found.joins.isEmpty else {
+        guard !dropped.isEmpty || !converted.isEmpty || !found.joins.isEmpty || !found.stops.isEmpty || !found.tables.isEmpty
+        else {
             return Model(text: text, breaks: breaks, folded: 0)
         }
         var kept: [UInt16] = []
@@ -350,6 +385,22 @@ public enum UnreachableLines {
             let kind: ParagraphBreaks.Hidden.Kind = leafStarts[join, default: 0] > 0 ? .boxedGap : .gap
             hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: kind),
                           at: hidden.lastIndex { $0.at <= start }.map { $0 + 1 } ?? 0)
+        }
+        // The other stops in their order, after the joins and markers at the same line (LIN-1780).
+        for stop in found.stops {
+            guard let line = starts.first(where: { breaks.fieldOffset($0) >= stop.at }), line > 0 else { continue }
+            let start = line - shift[line]
+            hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: stop.kind),
+                          at: hidden.lastIndex { $0.at <= start }.map { $0 + 1 } ?? 0)
+        }
+        // Every line a table holds is a cell's, its last row's first the table's way in from below.
+        for table in found.tables {
+            for line in starts where !dropped.contains(line) && table.range.contains(breaks.fieldOffset(line)) {
+                let start = line - shift[line]
+                let kind: ParagraphBreaks.Hidden.Kind = breaks.fieldOffset(line) == table.lastRow ? .lastRow : .cell
+                hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: kind),
+                              at: hidden.lastIndex { $0.at <= start }.map { $0 + 1 } ?? 0)
+            }
         }
         return Model(
             text: String(decoding: kept, as: UTF16.self), breaks: ParagraphBreaks(offsets: offsets, hidden: hidden),

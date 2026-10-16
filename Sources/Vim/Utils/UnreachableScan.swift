@@ -41,10 +41,14 @@ public struct UnreachableScan<Node> {
         }
         // Last, so running out of reads here loses only these, and Linear's blocks' reads after the lists', which lose only theirs.
         let lists = candidates.roots ? listJoins(in: roots) : nil
-        let blocks = candidates.stops ? blockStops(in: roots) : nil
+        var blocks: Blocks?
+        if candidates.stops {
+            var found = Blocks()
+            if stops(among: roots, path: [], level: 0, into: &found) { blocks = found }
+        }
         return UnreachableLines.Found(
             markers: markers, chips: chips, carets: carets, joins: Array(Set((lists ?? []) + (blocks?.joins ?? []))).sorted(),
-            controls: blocks?.controls ?? []
+            controls: blocks?.controls ?? [], stops: blocks?.stops ?? [], tables: blocks?.tables ?? []
         )
     }
 
@@ -64,36 +68,109 @@ public struct UnreachableScan<Node> {
         return joins
     }
 
-    /// The same over Linear's own lists, quotes and code blocks, told by their classes, and what precedes each code; nil past the budget.
-    private mutating func blockStops(in roots: [Node]) -> (joins: [Int], controls: [Range<Int>])? {
+    /// What Linear's own blocks add: joins as the lists', code blocks' controls, other stops and tables (LIN-1726, LIN-1780).
+    private struct Blocks {
         var joins: [Int] = []
         var controls: [Range<Int>] = []
-        var afterClosed = false
-        for (index, root) in roots.enumerated() {
-            guard let read = read(root, at: [index]) else { return nil }
-            var closed = read.role == "AXList" && read.classes.contains(UnreachableLines.listClass)
-            if read.classes.contains(UnreachableLines.blockClass) {
-                if read.quoteLevel > 0 {
-                    closed = true
-                } else if read.children.count > 1, let first = read.children.first, let last = read.children.last {
-                    let path = [index, read.children.count - 1]
-                    guard let lead = self.read(first, at: [index, 0]), let code = self.read(last, at: path) else { return nil }
-                    // A code block: its controls, then its code, which is an empty group once the code is deleted.
-                    if lead.classes.contains(UnreachableLines.controlsClass),
-                       DrawnCaret.isCode(code.subrole) || DrawnCaret.isEmptyGroup(subrole: code.subrole, children: code.children.count) {
-                        guard let lower = start(of: root, at: [index]), let upper = start(of: last, at: path) else { return nil }
-                        controls.append(lower..<upper)
-                        closed = true
-                    }
+        var stops: [UnreachableLines.Stop] = []
+        var tables: [UnreachableLines.Table] = []
+    }
+
+    /// A block as its own classes tell it.
+    private enum Kind: Equatable {
+        case list, quote, code, table, rule, other
+        case section(open: Bool)
+
+        /// Linear stops between two adjacent blocks closed where they meet; a collapsed section only for ↑ from below.
+        var closedEnd: Bool { [.list, .quote, .code, .table, .section(open: true)].contains(self) }
+        var closedStart: Bool { closedEnd || self == .section(open: false) }
+    }
+
+    /// Judges `nodes`, a ProseMirror editor's roots or a quote's or open section's children, each by its own classes, and
+    /// records the stops between them; false on a failed read or past the budget.
+    private mutating func stops(among nodes: [Node], path: [Int], level: Int, into blocks: inout Blocks) -> Bool {
+        var previous: Kind?
+        for (index, node) in nodes.enumerated() {
+            let here = path + [index]
+            guard let read = read(node, at: here), let kind = kind(of: node, read, at: here, level: level, into: &blocks) else {
+                return false
+            }
+            if let previous {
+                // The kinds whose stops were measured beside each other; a rule meets none but another rule's or a table's.
+                let stop: ParagraphBreaks.Hidden.Kind?
+                switch (previous, kind) {
+                case (.table, .rule): stop = .backGap
+                case (.rule, .rule): stop = .ruleGap
+                case (.rule, .table): stop = .boxedGap
+                case (.section(open: false), _) where kind.closedStart: stop = .upGap
+                case _ where previous.closedEnd && kind.closedStart: stop = previous == .table || kind == .table ? .boxedGap : .gap
+                default: stop = nil
+                }
+                if let stop {
+                    guard let start = start(of: node, at: here) else { return false }
+                    if stop == .gap { blocks.joins.append(start) } else { blocks.stops.append(.init(at: start, kind: stop)) }
                 }
             }
-            if closed, afterClosed {
-                guard let start = start(of: root, at: [index]) else { return nil }
-                joins.append(start)
+            if kind == .rule {
+                guard let start = start(of: node, at: here) else { return false }
+                blocks.stops.append(.init(at: start, kind: .rule))
             }
-            afterClosed = closed
+            // A quote's and an open section's blocks have the same stops among themselves, past the section's heading.
+            if kind == .quote || kind == .section(open: true) {
+                guard stops(among: read.children, path: here, level: read.quoteLevel, into: &blocks) else { return false }
+            }
+            previous = kind
         }
-        return (joins, controls)
+        return true
+    }
+
+    /// `read`'s kind, inside a quote of `level`; a code block's controls and a table's rows go into `blocks`. Nil past the budget.
+    private mutating func kind(
+        of node: Node, _ read: EmptyBlockScan<Node>.Block, at path: [Int], level: Int, into blocks: inout Blocks
+    ) -> Kind? {
+        if read.role == "AXList" { return read.classes.contains(UnreachableLines.listClass) ? .list : .other }
+        if read.role == "AXSplitter" { return .rule }
+        if read.classes.contains(UnreachableLines.tableClass) {
+            guard let table = table(node, read, at: path) else { return nil }
+            blocks.tables.append(table)
+            return .table
+        }
+        if read.classes.contains(UnreachableLines.sectionClass) { return .section(open: read.children.count > 1) }
+        guard read.classes.contains(UnreachableLines.blockClass) else { return .other }
+        // A quote's blocks share its level, so only a deeper one starts a quote of its own.
+        if read.quoteLevel > level { return .quote }
+        guard read.children.count > 1, let first = read.children.first, let last = read.children.last else { return .other }
+        let codePath = path + [read.children.count - 1]
+        guard let lead = self.read(first, at: path + [0]), let code = self.read(last, at: codePath) else { return nil }
+        // A code block: its controls, then its code, which is an empty group once the code is deleted.
+        guard lead.classes.contains(UnreachableLines.controlsClass),
+              DrawnCaret.isCode(code.subrole) || DrawnCaret.isEmptyGroup(subrole: code.subrole, children: code.children.count)
+        else { return .other }
+        guard let lower = start(of: node, at: path), let upper = start(of: last, at: codePath) else { return nil }
+        blocks.controls.append(lower..<upper)
+        return .code
+    }
+
+    /// A table's plain range and where its last row starts, the last `AXRow` under its wrapper's `AXTable`; nil past the budget.
+    private mutating func table(_ node: Node, _ read: EmptyBlockScan<Node>.Block, at path: [Int]) -> UnreachableLines.Table? {
+        guard let lower = start(of: node, at: path), let upper = end(of: node, at: path) else { return nil }
+        var lastRow: Int?
+        if let wrapper = read.children.first {
+            guard let wrapped = self.read(wrapper, at: path + [0]) else { return nil }
+            if let grid = wrapped.children.first {
+                guard let table = self.read(grid, at: path + [0, 0]) else { return nil }
+                // The rows come before the columns and the header.
+                for index in table.children.indices.reversed() where table.role == "AXTable" {
+                    let rowPath = path + [0, 0, index]
+                    guard let row = self.read(table.children[index], at: rowPath) else { return nil }
+                    guard row.role == "AXRow" else { continue }
+                    guard let start = start(of: table.children[index], at: rowPath) else { return nil }
+                    lastRow = start
+                    break
+                }
+            }
+        }
+        return UnreachableLines.Table(range: lower..<upper, lastRow: lastRow)
     }
 
     private enum Hit {
