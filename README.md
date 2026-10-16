@@ -774,8 +774,7 @@ A bind line's `caps=` gives each capability a code, `+` or `-`, and where the an
 content can be one block of a bigger document, as each block of a Notion page is: it then names
 another editable field as its outermost one (`AXHighestEditableAncestor`), and its bind line says
 `enclosed=1`. `drawCursor`, `wholeDocument` and `fieldIsSession` resolve off for it,
-`DC-p WD-p FS-p`, unless a default or your choice answers first: the Notion app, which ships with
-defaults, reads `DC-s WD-s FS-s enclosed=1`. Focus moving between two fields that name the same
+`DC-p WD-p FS-p`, unless your choice answers first. Focus moving between two fields that name the same
 outermost one, or between a field and the one it names, binds as `sameDocument` and keeps the
 mode. A native field, and a web field with nothing editable around it, names none.
 
