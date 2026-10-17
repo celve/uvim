@@ -790,8 +790,9 @@ aborted line can read `ok=0` and `mode=normal→insert` together.
 With an input method selected, Esc or ⌃[ in Insert mode logs what uvim read of pending letters and
 what it did: `e12 ime key=<C-[> method=com.apple.inputmethod.SCIM.Shuangpin read=pending,clear
 do=normal ms=15`. `read=` is `pending`, `clear` or `unknown`, read again after ⌃[ sent F13 to commit
-them, and `do=` is `pass` (the key went to the input method), `normal`, or `refuse` (F13 left the
-letters pending). A command refused while letters are pending logs `drop=composing`.
+them, and `do=` is `pass` (the key went to the input method), `normal`, or `refuse` (nothing read the
+letters as committed after F13, so uvim stayed in Insert mode). A command refused while letters are
+pending logs `drop=composing`.
 
 A Chromium rich-text field (a contenteditable in Chrome, Dia or an Electron app; its bind
 line says `chromium=1 offsets=textContent/…`) names its selection in text content: `AXValue`

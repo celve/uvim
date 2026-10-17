@@ -170,6 +170,9 @@ public struct Sim {
     /// The input method ignores the commit key, so its letters stay pending.
     public var ignoresCommit = false
 
+    /// The reads fail once the commit key is sent, so nothing reads the commit.
+    public var failsReadAfterCommit = false
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -245,7 +248,7 @@ public struct Sim {
         if mode == .insert, inputMethod, token == "<Esc>" || token == "<C-[>" {
             switch Composition.engage(token, read: { composition }, commit: {
                 if !ignoresCommit { composing = nil }
-                return composition
+                return failsReadAfterCommit ? .unknown : composition
             }) {
             case .normal:
                 break

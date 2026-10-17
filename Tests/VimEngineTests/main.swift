@@ -7677,13 +7677,15 @@ for (rich, profile) in [(true, adding([.lineStartKey, .lineEndKey, .documentStar
 // MARK: - Input methods (LIN-2053)
 
 var listReads = 0
-func answered(_ marked: Int?, _ method: String = "com.apple.inputmethod.SCIM.Shuangpin", list: Bool) -> Composition {
-    Composition.answer(markedLength: marked, method: method) { listReads += 1; return list }
+func answered(_ marked: Composition.Marked, _ method: String = "com.apple.inputmethod.SCIM.Shuangpin", list: Bool?) -> Composition {
+    Composition.answer(marked: marked, method: method) { listReads += 1; return list }
 }
-precondition(answered(9, list: false) == .pending && answered(0, list: true) == .clear && listReads == 0)
-precondition(answered(nil, list: true) == .pending && answered(nil, list: false) == .clear)
-precondition(answered(nil, "com.sogou.inputmethod.sogou.pinyin", list: true) == .pending)
-precondition(answered(nil, "com.sogou.inputmethod.sogou.pinyin", list: false) == .unknown)
+precondition(answered(.length(9), list: false) == .pending && answered(.length(0), list: true) == .clear)
+precondition(answered(.failed, list: false) == .unknown && listReads == 0, "a failed read proves nothing either way")
+precondition(answered(.absent, list: true) == .pending && answered(.absent, list: false) == .clear)
+precondition(answered(.absent, list: nil) == .unknown)
+precondition(answered(.absent, "com.sogou.inputmethod.sogou.pinyin", list: true) == .pending)
+precondition(answered(.absent, "com.sogou.inputmethod.sogou.pinyin", list: false) == .unknown)
 
 /// A key's fate as `Controller.handle` decides it: "app" when the app gets it; nil `answer` is no input method selected.
 func imeOutcome(
@@ -7718,7 +7720,7 @@ for escapeEngages in [true, false] {
             }
             let context = "escapeEngages=\(escapeEngages) answer=\(String(describing: answer)) afterCommit=\(afterCommit)"
             precondition(outcome(53, [], "\u{1B}", .insert) == (escapeEngages && !pending ? "normal" : "app"), context)
-            precondition(outcome(33, [.control], "\u{1B}", .insert) == (pending && afterCommit == .pending ? "beep" : "normal"),
+            precondition(outcome(33, [.control], "\u{1B}", .insert) == (pending && afterCommit != .clear ? "beep" : "normal"),
                          context)
             precondition(outcome(53, [], "\u{1B}", .normal) == "app", context)
             precondition(outcome(33, [.control], "\u{1B}", .normal) == (pending ? "beep" : "runs"), context)
@@ -7761,6 +7763,12 @@ precondition(unmoved.composing == 4..<6)
 unmoved.feed("<Esc>")
 unmoved.feed("<Esc>")
 precondition(unmoved.text == "say  world" && unmoved.state.field.mode == .normal)
+
+var unconfirmed = composer("say  world", caret: 4)
+unconfirmed.failsReadAfterCommit = true
+unconfirmed.compose("ni")
+unconfirmed.feed("<C-[>")
+precondition(unconfirmed.bells == 1 && unconfirmed.state.field.mode == .insert, "only a clear read after F13 enters Normal")
 
 for key in ["<Esc>", "<C-[>"] {
     var unread = composer("say  world", caret: 4)

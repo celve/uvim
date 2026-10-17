@@ -61,14 +61,18 @@ public enum AX {
         return length
     }
 
-    /// The current selection range in UTF-16 units (caret = `location` when `length == 0`).
+    /// The current selection range (caret = `location` when `length == 0`).
+    /// UTF-16 units.
+    ///
+    /// The type-ID check precedes the cast — the `copyElement` pattern. An
+    /// app answering this attribute with anything that is not an `AXValue`
+    /// would otherwise trap in the AX read path.
     public static func selectedRange(of element: AXUIElement) -> CFRange? {
-        copyRange(element, kAXSelectedTextRangeAttribute)
-    }
-
-    /// The letters an input method holds pending, empty at the caret when none are; nil where the field does not say, as in Chromium.
-    public static func inputMarkedRange(of element: AXUIElement) -> CFRange? {
-        copyRange(element, "AXTextInputMarkedRange")
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &ref) == .success,
+              let value = ref, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        return AXValueGetValue((value as! AXValue), .cfRange, &range) ? range : nil
     }
 
     public static func selectedText(of element: AXUIElement) -> String? {
@@ -557,15 +561,6 @@ public enum AX {
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
               let value = ref, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
-    }
-
-    /// The type-ID check precedes the cast: an app answering anything but an `AXValue` would otherwise trap here.
-    private static func copyRange(_ element: AXUIElement, _ attribute: String) -> CFRange? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
-              let value = ref, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        var range = CFRange()
-        return AXValueGetValue((value as! AXValue), .cfRange, &range) ? range : nil
     }
 
     private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {

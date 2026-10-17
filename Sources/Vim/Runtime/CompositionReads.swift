@@ -16,39 +16,53 @@ enum CompositionReads {
         return answer
     }
 
-    /// F13, which Shuangpin takes to commit the letters as typed; answers once they are no longer pending, or after 150 ms.
+    /// F13, which Shuangpin takes to commit the letters as typed; answers once they read clear, or after 150 ms.
     static func commit(on binding: FocusTracker.Binding, method: String) -> Composition {
         // Chromium's value shows the commit up to 42 ms after its candidate list closes, and the Esc plan reads the value.
-        let lagging = AX.inputMarkedRange(of: binding.element) == nil ? AX.value(of: binding.element) : nil
+        let lagging = marked(binding.element) == .absent ? AX.value(of: binding.element) : nil
         Synth.key(105)   // kVK_F13
         let deadline = Date().addingTimeInterval(0.15)
         var answer = read(binding, method: method)
-        while answer == .pending, Date() < deadline {
+        while answer != .clear, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.003)
             answer = read(binding, method: method)
         }
-        if answer != .pending, let lagging {
+        if answer == .clear, let lagging {
             let shown = Date().addingTimeInterval(0.1)
-            while AX.value(of: binding.element) == lagging, Date() < shown { Thread.sleep(forTimeInterval: 0.003) }
+            while AX.value(of: binding.element) ?? lagging == lagging, Date() < shown { Thread.sleep(forTimeInterval: 0.003) }
         }
         return answer
     }
 
     private static func read(_ binding: FocusTracker.Binding, method: String) -> Composition {
-        Composition.answer(markedLength: AX.inputMarkedRange(of: binding.element)?.length, method: method) {
-            showsCandidates(binding.pid)
-        }
+        Composition.answer(marked: marked(binding.element), method: method) { showsCandidates(binding.pid) }
     }
 
-    /// Shuangpin's candidate bar is an untitled dialog among the app's own windows, holding this list.
-    private static func showsCandidates(_ pid: pid_t) -> Bool {
-        let windows = AX.attributes([kAXWindowsAttribute], of: AXUIElementCreateApplication(pid)).elements(0) ?? []
-        return windows.contains { window in
+    private static func marked(_ element: AXUIElement) -> Composition.Marked {
+        let reads = AX.attributes(["AXTextInputMarkedRange"], of: element)
+        guard FieldTree.absentOrRead(reads, 0) else { return .failed }
+        return reads.range(0).map { .length($0.length) } ?? .absent
+    }
+
+    /// Shuangpin's candidate bar is an untitled dialog among the app's own windows, holding this list; nil when a read failed.
+    private static func showsCandidates(_ pid: pid_t) -> Bool? {
+        guard let windows = AX.attributes([kAXWindowsAttribute], of: AXUIElementCreateApplication(pid)).elements(0) else {
+            return nil
+        }
+        var failed = false
+        for window in windows {
             let reads = AX.attributes([kAXSubroleAttribute, kAXChildrenAttribute], of: window)
-            guard reads.string(0) != kAXStandardWindowSubrole else { return false }
-            return (reads.elements(1) ?? []).contains {
-                AX.attributes([kAXIdentifierAttribute], of: $0).string(0) == "InputMethodCandidateList"
+            guard FieldTree.absentOrRead(reads, 0), FieldTree.absentOrRead(reads, 1) else {
+                failed = true
+                continue
+            }
+            guard reads.string(0) != kAXStandardWindowSubrole else { continue }
+            for child in reads.elements(1) ?? [] {
+                let identifier = AX.attributes([kAXIdentifierAttribute], of: child)
+                if identifier.string(0) == "InputMethodCandidateList" { return true }
+                if !FieldTree.absentOrRead(identifier, 0) { failed = true }
             }
         }
+        return failed ? nil : false
     }
 }
