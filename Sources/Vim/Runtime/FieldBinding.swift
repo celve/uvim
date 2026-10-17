@@ -193,10 +193,16 @@ public enum Snapshotter {
                 field: raw, length: reads.int(2), webContent: reads.string(3) != nil, blocks: blocks, marked: marked?.range
             )
         snapshotReads.proseMirror = chromium && reads.strings(classes)?.contains(UnreachableLines.editorClass) == true
-        // Only where stops are read do the blocks' kinds decide discovery; elsewhere the memo holds as it did.
-        if snapshotReads.proseMirror {
-            snapshotReads.roots = roots.map { $0.reduce(into: Hasher()) { $0.combine(CFHash($1)) }.finalize() }
+        // A quote's or open section's children decide stops too, and one changing kind keeps the roots (LIN-1780).
+        func witness(_ found: UnreachableLines.Found?) -> Int? {
+            roots.flatMap { roots in
+                UnreachableLines.witness(
+                    roots: roots, containers: found?.containers ?? [], children: { AX.children(of: $0) }, identity: { CFHash($0) }
+                )
+            }
         }
+        // Only where stops are read do the blocks' kinds decide discovery; elsewhere the memo holds as it did.
+        if snapshotReads.proseMirror { snapshotReads.roots = witness(knownUnreachable?.found) }
         var memo = known
         var unreachable = knownUnreachable
         func take(_ need: FieldSnapshot.Need) {
@@ -215,6 +221,8 @@ public enum Snapshotter {
                 let walked = UnreachableDiscovery.found(
                     in: element, markers: markers, candidates: candidates, budget: UnreachableLines.readBudget
                 )
+                // The build checks the memo against these reads, which the next snapshot takes by the walk's containers.
+                if snapshotReads.proseMirror { snapshotReads.roots = witness(walked.found) }
                 unreachable = UnreachableLines.Memo(
                     value: value, markers: markers, blocks: blocks, roots: snapshotReads.roots, found: walked.found,
                     exhausted: walked.exhausted, candidates: candidates, reads: walked.reads, origin: .walked(why)

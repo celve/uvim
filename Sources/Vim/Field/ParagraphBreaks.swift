@@ -12,7 +12,7 @@ public struct ParagraphBreaks: Equatable, Sendable {
         public let text: String
         public let kind: Kind
 
-        public enum Kind: Equatable, Sendable {
+        public enum Kind: Hashable, Sendable {
             /// A list marker, a code block's label or a text-less block, which the caret passes.
             case structure
             /// Chromium's own list marker, which starts its item's line and reads as a boundary a side skips past.
@@ -23,8 +23,20 @@ public struct ParagraphBreaks: Equatable, Sendable {
             case trailingBreak
             /// No text: the line starts a list, code block or quote right after another, and a plain → ↓ or ↑ stops between them first.
             case gap
-            /// The same where text-less leaves start the block, as a to-do's checkbox does, which ⇧→ does not extend into.
+            /// The same where ⇧→ does not cross it: text-less leaves start the block, as a to-do's checkbox does, or a table is beside it.
             case boxedGap
+            /// No text: only ↑ from the line stops first, as below a collapsed section's title (LIN-1780).
+            case upGap
+            /// No text: a rule before the line, which every plain arrow from either side selects first.
+            case rule
+            /// No text: the stop between two rules, which every plain arrow visits.
+            case ruleGap
+            /// No text: the stop between a table and a rule after it, which only ← and ↑ visit.
+            case backGap
+            /// No text: the line is a table cell's, which ⌥→ from its end leaves for the next line's start.
+            case cell
+            /// The same on the first line of a table's last row, where ↑ from the line below the table lands.
+            case lastRow
         }
 
         public init(at: Int, text: String, kind: Kind = .structure) {
@@ -39,6 +51,12 @@ public struct ParagraphBreaks: Equatable, Sendable {
         public var isMarker: Bool { isStructure && !text.isEmpty }
 
         public var isGap: Bool { kind == .gap || kind == .boxedGap }
+
+        /// A stop or a table line, which holds no field text.
+        public var isBlock: Bool { isStop || kind == .cell || kind == .lastRow }
+
+        /// Somewhere between two lines a plain arrow can stop.
+        public var isStop: Bool { [.gap, .boxedGap, .upGap, .rule, .ruleGap, .backGap].contains(kind) }
     }
 
     public init(offsets: [Int] = [], hidden: [Hidden] = []) {
@@ -118,6 +136,21 @@ public extension ParagraphBreaks {
     /// Model offsets of the lines a stop between two blocks comes before.
     var gaps: Set<Int> {
         Set(hidden.filter(\.isGap).map(\.at))
+    }
+
+    /// Each line's stops, top first, by the model offset of the line they come before (LIN-1780).
+    var stops: [Int: [Hidden.Kind]] {
+        Dictionary(grouping: hidden.filter(\.isStop), by: \.at).mapValues { $0.map(\.kind) }
+    }
+
+    /// Model offsets of table lines.
+    var cells: Set<Int> {
+        Set(hidden.filter { $0.kind == .cell || $0.kind == .lastRow }.map(\.at))
+    }
+
+    /// Model offsets of the first lines of tables' last rows.
+    var lastRows: Set<Int> {
+        Set(hidden.filter { $0.kind == .lastRow }.map(\.at))
     }
 
     /// `text` at `range` with each atom's whole text, as a register keeps it.

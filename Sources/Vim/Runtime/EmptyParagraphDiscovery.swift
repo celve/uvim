@@ -56,8 +56,9 @@ struct FieldTree {
             )
         }
         offset = { node, end in
-            guard let length = AX.markerLength(from: start, to: node, end: end, in: element),
-                  objects.indices.contains(length) else { return nil }
+            guard let length = AX.markerLength(from: start, to: node, end: end, in: element), length >= 0 else { return nil }
+            // A table's columns read past the field's text; they sort after it, the rows holding their cells (LIN-1780).
+            guard objects.indices.contains(length) else { return length - objects[objects.count - 1] }
             return length - objects[length]
         }
     }

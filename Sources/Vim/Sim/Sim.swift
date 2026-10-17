@@ -67,8 +67,8 @@ public struct Sim {
     /// A caret written at a code span's end, where Linear's next ← or ⇧← can do nothing.
     private var atWrittenCodeEnd = false
 
-    /// The caret stopped between two lists, before the line after it.
-    private var inListGap = false
+    /// The stop between two blocks the caret is at, before the line after it.
+    private var inListGap: KeyModel.Stop?
 
     /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
     /// in Chrome's textarea, up to that break in Chrome's rich text.
@@ -272,7 +272,7 @@ public struct Sim {
             self.text = text
             let clamped = TextModel(text).clamp(caret)
             selection = clamped..<clamped
-            inListGap = false
+            inListGap = nil
         }
         state.field = state.field.carried(across: transition)
         if transition.clearsChangeInFlight {
@@ -288,7 +288,7 @@ public struct Sim {
         atChipStart = false
         codeInside = false
         atWrittenCodeEnd = false
-        inListGap = false
+        inListGap = nil
         backward = false
         buttonEvents &+= 2
         if state.field.mode.isInserting { monitor.markInsertLogLossy() }
@@ -505,7 +505,7 @@ private extension Sim {
                 // Measured, a caret written at a code span's start lands outside it, one at its end inside.
                 codeInside = selection.isEmpty && isCodeEdge(lower, start: false) && !isCodeEdge(lower, start: true)
                 atWrittenCodeEnd = codeInside
-                inListGap = false
+                inListGap = nil
                 backward = false
                 coalescing = false
 
@@ -626,7 +626,7 @@ private extension Sim {
            chord != .selectRight || TextModel(text).lineStart(of: selection.lowerBound) != selection.lowerBound {
             return true
         }
-        if !inListGap, chord.modifiers.isEmpty, selection.isEmpty, [Key.arrowLeft, .arrowRight].contains(chord.key) {
+        if inListGap == nil, chord.modifiers.isEmpty, selection.isEmpty, [Key.arrowLeft, .arrowRight].contains(chord.key) {
             let at = selection.lowerBound
             let (start, end) = (isCodeEdge(at, start: true), isCodeEdge(at, start: false))
             // From the side of an edge the arrow points across, it steps inside or out and stays put, but ← leaves a paragraph.
@@ -652,10 +652,13 @@ private extension Sim {
             wrap: wrapWidth,
             atoms: shown.atoms,
             gaps: shown.gaps,
-            inGap: inListGap
+            stops: shown.keyStops,
+            cells: shown.cells,
+            lastRows: shown.lastRows,
+            inStop: inListGap
         )
         guard keys.press(chord) else { return false }
-        inListGap = keys.inGap
+        inListGap = keys.inStop
         if keys.text != text {
             noteEdit(at: keys.selection.lowerBound, typing: true)
             let deleted = keys.selection.lowerBound..<(keys.selection.lowerBound + text.utf16.count - keys.text.utf16.count)
@@ -674,7 +677,7 @@ private extension Sim {
             codeInside = isCodeEdge(arrived, start: true) && TextModel(text).lineStart(of: arrived) != arrived
         default: codeInside = false
         }
-        if inListGap { codeInside = false }
+        if inListGap != nil { codeInside = false }
         return true
     }
 
@@ -789,7 +792,7 @@ private extension Sim {
         redoGroups.append((group: group, after: text, listLines: listLines, codeSpans: codeSpans))
         let restored = group.before.utf16.count - text.utf16.count
         (text, listLines, codeSpans) = (group.before, group.listLines, group.codeSpans)
-        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
+        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, nil, false, false)
         let put = TextModel(text).substring(group.at..<group.at + max(0, restored)).utf16
         let toBreak = put.firstIndex(of: 10).map { put.distance(from: put.startIndex, to: $0) }
         let length = switch undoSelection {
@@ -806,7 +809,7 @@ private extension Sim {
         guard let undone = redoGroups.popLast() else { return true }
         undoGroups.append(undone.group)
         (text, listLines, codeSpans) = (undone.after, undone.listLines, undone.codeSpans)
-        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, false, false, false)
+        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, nil, false, false)
         let at = TextModel(text).clamp(undone.group.at)
         selection = at..<at
         return true
@@ -819,7 +822,7 @@ private extension Sim {
         codeSpans = Self.carried(codeSpans, replacing: selection, with: replacement, into: replaced)
         codeInside = false
         atWrittenCodeEnd = false
-        inListGap = false
+        inListGap = nil
         text = replaced
         let caretAfter = selection.lowerBound + replacement.utf16.count
         selection = caretAfter..<caretAfter
@@ -934,7 +937,7 @@ extension Sim {
                     candidates.chips.contains { $0.lowerBound == chip.range.lowerBound && chip.range.upperBound <= $0.upperBound }
                 },
                 carets: shown.drawnCaret.map { candidates.carets.contains($0.offset) ? [$0] : [] } ?? [],
-                joins: shown.joins, controls: shown.controls
+                joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables
             ) : nil
             unreachable = UnreachableLines.Memo(
                 value: value, markers: markers, blocks: blocks, roots: roots, found: found, origin: .walked(why)
@@ -1035,10 +1038,18 @@ public extension Sim {
         public var stop: Bool
         /// The marker is a code block's language label, which its block tells from text, not its shape.
         public var controls: Bool
+        /// Rules right before the line, each a text-less block of its own (LIN-1780).
+        public var ruled: Int
+        /// The stops before the line other than `stop`'s, top first, as discovery reads them beside rules, tables and sections.
+        public var before: [ParagraphBreaks.Hidden.Kind]
+        /// The line is a table cell's, and starts the table's last row.
+        public var cell: Bool
+        public var lastRow: Bool
 
         public init(
             marker: String? = nil, leaves: Int = 0, checkbox: Bool = false, inline: Bool = false, stop: Bool = false,
-            controls: Bool = false
+            controls: Bool = false, ruled: Int = 0, before: [ParagraphBreaks.Hidden.Kind] = [], cell: Bool = false,
+            lastRow: Bool = false
         ) {
             self.marker = marker
             self.leaves = leaves
@@ -1046,6 +1057,10 @@ public extension Sim {
             self.inline = inline
             self.stop = stop
             self.controls = controls
+            self.ruled = ruled
+            self.before = before
+            self.cell = cell || lastRow
+            self.lastRow = lastRow
         }
 
         /// `lines` once `range` of `text` is `replacement`: the first keeps its own, but a deleted plain line the next's.
@@ -1105,6 +1120,12 @@ struct ChromiumParagraphs {
     let joins: [Int]
     let gaps: Set<Int>
     let controls: [Range<Int>]
+    /// The other stops and the tables as discovery reads them, and each line's stops, table lines and last rows in Sim offsets.
+    let stops: [UnreachableLines.Stop]
+    let tables: [UnreachableLines.Table]
+    let keyStops: [Int: [ParagraphBreaks.Hidden.Kind]]
+    let cells: Set<Int>
+    let lastRows: Set<Int>
     /// The caret Linear draws at a code span's edge, and the paragraph whose end it ends with a `<br>`.
     let drawnCaret: UnreachableLines.Caret?
     let drawnAtEnd: Int?
@@ -1122,6 +1143,11 @@ struct ChromiumParagraphs {
             joins = []
             gaps = []
             controls = []
+            stops = []
+            tables = []
+            keyStops = [:]
+            cells = []
+            lastRows = []
             drawnCaret = nil
             drawnAtEnd = nil
             return
@@ -1136,6 +1162,12 @@ struct ChromiumParagraphs {
         var joins: [Int] = []
         var gaps: Set<Int> = []
         var controls: [Range<Int>] = []
+        var stops: [UnreachableLines.Stop] = []
+        var tables: [UnreachableLines.Table] = []
+        var keyStops: [Int: [ParagraphBreaks.Hidden.Kind]] = [:]
+        var cells: Set<Int> = []
+        var lastRows: Set<Int> = []
+        var table: (start: Int, lastRow: Int?)?
         var plain = 0
         var start = 0
         var afterBreak = false
@@ -1149,9 +1181,26 @@ struct ChromiumParagraphs {
             let line = lines.indices.contains(index) ? lines[index] : Sim.ListLine()
             let units = Array(paragraph.utf16)
             let prefix = line.inline ? Array((line.marker ?? "").utf16) : []
+            for _ in 0..<line.ruled {
+                block([])
+                raw += "\u{FFFC}"
+            }
             if line.stop {
                 joins.append(plain)
                 gaps.insert(start)
+            }
+            stops += line.before.map { UnreachableLines.Stop(at: plain, kind: $0) }
+            let own: [ParagraphBreaks.Hidden.Kind] = line.stop ? [line.leaves > 0 ? .boxedGap : .gap] : []
+            if !(own + line.before).isEmpty { keyStops[start] = own + line.before }
+            // A run of cell lines is a table, which ends where the line after it starts.
+            if line.cell {
+                cells.insert(start)
+                if line.lastRow { lastRows.insert(start) }
+                if table == nil { table = (plain, nil) }
+                if line.lastRow { table?.lastRow = plain }
+            } else if let open = table {
+                tables.append(UnreachableLines.Table(range: open.start..<plain, lastRow: open.lastRow))
+                table = nil
             }
             if let marker = line.marker {
                 if line.controls { controls.append(plain..<(plain + marker.utf16.count)) } else { markers.append(plain) }
@@ -1247,9 +1296,15 @@ struct ChromiumParagraphs {
         plainMarkers = FieldReads.withoutAttachments(raw)
         listMarkers = markers
         self.chips = chips
+        if let open = table { tables.append(UnreachableLines.Table(range: open.start..<plain, lastRow: open.lastRow)) }
         self.joins = joins
         self.gaps = gaps
         self.controls = controls
+        self.stops = stops
+        self.tables = tables
+        self.keyStops = keyStops
+        self.cells = cells
+        self.lastRows = lastRows
         self.drawnCaret = drawnCaret
         self.drawnAtEnd = drawnAtEnd
     }

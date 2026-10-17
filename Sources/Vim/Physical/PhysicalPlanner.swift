@@ -342,6 +342,7 @@ private extension PhysicalPlanner {
             reshapes = snapshot.holdsEmptyParagraphs || snapshot.foldedLength > 0
             if snapshot.holdsChips || snapshot.holdsDrawnCaret { unknown.insert(.length) }
             drawnBreak = snapshot.drawnBreak
+            if let caret = snapshot.selection?.lowerBound { startsInTable = inTable(caret) }
             if let cursor = snapshot.cursor, !cursor.isEmpty, cursor == snapshot.selection {
                 // The engine plans from the collapsed gap, not the block.
                 let gap = cursor.lowerBound
@@ -357,12 +358,12 @@ private extension PhysicalPlanner {
         }
 
         /// The model holds folded text, where Linear lands a write by where the caret came from (LIN-1652).
-        var folded: Bool { !(breaks?.hidden.allSatisfy(\.isGap) ?? true) }
+        var folded: Bool { !(breaks?.hidden.allSatisfy(\.isBlock) ?? true) }
 
         /// A non-empty line's start with nothing folded at or beside it, where a write lands as where nothing is folded.
         func plainStart(_ offset: Int, in model: TextModel) -> Bool {
             // A stop folds no text, so a quote's first line after one takes a write as any paragraph's does.
-            let folded = breaks?.hidden.contains { !$0.isGap && (offset - 1...offset + 1).contains($0.at) } ?? false
+            let folded = breaks?.hidden.contains { !$0.isBlock && (offset - 1...offset + 1).contains($0.at) } ?? false
             return model.lineBreak(of: offset) > offset && !folded
         }
 
@@ -390,8 +391,20 @@ private extension PhysicalPlanner {
         /// Starts of lines right after a list, code block or quote's end, where a plain → ↓ from above or ↑ from them stops first.
         var gaps: Set<Int> { breaks?.gaps ?? [] }
 
-        /// Starts of to-dos after a stop, into which ⇧→ does not extend.
-        var boxed: Set<Int> { Set(breaks?.hidden.filter { $0.kind == .boxedGap }.map(\.at) ?? []) }
+        /// Each line's stops, top first: beside Linear's blocks and rules (LIN-1780).
+        var stops: [Int: [ParagraphBreaks.Hidden.Kind]] { breaks?.stops ?? [:] }
+
+        /// Table lines, and the first lines of tables' last rows.
+        var cells: Set<Int> { breaks?.cells ?? [] }
+        var lastRows: Set<Int> { breaks?.lastRows ?? [] }
+
+        /// Linear's keys over `text` from `position`, with this field's chips, stops and tables.
+        func keys(_ text: String, at position: Int) -> KeyModel {
+            KeyModel(
+                text: text, anchor: position, focus: position, atoms: atoms, gaps: gaps, stops: stops, cells: cells,
+                lastRows: lastRows
+            )
+        }
 
         func isAtom(_ offset: Int) -> Bool { breaks?.isAtom(offset) ?? false }
 
@@ -424,12 +437,30 @@ private extension PhysicalPlanner {
             return offset == candidates.lowerBound ? .paragraphEnd : .paragraphStart
         }
 
+        /// The snapshot's caret was in a table.
+        var startsInTable = false
+
+        /// `offset` is on a table line.
+        func inTable(_ offset: Int) -> Bool {
+            guard let breaks, !breaks.cells.isEmpty, let model else { return false }
+            return breaks.cells.contains(model.lineStart(of: model.clamp(offset)))
+        }
+
         /// Every settle's expectation: a landing in `AXValue` offsets leaves in the field's, less what is unknown.
         func expectation(
             _ landing: Landing, blame: Expectation.Blame? = nil, selectedText: String? = nil,
             keeps: Int? = nil, within: Range<Int>? = nil, profile: CapabilityProfile
         ) -> Expectation {
-            let length = profile.has(.readLength) && !unknown.contains(.length)
+            // Linear shows a table's controls as `AXValue` lines while the caret is in it, once keys brought it there.
+            let at: Int?
+            switch landing {
+            case .exact(let range): at = range.upperBound
+            case .caretAfter(let offset, _), .caretBefore(let offset, _): at = offset
+            case .caretWithin(let range): at = range.lowerBound
+            case .between: at = nil
+            }
+            let inTables = startsInTable || at.map(inTable) == true
+            let length = profile.has(.readLength) && !unknown.contains(.length) && !inTables
                 ? text.map { $0.utf16.count - valueGap } : nil
             // Without a landing no selection is read, so its edge and slots would check nothing.
             guard !unknown.contains(.selection) else {
@@ -518,7 +549,7 @@ private extension PhysicalPlanner {
                 // A typed `\n` may have made a paragraph or a line break.
                 if replacement.contains("\n") { unknown.formUnion([.selection, .edge]) }
                 // An item made or merged gains or loses `AXValue` lines, and its list renumbers.
-                if current.hidden.contains(where: { !$0.isGap }), replacement.contains("\n") || current.covers(range) {
+                if current.hidden.contains(where: { !$0.isBlock }), replacement.contains("\n") || current.covers(range) {
                     unknown.insert(.length)
                 }
                 if coversMarker, !plainLine, !ownMarker { unknown.formUnion([.selection, .edge]) }
@@ -852,8 +883,10 @@ private extension PhysicalPlanner {
             return presses + run(to > from ? .right : .left, count: count, selecting: selecting, normalizing: context.normalizes(to))
         }
         let lines = model.newlineCount(in: min(fromLine, toLine)..<max(fromLine, toLine))
-        // ↓ or ↑ across a line that starts right after a list, code block or quote's end stops between the two first.
-        let stops = context.gaps.filter { min(fromLine, toLine) < $0 && $0 <= max(fromLine, toLine) }.count
+        // ↓ or ↑ across a line that starts after a block or rule Linear stops beside stops there first.
+        let way: KeyModel.Way = toLine > fromLine ? .down : .up
+        let stops = context.stops.filter { min(fromLine, toLine) < $0.key && $0.key <= max(fromLine, toLine) }
+            .values.reduce(0) { $0 + $1.filter { KeyModel.visits($0, way) }.count }
         presses.append(.press(toLine > fromLine ? .down : .up, count: lines + stops))
         presses.append(.press(.lineStart, count: 1))
         if context.normalizes(toLine) { presses += outside }
@@ -1053,13 +1086,56 @@ private extension PhysicalPlanner {
         guard let position = context.position else { return .next }
         let line = model.lineStart(of: position)
         let targetLine = model.lineStart(of: target)
-        let gaps = context.gaps
-        let boxed = context.boxed
-        // ⇧→ → crosses a stop, which Dia reads right ~150 ms before → → (LIN-1686); a to-do takes only → →.
+        let stops = context.stops
+        let cells = context.cells
+        let lastRows = context.lastRows
+        let shape = context
+        // ⇧→ → crosses a lone stop, which Dia reads right ~150 ms before → → (LIN-1686); a to-do, a table or a rule takes
+        // a → each, and ⌥→ leaves a table line for the next line's start past any stop (LIN-1780).
         func hops(_ count: Int) -> [[Chord]] {
-            let starts = gaps.isEmpty ? [] : lineStarts(after: line, count: count, in: model)
-            return starts.map { !gaps.contains($0) ? [.right] : boxed.contains($0) ? [.right, .right] : [.selectRight, .right] }
-                + Array(repeating: [.right], count: count - starts.count)
+            let starts = stops.isEmpty && cells.isEmpty ? [] : lineStarts(after: line, count: count, in: model)
+            return zip([line] + starts, starts).map { from, start -> [Chord] in
+                let crossed = (stops[start] ?? []).filter { KeyModel.visits($0, .right) }
+                // Into a rule a table's last cell leaves by →, after which ⇧→ counts a column right where ⌥→'s does not.
+                if cells.contains(from), !crossed.contains(.rule), profile.has(.wordKeys) { return [.wordRight] }
+                return crossed == [.gap] ? [.selectRight, .right] : Array(repeating: .right, count: crossed.count + 1)
+            } + Array(repeating: [.right], count: count - starts.count)
+        }
+        // ← per stop ← meets and ⌃A per line; into a table from the line below it, ↑ to its last row, then ⌃E ⌥→ per cell.
+        func upward(_ count: Int) -> (chords: [Chord], endsLeft: Bool) {
+            var chords: [Chord] = []
+            var at = line
+            var left = count
+            var endsLeft = false
+            while left > 0, at > 0 {
+                let above = model.lineStart(of: at - 1)
+                // ← skips a table right above unless a rule between gives it somewhere to stop.
+                let backs = (stops[at] ?? []).filter { KeyModel.visits($0, .left) }.count
+                if cells.contains(above), !cells.contains(at), backs == 0, let row = lastRow(above) {
+                    let rows = model.newlineCount(in: row..<above) + 1
+                    let crossed = (stops[at] ?? []).filter { KeyModel.visits($0, .up) }.count
+                    chords += Array(repeating: .up, count: crossed + 1) + [.paragraphStart]
+                    endsLeft = false
+                    guard left >= rows else {
+                        chords += repeated([.paragraphEnd, profile.has(.wordKeys) ? .wordRight : .right], rows - left)
+                        break
+                    }
+                    (at, left) = (row, left - rows)
+                    continue
+                }
+                chords += Array(repeating: .left, count: backs + 1) + [.paragraphStart]
+                (at, left, endsLeft) = (above, left - 1, true)
+            }
+            return (chords, endsLeft)
+        }
+        // The first line of the last row of the table holding the table line `line`.
+        func lastRow(_ line: Int) -> Int? {
+            var at = line
+            while !lastRows.contains(at) {
+                guard at > 0, cells.contains(model.lineStart(of: at - 1)) else { return nil }
+                at = model.lineStart(of: at - 1)
+            }
+            return at
         }
         // The way to the target's line, and for `j`/`k` an optional one to its end; the column is counted from where each lands.
         var way: [KeyGroup]
@@ -1093,20 +1169,19 @@ private extension PhysicalPlanner {
             } else {
                 guard profile.has(.lineStartKey) else { return .next }
                 let lines = model.newlineCount(in: targetLine..<line)
-                let up = repeated([.left, .paragraphStart], lines)
-                way = [([.paragraphStart], .lineStartKey), (up, nil)]
+                let up = upward(lines)
+                way = [([.paragraphStart], .lineStartKey), (up.chords, nil)]
                 // The last ← already lands at the line's end.
-                if lines > 0, !context.missed.contains(.lineStart) {
-                    end = ([([.paragraphStart], .lineStartKey), (Array(up.dropLast()), nil)], .lineStart)
+                if lines > 0, up.endsLeft, !context.missed.contains(.lineStart) {
+                    end = ([([.paragraphStart], .lineStartKey), (Array(up.chords.dropLast()), nil)], .lineStart)
                 }
             }
         }
-        let atoms = context.atoms
         let selecting = context.arrowsSelect
         let normalizing = context.normalizes(target)
         // Only the column is counted, in its own settle so the line the field reports decides it.
         func counted(_ way: [KeyGroup]) -> [KeyGroup]? {
-            var landing = KeyModel(text: model.text, anchor: position, focus: position, atoms: atoms, gaps: gaps)
+            var landing = shape.keys(model.text, at: position)
             guard way.flatMap(\.chords).allSatisfy({ landing.press($0) }),
                   model.lineStart(of: landing.focus) == targetLine else { return nil }
             let reached = landing.focus
@@ -1225,7 +1300,7 @@ private extension PhysicalPlanner {
         var context = original
         var steps = collapsing(&context)
         // One model throughout: which end of a selection moves is state the keys build up.
-        var model = KeyModel(text: text, anchor: position, focus: position, atoms: original.atoms, gaps: original.gaps)
+        var model = original.keys(text, at: position)
         let shown = original.model
         var pending: KeyGroup = ([], nil)
         for group in groups where !group.chords.isEmpty {
@@ -1273,7 +1348,7 @@ private extension PhysicalPlanner {
         let blame = atom.flatMap { atom -> Expectation.Blame? in
             guard let before, let model else { return nil }
             let emptyParagraph = before == context.emptyParagraphCaret
-            let unmoved = emptyParagraph || mayStayPut(chords, from: before, in: model, atoms: context.atoms, gaps: context.gaps)
+            let unmoved = emptyParagraph || mayStayPut(chords, from: before, keys: context.keys(model.text, at: before.lowerBound))
                 ? [] : [context.field(before)]
             // Chromium's rich text can split one paragraph into several `AXValue` lines (a mention chip); nothing else does.
             let offTarget = context.breaks == nil
@@ -1291,9 +1366,9 @@ private extension PhysicalPlanner {
     }
 
     /// Whether the keys may rightly leave the caret where it was: they had nowhere to go from it.
-    static func mayStayPut(_ chords: [Chord], from read: Range<Int>, in model: TextModel, atoms: Set<Int>, gaps: Set<Int>) -> Bool {
+    static func mayStayPut(_ chords: [Chord], from read: Range<Int>, keys: KeyModel) -> Bool {
         guard read.isEmpty else { return true }
-        var keys = KeyModel(text: model.text, anchor: read.lowerBound, focus: read.lowerBound, atoms: atoms, gaps: gaps)
+        var keys = keys
         guard chords.allSatisfy({ keys.press($0) }) else { return true }
         return keys.selection == read
     }
