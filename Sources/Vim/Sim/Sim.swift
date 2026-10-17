@@ -158,6 +158,18 @@ public struct Sim {
     /// Lark's editor: ⌫ at a line's start deletes the line above's closing invisible characters with the `\n`, as its newline.
     public var runsAreNewlines = false
 
+    /// An input method is selected, so what Insert-mode keys type is not what the typed log says.
+    public var inputMethod = false
+
+    /// Letters the input method holds pending, ending at the caret; `compose` types them.
+    public private(set) var composing: Range<Int>?
+
+    /// Off, the reads cannot tell, as in Chromium with an input method that shows no candidate list there.
+    public var readsComposition = true
+
+    /// The input method ignores the commit key, so its letters stay pending.
+    public var ignoresCommit = false
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -229,14 +241,60 @@ public struct Sim {
         case .visual: mode = .visual
         case .insert, .replace: mode = .insert
         }
+        // The Controller's engage path, against the modeled input method.
+        if mode == .insert, inputMethod, token == "<Esc>" || token == "<C-[>" {
+            switch Composition.engage(token, read: { composition }, commit: {
+                if !ignoresCommit { composing = nil }
+                return composition
+            }) {
+            case .normal:
+                break
+            case .passThrough:
+                monitor.markInsertLogLossy()
+                cancelComposition()
+                return
+            case .refuse:
+                bells += 1
+                return
+            }
+        }
         switch monitor.feed(token, mode: mode, clicks: mode == .insert ? nil : buttonEvents) {
         case .pending, .cancelled:
             break
         case .passthrough:
+            if mode == .insert, inputMethod { monitor.markInsertLogLossy() }
+            if token == "<Esc>" { cancelComposition() }
             applyTyping(token)
         case .command(let completed):
+            guard mode == .insert || !inputMethod || Composition.runs(completed.command, read: { composition }) else {
+                bells += 1
+                return
+            }
             run(completed)
         }
+    }
+
+    /// Letters typed through the input method, which holds them pending at the caret.
+    public mutating func compose(_ letters: String) {
+        for letter in letters {
+            let start = composing?.lowerBound ?? caret
+            feed(String(letter))
+            composing = start..<caret
+        }
+    }
+
+    /// What the Controller's reads would answer.
+    var composition: Composition {
+        guard readsComposition else { return .unknown }
+        return composing == nil ? .clear : .pending
+    }
+
+    /// Esc reached the input method, which drops its pending letters.
+    private mutating func cancelComposition() {
+        guard let pending = composing else { return }
+        composing = nil
+        selection = pending
+        applyReplace("")
     }
 
     /// Step-level entry for goldens that exercise the interpreter directly —

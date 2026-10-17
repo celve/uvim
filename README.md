@@ -153,6 +153,14 @@ half-typed it still goes to the app: press Esc twice to close a dialog, a popup 
 P, whatever the keyboard layout, and it works whichever key you choose. To leave Esc to the apps, for their own
 cancels and dialogs, choose **⌃[** under **Normal Mode Key**.
 
+**With an input method** such as Shuangpin, letters still underlined with candidates are the input method's:
+Esc goes to it, which cancels them, and you stay in Insert mode, so a second Esc enters Normal mode. ⌃[ keeps
+the letters as typed and enters Normal mode at once. While letters are pending, Normal-mode commands beep,
+except `i`, and `.` does not repeat an insert typed with an input method. This was measured with Apple's
+Shuangpin in Chrome and in native fields, and native fields work the same with any input method that marks its
+letters, as Apple's do. Elsewhere, such as Sogou, WeType or Rime in Chrome, Dia or an Electron app, Esc and ⌃[
+work as they do without an input method.
+
 The menu-bar icon shows the mode as a letter in a square:
 
 | Icon | Meaning |
@@ -778,6 +786,12 @@ a length and never the text, on both sides (the text itself only with text recor
 `abort@N` names the step that ended the run, and the `C`s behind it did **not** all die with
 it: a commit carrying residency still lands (`VimEffect.survivesAbort`), which is why an
 aborted line can read `ok=0` and `mode=normal→insert` together.
+
+With an input method selected, Esc or ⌃[ in Insert mode logs what uvim read of pending letters and
+what it did: `e12 ime key=<C-[> method=com.apple.inputmethod.SCIM.Shuangpin read=pending,clear
+do=normal ms=15`. `read=` is `pending`, `clear` or `unknown`, read again after ⌃[ sent F13 to commit
+them, and `do=` is `pass` (the key went to the input method), `normal`, or `refuse` (F13 left the
+letters pending). A command refused while letters are pending logs `drop=composing`.
 
 A Chromium rich-text field (a contenteditable in Chrome, Dia or an Electron app; its bind
 line says `chromium=1 offsets=textContent/…`) names its selection in text content: `AXValue`
