@@ -237,6 +237,22 @@ enum Diag {
             """)
     }
 
+    /// An engage key's reads with an input method selected, then what it did; only Normal mode stays at the debug level.
+    static func engaged(
+        _ epoch: UInt64, key: String, method: String, answers: [Composition], _ engaged: Composition.Engage, since start: UInt64
+    ) {
+        let milliseconds = (DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+        let line = """
+            e\(epoch) ime key=\(key) method=\(method) read=\(answers.map(\.traceName).joined(separator: ",")) \
+            do=\(engaged.traceName) ms=\(milliseconds)
+            """
+        if engaged == .normal {
+            cmd.debug("\(line, privacy: .public)")
+        } else {
+            cmd.log("\(line, privacy: .public)")
+        }
+    }
+
     /// Every notification, activation and keydown resolve takes this exit without re-probing.
     static func shortCircuited(_ epoch: UInt64) {
         gate.debug("e\(epoch, privacy: .public) short-circuit same-element revalidate=0")

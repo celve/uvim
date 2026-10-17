@@ -75,6 +75,9 @@ public final class Controller {
     /// The last snapshot's, to convert the drawn cursor at unbind.
     private var fieldBreaks: ParagraphBreaks?
 
+    /// When the app last got a letter in Insert mode, in uptime nanoseconds: an input method shows it pending only later.
+    private var letterAt: UInt64?
+
     public init() {
         tracker.onRebind = { [weak self] binding, transition in
             self?.rebind(to: binding, transition: transition)
@@ -200,10 +203,22 @@ public final class Controller {
         case .insert, .replace: mode = .insert
         }
 
+        if mode == .insert, Self.engageTokens.contains(token), let method = InputSource.selectedMethod(),
+           let engaged = engage(token, on: binding, method: method) {
+            return engaged
+        }
+
         // Insert-mode non-Esc tokens must keep flowing through the monitor:
         // they build the insert log the dot body replays.
         switch monitor.feed(token, mode: mode, clicks: mode == .insert ? nil : Self.buttonEvents()) {
         case .passthrough:
+            if mode == .insert {
+                if token.count == 1, token.first?.isASCII == true, token.first?.isLetter == true {
+                    letterAt = DispatchTime.now().uptimeNanoseconds
+                }
+                // An input method turns these keys into text the log cannot say, so `.` must not replay them.
+                if InputSource.selectedMethod() != nil { monitor.markInsertLogLossy() }
+            }
             return false
         case .pending, .cancelled:
             guard gate(event, profile: binding.capabilities) != nil else {
@@ -251,6 +266,14 @@ public final class Controller {
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "app-key")
                 return false
             }
+            // Pending letters take the field's keys and selection, so a command would misfire and teach uvim wrong.
+            if mode != .insert, let method = InputSource.selectedMethod(), !Composition.runs(completed.command, read: {
+                CompositionReads.answer(of: binding, method: method, letter: letterAt)
+            }) {
+                NSSound.beep()
+                Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "composing")
+                return true
+            }
             run(completed, on: binding, seq: commandSeq)
             // Publish even on mid-plan aborts: a .setMode commit may have
             // landed before a later step failed.
@@ -277,6 +300,30 @@ public final class Controller {
     private func drop(_ completed: RawMonitor.Completed, _ seq: UInt64, _ reason: String) {
         Diag.dropped(tracker.epoch, seq, command: completed.command, reason: reason)
         tracker.reverify(force: true)
+    }
+
+    /// An engage key in Insert mode with an input method selected: its consume verdict, or nil to enter Normal mode.
+    private func engage(_ token: String, on binding: FocusTracker.Binding, method: String) -> Bool? {
+        let start = DispatchTime.now().uptimeNanoseconds
+        var answers: [Composition] = []
+        let engaged = Composition.engage(token, read: {
+            answers.append(CompositionReads.answer(of: binding, method: method, letter: letterAt))
+            return answers[answers.count - 1]
+        }, commit: {
+            answers.append(CompositionReads.commit(on: binding, method: method))
+            return answers[answers.count - 1]
+        })
+        Diag.engaged(tracker.epoch, key: token, method: method, answers: answers, engaged, since: start)
+        switch engaged {
+        case .normal:
+            return nil
+        case .passThrough:
+            monitor.markInsertLogLossy()
+            return false
+        case .refuse:
+            NSSound.beep()
+            return true
+        }
     }
 
     /// Focus moved (tracker event). The element plumbing is unconditional;
