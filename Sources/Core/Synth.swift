@@ -45,8 +45,17 @@ public enum Synth {
         }
     }
 
-    public static func key(_ code: CGKeyCode, _ flags: CGEventFlags = [], times count: Int, gap: TimeInterval = pairGap) {
-        for _ in 0..<max(0, count) { key(code, flags, gap: gap) }
+    /// Posts `count` presses, stopping before the first `proceed` refuses; returns how many it posted.
+    @discardableResult
+    public static func key(
+        _ code: CGKeyCode, _ flags: CGEventFlags = [], times count: Int, gap: TimeInterval = pairGap,
+        while proceed: () -> Bool = { true }
+    ) -> Int {
+        for posted in 0..<max(0, count) {
+            guard proceed() else { return posted }
+            key(code, flags, gap: gap)
+        }
+        return max(0, count)
     }
 
     /// Type arbitrary Unicode (emoji/CJK verbatim — no layout mapping), tagged.

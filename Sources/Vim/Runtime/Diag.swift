@@ -100,6 +100,9 @@ enum Diag {
         if let abortedAt = evidence.abortedAt {
             line += " abort@\(abortedAt)"
         }
+        if let departure = evidence.departure {
+            line += " left=\(departure.rawValue)"
+        }
         line += " ok=\(executed ? 1 : 0)"
         line += " fail=\(evidence.failedCapability?.traceName ?? "nil")"
         line += " settled=\(evidence.settledCapabilities.traceNames)"
@@ -135,6 +138,7 @@ enum Diag {
         let line = "\(tag) undo landing steps=\(plan.map(\.traceShape) ?? "none") ok=\(executed ? 1 : 0) waited=\(waited)"
             + " len=\(lengths.0)→\(lengths.1.map(String.init) ?? "nil")"
             + (fallbacks.isEmpty ? "" : " fallback=" + fallbacks.map(\.traceShape).joined(separator: ","))
+            + (evidence.departure.map { " left=\($0.rawValue)" } ?? "")
         if executed { cmd.debug("\(line, privacy: .public)") } else { cmd.log("\(line, privacy: .public)") }
         for failure in evidence.settleFailures {
             settleFailed(tag, failure)

@@ -173,6 +173,16 @@ public struct Sim {
     /// The reads fail once the commit key is sent, so nothing reads the commit.
     public var failsReadAfterCommit = false
 
+    /// After this many more keys reach the field a click takes the focus elsewhere, and the `inFlight` keys posted
+    /// next go with it, as keys the window server routes after the click do (LIN-1105).
+    public var focusLeaves: (after: Int, inFlight: Int)?
+
+    /// Why the last command stopped posting keys, as the executor's run says.
+    public private(set) var departure: KeyDestination.Departure?
+
+    /// The running command's, as the Controller hands it to the executor.
+    private var destination: KeyDestination?
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -360,6 +370,9 @@ public struct Sim {
 
 private extension Sim {
     mutating func run(_ completed: RawMonitor.Completed) {
+        destination = KeyDestination(app: nil, presses: buttonEvents)
+        departure = nil
+        defer { destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
@@ -574,31 +587,38 @@ private extension Sim {
                 if !swallowsReplace { applyReplace(replacement) }
 
             case .typeText(let typed):
-                applyReplace(typed)
+                guard let lands = posts() else { return stop(steps, at: index) }
+                if lands { applyReplace(typed) }
 
             case .press(let chord, let count):
-                if undoesLate, [.undo, .redo].contains(chord) {
-                    lateHistory += repeatElement(chord, count: count)
-                    break
-                }
-                for _ in 0..<count where !ignoredChords.contains(chord) {
-                    guard emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord),
-                          press(reboundChords[chord] ?? chord) else {
+                var unsupported = false
+                for _ in 0..<count {
+                    guard let lands = posts() else { return stop(steps, at: index) }
+                    guard lands, !unsupported, !ignoredChords.contains(chord) else { continue }
+                    if undoesLate, [.undo, .redo].contains(chord) {
+                        lateHistory.append(chord)
+                    } else if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
+                                || !press(reboundChords[chord] ?? chord) {
                         unsupportedSteps += 1
-                        break
+                        unsupported = true
                     }
                 }
-                landLateHistory()
+                if !undoesLate || ![.undo, .redo].contains(chord) { landLateHistory() }
 
             case .clipboardCut:
-                pasteboard = TextModel(text).substring(selection)
-                applyReplace("")
+                guard let lands = posts() else { return stop(steps, at: index) }
+                if lands {
+                    pasteboard = TextModel(text).substring(selection)
+                    applyReplace("")
+                }
 
             case .clipboardCopy:
-                pasteboard = TextModel(text).substring(selection)
+                guard let lands = posts() else { return stop(steps, at: index) }
+                if lands { pasteboard = TextModel(text).substring(selection) }
 
             case .clipboardInsert(let content):
-                applyReplace(content ?? pasteboard ?? "")
+                guard let lands = posts() else { return stop(steps, at: index) }
+                if lands { applyReplace(content ?? pasteboard ?? "") }
 
             case .captureSelectedText(let slot):
                 captures[slot] = readSelectedText
@@ -607,6 +627,7 @@ private extension Sim {
                 let expectation = planned.resolving(kept)
                 let (passed, observed, length) = settles(expectation, generated: generated)
                 generated = !passed || expectation.metByEmptyField
+                if !passed, departs() { return stop(steps, at: index) }
                 attribution.record(.settle(expectation), passed: passed, selection: observed, length: length,
                                    selectedText: readSelectedText)
                 if !passed {
@@ -622,6 +643,7 @@ private extension Sim {
                 let (passed, observed, length) = settles(expectation, generated: generated)
                 let read = Self.asRead(expectation, observed, length)
                 if !passed, expectation.ignored(selection: read.selection, length: read.length) {
+                    if departs() { return stop(steps, at: index) }
                     settleFailures += 1
                     drainResidency(of: steps, after: index)
                     return index
@@ -821,6 +843,47 @@ private extension Sim {
         let aborted = execute(plan.steps)
         attribution = evidence
         return aborted == nil
+    }
+
+    /// The executor's check before each key: nil where the run stops there, false where the key goes with the focus.
+    mutating func posts() -> Bool? {
+        guard !departs() else { return nil }
+        guard var leaves = focusLeaves else { return true }
+        if leaves.after > 0 {
+            leaves.after -= 1
+            focusLeaves = leaves
+            return true
+        }
+        if leaves.inFlight > 0 {
+            leaves.inFlight -= 1
+            focusLeaves = leaves
+            if leaves.inFlight == 0 { leave() }
+            return false
+        }
+        leave()
+        return departs() ? nil : true
+    }
+
+    /// The click `focusLeaves` makes, outside the field.
+    mutating func leave() {
+        focusLeaves = nil
+        buttonEvents &+= 2
+    }
+
+    /// Whether the run's keys left, by the executor's reads.
+    mutating func departs() -> Bool {
+        guard var held = destination else { return false }
+        if departure == nil {
+            departure = held.departure(presses: buttonEvents) { _ in true }
+            destination = held
+        }
+        return departure != nil
+    }
+
+    /// A run the focus left ends where the executor's does, with no evidence from that step.
+    mutating func stop(_ steps: [PhysicalStep], at index: Int) -> Int {
+        drainResidency(of: steps, after: index)
+        return index
     }
 
     /// The twin of the real executor's surviving-commit scan.

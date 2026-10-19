@@ -30,6 +30,9 @@ public final class Executor {
         /// Recorder only.
         public internal(set) var abortedAt: Int?
 
+        /// Why the run stopped posting keys, which then teach nothing about the field.
+        public internal(set) var departure: KeyDestination.Departure?
+
         /// Hard and soft: a soft one rings nothing and aborts nothing, so it was invisible.
         public internal(set) var settleFailures: [SettleFailure] = []
 
@@ -52,6 +55,14 @@ public final class Executor {
     }
 
     public private(set) var lastRun = RunEvidence()
+
+    /// The running command's, set around it by the controller; keys stop once it departs, and nil posts them unchecked.
+    var destination: KeyDestination? {
+        didSet { if destination == nil { watch = nil } }
+    }
+
+    /// Answers the checks within a run of presses for `destination`.
+    private var watch: ActiveWatch?
 
     /// From the write a following settle verifies; cleared where attribution is.
     private var lastWriteError: Int32?
@@ -162,10 +173,12 @@ public final class Executor {
                 kept[slot] = caret
             }
             let failure = passed ? nil : lastRun.settleFailures.last
-            lastRun.attribution.record(
-                step, passed: passed, selection: lastObserved, length: lastLength,
-                selectedText: failure?.observedSelectedText, writeError: failure?.writeError
-            )
+            if passed || lastRun.departure == nil {
+                lastRun.attribution.record(
+                    step, passed: passed, selection: lastObserved, length: lastLength,
+                    selectedText: failure?.observedSelectedText, writeError: failure?.writeError
+                )
+            }
             switch step {
             case .setSelection, .replaceSelection:
                 break
@@ -214,25 +227,34 @@ public final class Executor {
                 NSSound.beep()
                 return false
             }
-            Synth.key(code, flags(for: chord.modifiers), times: count, gap: Self.backToBack(chord) ? 0 : Synth.pairGap)
-            pressed += count
-            return true
+            var first = true
+            let gap = Self.backToBack(chord) ? 0 : Synth.pairGap
+            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap) {
+                defer { first = false }
+                return stays(fresh: first)
+            }
+            pressed += posted
+            return posted == count
 
         case .typeText(let text):
+            guard stays() else { return false }
             Synth.type(text)
             return true
 
         case .clipboardCut:
+            guard stays() else { return false }
             // The pasteboard IS the register (clipboard=unnamed): post the
             // cut and move on — nothing read back, silence on failure.
             Synth.key(7, .maskCommand)   // kVK_ANSI_X
             return true
 
         case .clipboardCopy:
+            guard stays() else { return false }
             Synth.key(8, .maskCommand)   // kVK_ANSI_C
             return true
 
         case .clipboardInsert(let content):
+            guard stays() else { return false }
             if let content {
                 // No sleep before ⌘V: the app reads the pasteboard only as it handles the ⌘V, queued after the write.
                 PasteboardLoan.shared.put(content)
@@ -273,7 +295,8 @@ public final class Executor {
             if record(outcome, expectation, at: index, hard: true) {
                 return true
             }
-            NSSound.beep()
+            // Keys that went elsewhere fail it without saying anything of this field.
+            if stays() { NSSound.beep() }
             return false
 
         case .softSettle(let expectation):
@@ -288,7 +311,7 @@ public final class Executor {
             lastLength = outcome.observedLength
             confirmPaste(outcome, expectation, at: index)
             _ = record(outcome, expectation, at: index, hard: ignored)
-            if ignored { NSSound.beep() }
+            if ignored, stays() { NSSound.beep() }
             return !ignored
 
         case .commit(let effect):
@@ -299,6 +322,15 @@ public final class Executor {
             NSSound.beep()
             return true
         }
+    }
+
+    /// Whether a key posted now still lands where the command was verified; once not, the run says why.
+    private func stays(fresh: Bool = true) -> Bool {
+        if lastRun.departure == nil, var held = destination {
+            lastRun.departure = KeyDestinationReads.departure(of: &held, fresh: fresh, watch: &watch)
+            destination = held
+        }
+        return lastRun.departure == nil
     }
 
     /// The observed values ride every exit, so a timeout costs no extra round trip.

@@ -7816,4 +7816,46 @@ switched.inputMethod = true
 switched.feed("<C-[>")
 precondition(switched.state.session.lastChange == VimState.ChangeMemory(body: "ciw", insert: "bye"))
 
+// MARK: - Where a command's keys land (LIN-1105)
+
+var asked: [Int32] = []
+func active(_ answer: Bool) -> (Int32) -> Bool { { asked.append($0); return answer } }
+var clicked = KeyDestination(app: 7, presses: 4)
+precondition(clicked.departure(presses: 4, isActive: active(true)) == nil && asked == [7])
+precondition(clicked.departure(presses: 5, isActive: active(true)) == .click && asked == [7], "a press needs no asking")
+precondition(clicked.departure(presses: 4, isActive: active(true)) == .click && asked == [7], "and stays")
+var deactivated = KeyDestination(app: 7, presses: 4)
+precondition(deactivated.departure(presses: 4, isActive: active(false)) == .app)
+precondition(deactivated.departure(presses: 4, isActive: active(true)) == .app && asked == [7, 7], "and stays")
+var noApp = KeyDestination(app: nil, presses: 4)
+precondition(noApp.departure(presses: 4, isActive: active(false)) == nil && asked.count == 2)
+precondition(noApp.departure(presses: 6, isActive: active(true)) == .click)
+
+let fiveLines = "a\nb\nc\nd\ne"
+var blindCut = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
+blindCut.emulatesKeys = true
+blindCut.type("d3j")
+precondition(blindCut.text == "e" && blindCut.pasteboard == "a\nb\nc\nd\n" && blindCut.departure == nil, blindCut.text.debugDescription)
+for (after, inFlight) in [(0, 0), (1, 0), (2, 3), (5, 0)] {
+    var leaving = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
+    leaving.emulatesKeys = true
+    leaving.focusLeaves = (after, inFlight)
+    leaving.type("d3j")
+    let context = "after \(after) in flight \(inFlight)"
+    precondition(leaving.text == fiveLines && leaving.pasteboard == nil && leaving.departure == .click, context)
+    precondition(leaving.bells == 0 && leaving.settleFailures == 0 && leaving.state.field.mode == .normal, context)
+    leaving.type("d3j")
+    precondition(leaving.text == "e" && leaving.departure == nil, "the next command runs: \(context)")
+}
+
+var wordLeft = keyedSim(nativeThreeParagraphs, caret: 10)
+wordLeft.focusLeaves = (after: 0, inFlight: 1)
+wordLeft.type("w")
+precondition(wordLeft.departure == .click && wordLeft.blamed.isEmpty && wordLeft.attribution.evidence.isEmpty)
+precondition(wordLeft.caret == 10 && wordLeft.settleFailures == 0)
+var deleteLeft = keyedSim(nativeThreeParagraphs, caret: 0, profile: readProfile)
+deleteLeft.focusLeaves = (after: 1, inFlight: 0)
+deleteLeft.type("dw")
+precondition(deleteLeft.text == nativeThreeParagraphs && deleteLeft.departure == .click && deleteLeft.state.field.mode == .normal)
+
 print("Vim engine tests passed")

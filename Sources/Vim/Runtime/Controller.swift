@@ -230,6 +230,8 @@ public final class Controller {
             // Numbered here, not in `run`, so the three silent drops below are too.
             seq &+= 1
             let commandSeq = seq
+            // Read before the checks below, so the focus moving after them stops the command's keys.
+            let destination = KeyDestinationReads.verified()
             // Never mutate a field focus has left (an overlay emits no event); an engage key already reverified.
             if !Self.engageTokens.contains(token) {
                 if binding.isForced {
@@ -274,7 +276,7 @@ public final class Controller {
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "composing")
                 return true
             }
-            run(completed, on: binding, seq: commandSeq)
+            run(completed, on: binding, seq: commandSeq, destination: destination)
             // Publish even on mid-plan aborts: a .setMode commit may have
             // landed before a later step failed.
             publishMode()
@@ -379,7 +381,12 @@ public final class Controller {
         }
     }
 
-    private func run(_ completed: RawMonitor.Completed, on binding: FocusTracker.Binding, seq commandSeq: UInt64) {
+    private func run(
+        _ completed: RawMonitor.Completed, on binding: FocusTracker.Binding, seq commandSeq: UInt64, destination: KeyDestination
+    ) {
+        // Every plan below posts its keys only while they land where the command was verified.
+        executor.destination = destination
+        defer { executor.destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
