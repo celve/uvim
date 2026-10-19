@@ -370,7 +370,7 @@ public struct Sim {
 
 private extension Sim {
     mutating func run(_ completed: RawMonitor.Completed) {
-        destination = KeyDestination(app: nil, presses: buttonEvents)
+        destination = KeyDestination(presses: buttonEvents)
         departure = nil
         defer { destination = nil }
         let command = completed.command
@@ -874,7 +874,7 @@ private extension Sim {
     mutating func departs() -> Bool {
         guard var held = destination else { return false }
         if departure == nil {
-            departure = held.departure(presses: buttonEvents) { _ in true }
+            departure = held.departure(presses: buttonEvents, routedAway: false)
             destination = held
         }
         return departure != nil

@@ -57,12 +57,7 @@ public final class Executor {
     public private(set) var lastRun = RunEvidence()
 
     /// The running command's, set around it by the controller; keys stop once it departs, and nil posts them unchecked.
-    var destination: KeyDestination? {
-        didSet { if destination == nil { watch = nil } }
-    }
-
-    /// Answers the checks within a run of presses for `destination`.
-    private var watch: ActiveWatch?
+    var destination: KeyDestination?
 
     /// From the write a following settle verifies; cleared where attribution is.
     private var lastWriteError: Int32?
@@ -197,6 +192,8 @@ public final class Executor {
                 return false
             }
         }
+        // The routing tap may have dropped the last key after its check, which the recorder should still say.
+        _ = stays()
         return true
     }
 
@@ -227,12 +224,8 @@ public final class Executor {
                 NSSound.beep()
                 return false
             }
-            var first = true
             let gap = Self.backToBack(chord) ? 0 : Synth.pairGap
-            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap) {
-                defer { first = false }
-                return stays(fresh: first)
-            }
+            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap, while: stays)
             pressed += posted
             return posted == count
 
@@ -263,12 +256,16 @@ public final class Executor {
                 pastedFrom = paragraphs ? Snapshotter.markedSelection(of: element).flatMap {
                     $0.isCollapsed ? ($0.range, Snapshotter.paragraphSide(of: $0, upper: true)) : nil
                 } : nil
-                Synth.commandV()
             } else {
                 // Registers +/* and pasteboard markers paste what the user has there, not a register still on loan.
                 PasteboardLoan.shared.restore()
-                Synth.commandV()
             }
+            // The loan and the reads above take long enough for the focus to move.
+            guard stays() else {
+                if content != nil { PasteboardLoan.shared.restore() }
+                return false
+            }
+            Synth.commandV()
             return true
 
         case .captureSelectedText(let slot):
@@ -325,9 +322,9 @@ public final class Executor {
     }
 
     /// Whether a key posted now still lands where the command was verified; once not, the run says why.
-    private func stays(fresh: Bool = true) -> Bool {
+    private func stays() -> Bool {
         if lastRun.departure == nil, var held = destination {
-            lastRun.departure = KeyDestinationReads.departure(of: &held, fresh: fresh, watch: &watch)
+            lastRun.departure = KeyDestinationReads.departure(of: &held)
             destination = held
         }
         return lastRun.departure == nil

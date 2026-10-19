@@ -1,24 +1,21 @@
-/// Where a command's keys land, as read when it was verified: the active app and the session's button presses. A key
-/// posted once a press was made, or once that app stopped being active, reaches another app or another place (LIN-1105).
+/// Where a command's keys land, as read when it was verified: the session's button presses, and the process the keys are
+/// routed to, which `KeyRouting` holds them to. A key posted once a press was made reaches another place (LIN-1105).
 public struct KeyDestination: Sendable {
     public enum Departure: String, Equatable, Sendable {
         case click, app
     }
 
-    /// The app active when the command was verified; nil leaves only a click noticed.
-    public let app: Int32?
     private let presses: UInt32
     private var departed: Departure?
 
-    public init(app: Int32?, presses: UInt32) {
-        self.app = app
+    public init(presses: UInt32) {
         self.presses = presses
     }
 
-    /// Why a key posted now would land elsewhere, for good once it has.
-    public mutating func departure(presses now: UInt32, isActive: (Int32) -> Bool) -> Departure? {
+    /// Why a key posted now would land elsewhere, for good once it has; `routedAway` is a key already dropped as bound elsewhere.
+    public mutating func departure(presses now: UInt32, routedAway: Bool) -> Departure? {
         if departed == nil, now != presses { departed = .click }
-        if departed == nil, let app, !isActive(app) { departed = .app }
+        if departed == nil, routedAway { departed = .app }
         return departed
     }
 }

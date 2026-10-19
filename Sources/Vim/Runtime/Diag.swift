@@ -85,6 +85,7 @@ enum Diag {
             || bell != nil
             || evidence.failedCapability != nil
             || !evidence.settleFailures.isEmpty
+            || evidence.departure != nil
         guard anomalous || cmdLevel.isEnabled(type: .debug) else { return }
 
         let tag = "e\(epoch).c\(seq)"

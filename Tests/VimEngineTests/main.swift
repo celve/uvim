@@ -7818,18 +7818,13 @@ precondition(switched.state.session.lastChange == VimState.ChangeMemory(body: "c
 
 // MARK: - Where a command's keys land (LIN-1105)
 
-var asked: [Int32] = []
-func active(_ answer: Bool) -> (Int32) -> Bool { { asked.append($0); return answer } }
-var clicked = KeyDestination(app: 7, presses: 4)
-precondition(clicked.departure(presses: 4, isActive: active(true)) == nil && asked == [7])
-precondition(clicked.departure(presses: 5, isActive: active(true)) == .click && asked == [7], "a press needs no asking")
-precondition(clicked.departure(presses: 4, isActive: active(true)) == .click && asked == [7], "and stays")
-var deactivated = KeyDestination(app: 7, presses: 4)
-precondition(deactivated.departure(presses: 4, isActive: active(false)) == .app)
-precondition(deactivated.departure(presses: 4, isActive: active(true)) == .app && asked == [7, 7], "and stays")
-var noApp = KeyDestination(app: nil, presses: 4)
-precondition(noApp.departure(presses: 4, isActive: active(false)) == nil && asked.count == 2)
-precondition(noApp.departure(presses: 6, isActive: active(true)) == .click)
+var clicked = KeyDestination(presses: 4)
+precondition(clicked.departure(presses: 4, routedAway: false) == nil)
+precondition(clicked.departure(presses: 5, routedAway: false) == .click)
+precondition(clicked.departure(presses: 4, routedAway: true) == .click, "the first departure stays")
+var routedAway = KeyDestination(presses: 4)
+precondition(routedAway.departure(presses: 4, routedAway: true) == .app)
+precondition(routedAway.departure(presses: 4, routedAway: false) == .app && routedAway.departure(presses: 9, routedAway: false) == .app)
 
 let fiveLines = "a\nb\nc\nd\ne"
 var blindCut = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())

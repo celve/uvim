@@ -90,6 +90,7 @@ public final class Controller {
     /// Starts focus tracking, once. Only with Accessibility granted: its click monitor costs a process without it its tap.
     public func start() {
         tracker.start()
+        KeyRouting.shared.install()
     }
 
     /// A click in a forced app moved the caret invisibly — Normal-mode
@@ -386,7 +387,11 @@ public final class Controller {
     ) {
         // Every plan below posts its keys only while they land where the command was verified.
         executor.destination = destination
-        defer { executor.destination = nil }
+        KeyRouting.shared.expect(binding.pid)
+        defer {
+            executor.destination = nil
+            KeyRouting.shared.finish()
+        }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?

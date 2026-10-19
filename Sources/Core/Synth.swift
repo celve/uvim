@@ -15,7 +15,8 @@ public enum SynthTag {
 
 /// Synthesized-input primitives — the blind lane's actuator and the clipboard
 /// paste fallback. Events go to the frontmost app (uvim is an accessory
-/// agent). Requires Accessibility permission. Every event is tagged.
+/// agent), but `KeyRouting` drops any a running command meant for another.
+/// Requires Accessibility permission. Every event is tagged.
 public enum Synth {
     /// Below every session-level tap — including uvim's own. The executor
     /// settles *inside* the tap callback (main run loop held), so an event
