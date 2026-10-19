@@ -128,11 +128,12 @@ enum Diag {
 
     /// The cursor move after `u`, or none where the undo put back no whole lines, joined to its command's line.
     static func undoLanding(
-        _ epoch: UInt64, _ seq: UInt64, plan: PhysicalPlan?, executed: Bool, evidence: Executor.RunEvidence, waited: Int,
-        lengths: (Int, Int?), fallbacks: [PhysicalPlan]
+        _ epoch: UInt64, _ seq: UInt64, plan: PhysicalPlan?, executed: Bool, evidence: Executor.RunEvidence,
+        waited: (polls: Int, milliseconds: Int), lengths: (Int, Int?), fallbacks: [PhysicalPlan]
     ) {
         let tag = "e\(epoch).c\(seq)"
-        let line = "\(tag) undo landing steps=\(plan.map(\.traceShape) ?? "none") ok=\(executed ? 1 : 0) waited=\(waited)"
+        let line = "\(tag) undo landing steps=\(plan.map(\.traceShape) ?? "none") ok=\(executed ? 1 : 0)"
+            + " waited=\(waited.polls) ms=\(waited.milliseconds)"
             + " len=\(lengths.0)→\(lengths.1.map(String.init) ?? "nil")"
             + (fallbacks.isEmpty ? "" : " fallback=" + fallbacks.map(\.traceShape).joined(separator: ","))
         if executed { cmd.debug("\(line, privacy: .public)") } else { cmd.log("\(line, privacy: .public)") }

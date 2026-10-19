@@ -487,11 +487,15 @@ public final class Controller {
     /// Puts the cursor on the lines `u` put back, as Vim does, from the field as the undo left it.
     private func landUndo(from before: String, reading: Snapshotter.Reading, on binding: FocusTracker.Binding, seq: UInt64) {
         // Chrome can apply ⌘Z after reads that follow it, and a read it cannot answer yet is no change (LIN-1980).
+        // Bounded in time, not reads: one read may take the whole messaging timeout, and no key is handled meanwhile (LIN-2104).
+        let start = Date()
+        let deadline = start.addingTimeInterval(0.25)
         var waited = 0
-        while waited < 25, (AX.value(of: binding.element) ?? reading.value) == reading.value {
+        while (AX.value(of: binding.element) ?? reading.value) == reading.value, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01)
             waited += 1
         }
+        let waitedMilliseconds = Int(Date().timeIntervalSince(start) * 1000)
         let after = snapshotAside(binding)
         let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after)
         let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
@@ -507,8 +511,8 @@ public final class Controller {
             }
         }
         Diag.undoLanding(
-            tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
-            lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks
+            tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence,
+            waited: (waited, waitedMilliseconds), lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks
         )
     }
 
