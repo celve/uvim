@@ -487,12 +487,12 @@ public final class Controller {
     /// Puts the cursor on the lines `u` put back, as Vim does, from the field as the undo left it.
     private func landUndo(from before: String, reading: Snapshotter.Reading, on binding: FocusTracker.Binding, seq: UInt64) {
         // Chrome can apply ⌘Z after reads that follow it, and a read it cannot answer yet is no change (LIN-1980).
-        // Bounded in time, not reads: one read may take the whole messaging timeout, and no key is handled meanwhile (LIN-2104).
+        // Half a second at most, as a read may take the whole messaging timeout and no key is handled meanwhile (LIN-2104).
         let start = Date()
-        let deadline = start.addingTimeInterval(0.25)
+        let deadline = start.addingTimeInterval(0.5)
         var waited = 0
         var shown = AX.value(of: binding.element) ?? reading.value
-        while shown == reading.value, Date() < deadline {
+        while shown == reading.value, waited < 25, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01)
             waited += 1
             shown = AX.value(of: binding.element) ?? reading.value
