@@ -7819,12 +7819,39 @@ precondition(switched.state.session.lastChange == VimState.ChangeMemory(body: "c
 // MARK: - Where a command's keys land (LIN-1105)
 
 var clicked = KeyDestination(presses: 4)
+clicked.routed = true
 precondition(clicked.departure(presses: 4, routedAway: false) == nil)
 precondition(clicked.departure(presses: 5, routedAway: false) == .click)
 precondition(clicked.departure(presses: 4, routedAway: true) == .click, "the first departure stays")
 var routedAway = KeyDestination(presses: 4)
+routedAway.routed = true
 precondition(routedAway.departure(presses: 4, routedAway: true) == .app)
-precondition(routedAway.departure(presses: 4, routedAway: false) == .app && routedAway.departure(presses: 9, routedAway: false) == .app)
+precondition(routedAway.departure(presses: 9, routedAway: false) == .app)
+var unrouted = KeyDestination(presses: 4)
+precondition(unrouted.departure(presses: 4, routedAway: false) == .unrouted, "no key without the routing tap")
+
+let ms: UInt64 = 1_000_000
+var ledger = KeyLedger()
+precondition(ledger.admit(target: 9), "a key outside any command passes")
+precondition(ledger.begin(7, at: 0))
+ledger.post(at: 1)
+ledger.post(at: 2)
+precondition(ledger.admit(target: 7) && !ledger.settled(at: 3))
+precondition(!ledger.end(at: 3) && ledger.expected == 7, "the policy waits for the command's last key")
+precondition(!ledger.begin(8, at: 4) && ledger.expected == 7, "and the next command waits too")
+precondition(!ledger.admit(target: 8) && ledger.cancelled, "the late key is judged by its own command's policy")
+precondition(ledger.end(at: 5) && ledger.expected == nil)
+precondition(ledger.begin(8, at: 6) && !ledger.cancelled)
+ledger.post(at: 7)
+ledger.post(at: 8)
+ledger.post(at: 9)
+precondition(!ledger.admit(target: 3) && !ledger.admit(target: 8), "after one key bound elsewhere, none goes")
+precondition(!ledger.end(at: 10) && ledger.end(at: 9 + KeyLedger.stale), "keys a tap that was off passed unseen go stale")
+precondition(ledger.begin(8, at: 300 * ms) && !ledger.admit(target: 3), "a key later than `stale` meets the next policy")
+var off = KeyLedger()
+precondition(off.begin(7, at: 0))
+off.cancel()
+precondition(off.cancelled && !off.admit(target: 7), "a tap that was off cancels the running command")
 
 let fiveLines = "a\nb\nc\nd\ne"
 var blindCut = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
@@ -7842,6 +7869,20 @@ for (after, inFlight) in [(0, 0), (1, 0), (2, 3), (5, 0)] {
     leaving.type("d3j")
     precondition(leaving.text == "e" && leaving.departure == nil, "the next command runs: \(context)")
 }
+
+var cutAway = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
+cutAway.emulatesKeys = true
+cutAway.focusLeaves = (after: 5, inFlight: 1)
+cutAway.type("d3j")
+precondition(cutAway.text == fiveLines && cutAway.pasteboard == nil && cutAway.departure == .app)
+precondition(cutAway.state.session.registers == VimState.initial.session.registers, "a cut that went elsewhere stores nothing")
+
+var leavingInsert = Sim(text: "abc", caret: 2, profile: CapabilityProfile())
+leavingInsert.emulatesKeys = true
+leavingInsert.type("i")
+leavingInsert.focusLeaves = (after: 0, inFlight: 1)
+leavingInsert.feed("<Esc>")
+precondition(leavingInsert.departure == .app && leavingInsert.state.field.mode == .normal, "a mode change survives its step left")
 
 var wordLeft = keyedSim(nativeThreeParagraphs, caret: 10)
 wordLeft.focusLeaves = (after: 0, inFlight: 1)

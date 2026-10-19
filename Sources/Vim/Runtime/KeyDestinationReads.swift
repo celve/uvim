@@ -8,7 +8,7 @@ enum KeyDestinationReads {
     }
 
     static func departure(of destination: inout KeyDestination) -> KeyDestination.Departure? {
-        destination.departure(presses: presses(), routedAway: KeyRouting.shared.droppedAny)
+        destination.departure(presses: presses(), routedAway: KeyRouting.shared.cancelled)
     }
 
     /// Presses only: a release can end a press made before the command.

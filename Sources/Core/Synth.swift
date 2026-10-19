@@ -34,15 +34,22 @@ public enum Synth {
     /// Synthesize ⌘V (clipboard paste). Used by clipboard-insert steps.
     public static func commandV() { key(0x09, .maskCommand) }   // 0x09 = kVK_ANSI_V
 
+    /// Tagged, and counted for `KeyRouting` before it is posted.
+    private static func send(_ event: CGEvent) {
+        SynthTag.tag(event)
+        KeyRouting.shared.willPost()
+        event.post(tap: tapLocation)
+    }
+
     /// Post a key down+up with modifier flags (tagged), `gap` apart.
     public static func key(_ code: CGKeyCode, _ flags: CGEventFlags = [], gap: TimeInterval = pairGap) {
         let src = source()
         if let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true) {
-            down.flags = flags; SynthTag.tag(down); down.post(tap: tapLocation)
+            down.flags = flags; send(down)
         }
         nudge(gap)
         if let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) {
-            up.flags = flags; SynthTag.tag(up); up.post(tap: tapLocation)
+            up.flags = flags; send(up)
         }
     }
 
@@ -65,12 +72,12 @@ public enum Synth {
         let units = Array(text.utf16)
         if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
             down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-            SynthTag.tag(down); down.post(tap: tapLocation)
+            send(down)
         }
         nudge()
         if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
             up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-            SynthTag.tag(up); up.post(tap: tapLocation)
+            send(up)
         }
     }
 }

@@ -59,6 +59,9 @@ public final class Executor {
     /// The running command's, set around it by the controller; keys stop once it departs, and nil posts them unchecked.
     var destination: KeyDestination?
 
+    /// This run posted a key, which its commits wait to see routed.
+    private var postedKeys = false
+
     /// From the write a following settle verifies; cleared where attribution is.
     private var lastWriteError: Int32?
 
@@ -157,6 +160,7 @@ public final class Executor {
         self.paragraphs = paragraphs
         self.generated = generated
         pressed = 0
+        postedKeys = false
         kept = [:]
         let outside: [PhysicalStep] = [.press(.selectLeft, count: 1), .press(.right, count: 1)]
         afterNormalizing = Set(plan.steps.indices.filter { $0 >= 2 && Array(plan.steps[$0 - 2..<$0]) == outside })
@@ -192,8 +196,11 @@ public final class Executor {
                 return false
             }
         }
-        // The routing tap may have dropped the last key after its check, which the recorder should still say.
-        _ = stays()
+        // Keys after the last commit have yet to reach their process.
+        guard keysLanded() else {
+            lastRun.abortedAt = max(0, plan.steps.count - 1)
+            return false
+        }
         return true
     }
 
@@ -227,15 +234,18 @@ public final class Executor {
             let gap = Self.backToBack(chord) ? 0 : Synth.pairGap
             let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap, while: stays)
             pressed += posted
+            postedKeys = postedKeys || posted > 0
             return posted == count
 
         case .typeText(let text):
             guard stays() else { return false }
+            postedKeys = true
             Synth.type(text)
             return true
 
         case .clipboardCut:
             guard stays() else { return false }
+            postedKeys = true
             // The pasteboard IS the register (clipboard=unnamed): post the
             // cut and move on — nothing read back, silence on failure.
             Synth.key(7, .maskCommand)   // kVK_ANSI_X
@@ -243,6 +253,7 @@ public final class Executor {
 
         case .clipboardCopy:
             guard stays() else { return false }
+            postedKeys = true
             Synth.key(8, .maskCommand)   // kVK_ANSI_C
             return true
 
@@ -265,6 +276,7 @@ public final class Executor {
                 if content != nil { PasteboardLoan.shared.restore() }
                 return false
             }
+            postedKeys = true
             Synth.commandV()
             return true
 
@@ -312,6 +324,11 @@ public final class Executor {
             return !ignored
 
         case .commit(let effect):
+            // A key posted before it may yet be dropped at routing, and only an effect that survives an abort then applies.
+            guard keysLanded() else {
+                if effect.survivesAbort { commit(effect, state: &state) }
+                return false
+            }
             commit(effect, state: &state)
             return true
 
@@ -326,6 +343,18 @@ public final class Executor {
         if lastRun.departure == nil, var held = destination {
             lastRun.departure = KeyDestinationReads.departure(of: &held)
             destination = held
+        }
+        return lastRun.departure == nil
+    }
+
+    /// Whether the keys this run posted have all reached the routing tap, and none was bound elsewhere; a click after the
+    /// last of them does not undo what they did.
+    private func keysLanded() -> Bool {
+        guard lastRun.departure == nil, postedKeys, destination?.routed == true else { return lastRun.departure == nil }
+        if !KeyRouting.shared.settle() {
+            lastRun.departure = .unrouted
+        } else if KeyRouting.shared.cancelled {
+            lastRun.departure = .app
         }
         return lastRun.departure == nil
     }

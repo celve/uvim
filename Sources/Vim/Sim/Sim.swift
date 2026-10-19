@@ -183,6 +183,9 @@ public struct Sim {
     /// The running command's, as the Controller hands it to the executor.
     private var destination: KeyDestination?
 
+    /// A key went with the focus, which the routing tap would have dropped.
+    private var routedAway = false
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -371,7 +374,9 @@ public struct Sim {
 private extension Sim {
     mutating func run(_ completed: RawMonitor.Completed) {
         destination = KeyDestination(presses: buttonEvents)
+        destination?.routed = true
         departure = nil
+        routedAway = false
         defer { destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
@@ -555,6 +560,7 @@ private extension Sim {
     /// The index of the step that ended the run, nil when every step ran; `generated` as the executor's.
     mutating func execute(_ steps: [PhysicalStep], generated: Bool = false) -> Int? {
         var kept: [Int: Int] = [:]
+        var postedKeys = false
         var generated = generated
         attribution = RunAttribution()
         defer { landLateHistory() }
@@ -588,12 +594,14 @@ private extension Sim {
 
             case .typeText(let typed):
                 guard let lands = posts() else { return stop(steps, at: index) }
+                postedKeys = true
                 if lands { applyReplace(typed) }
 
             case .press(let chord, let count):
                 var unsupported = false
                 for _ in 0..<count {
                     guard let lands = posts() else { return stop(steps, at: index) }
+                    postedKeys = true
                     guard lands, !unsupported, !ignoredChords.contains(chord) else { continue }
                     if undoesLate, [.undo, .redo].contains(chord) {
                         lateHistory.append(chord)
@@ -607,6 +615,7 @@ private extension Sim {
 
             case .clipboardCut:
                 guard let lands = posts() else { return stop(steps, at: index) }
+                postedKeys = true
                 if lands {
                     pasteboard = TextModel(text).substring(selection)
                     applyReplace("")
@@ -614,10 +623,12 @@ private extension Sim {
 
             case .clipboardCopy:
                 guard let lands = posts() else { return stop(steps, at: index) }
+                postedKeys = true
                 if lands { pasteboard = TextModel(text).substring(selection) }
 
             case .clipboardInsert(let content):
                 guard let lands = posts() else { return stop(steps, at: index) }
+                postedKeys = true
                 if lands { applyReplace(content ?? pasteboard ?? "") }
 
             case .captureSelectedText(let slot):
@@ -652,6 +663,12 @@ private extension Sim {
                 generated = !passed || expectation.metByEmptyField
 
             case .commit(let effect):
+                // The executor's check before a commit: a key that went with the focus never did what this records.
+                if destination != nil, routedAway, postedKeys {
+                    if departure == nil { departure = .app }
+                    if effect.survivesAbort { state = VimReducer.reduce(state, effect, captures: captures) }
+                    return stop(steps, at: index)
+                }
                 state = VimReducer.reduce(state, effect, captures: captures)
 
             case .bell:
@@ -857,7 +874,11 @@ private extension Sim {
         if leaves.inFlight > 0 {
             leaves.inFlight -= 1
             focusLeaves = leaves
-            if leaves.inFlight == 0 { leave() }
+            // The tap's verdict on these reaches the executor only after the keys already posted.
+            if leaves.inFlight == 0 {
+                leave()
+                routedAway = true
+            }
             return false
         }
         leave()
@@ -874,7 +895,7 @@ private extension Sim {
     mutating func departs() -> Bool {
         guard var held = destination else { return false }
         if departure == nil {
-            departure = held.departure(presses: buttonEvents, routedAway: false)
+            departure = held.departure(presses: buttonEvents, routedAway: routedAway)
             destination = held
         }
         return departure != nil

@@ -386,8 +386,9 @@ public final class Controller {
         _ completed: RawMonitor.Completed, on binding: FocusTracker.Binding, seq commandSeq: UInt64, destination: KeyDestination
     ) {
         // Every plan below posts its keys only while they land where the command was verified.
+        var destination = destination
+        destination.routed = KeyRouting.shared.expect(binding.pid)
         executor.destination = destination
-        KeyRouting.shared.expect(binding.pid)
         defer {
             executor.destination = nil
             KeyRouting.shared.finish()
