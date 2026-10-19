@@ -126,17 +126,19 @@ enum Diag {
         }
     }
 
-    /// The cursor move after `u`, or none where the undo put back no whole lines, joined to its command's line.
+    /// The cursor move after `u`, or none where the undo put back no whole lines, joined to its command's line; `late` where
+    /// the next command made it, and `pending=1` where it is left to the next command.
     static func undoLanding(
         _ epoch: UInt64, _ seq: UInt64, plan: PhysicalPlan?, executed: Bool, evidence: Executor.RunEvidence,
-        waited: (polls: Int, milliseconds: Int), lengths: (Int, Int?), fallbacks: [PhysicalPlan]
+        waited: (polls: Int, milliseconds: Int)?, lengths: (Int, Int?), fallbacks: [PhysicalPlan], pending: Bool
     ) {
         let tag = "e\(epoch).c\(seq)"
-        let line = "\(tag) undo landing steps=\(plan.map(\.traceShape) ?? "none") ok=\(executed ? 1 : 0)"
-            + " waited=\(waited.polls) ms=\(waited.milliseconds)"
+        let line = "\(tag) undo landing\(waited == nil ? " late" : "") steps=\(plan.map(\.traceShape) ?? "none") ok=\(executed ? 1 : 0)"
+            + (waited.map { " waited=\($0.polls) ms=\($0.milliseconds)" } ?? "")
             + " len=\(lengths.0)→\(lengths.1.map(String.init) ?? "nil")"
             + (fallbacks.isEmpty ? "" : " fallback=" + fallbacks.map(\.traceShape).joined(separator: ","))
-        if executed { cmd.debug("\(line, privacy: .public)") } else { cmd.log("\(line, privacy: .public)") }
+            + (pending ? " pending=1" : "")
+        if executed, !pending { cmd.debug("\(line, privacy: .public)") } else { cmd.log("\(line, privacy: .public)") }
         for failure in evidence.settleFailures {
             settleFailed(tag, failure)
         }

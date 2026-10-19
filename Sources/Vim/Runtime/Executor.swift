@@ -394,7 +394,7 @@ public final class Executor {
                 Snapshotter.showsOnlyGeneratedText(element)
             }
             if met { return outcome(true) }
-            guard Date() < deadline else { return outcome(false) }
+            guard Date() < deadline, !AX.pastDeadline else { return outcome(false) }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).
             Thread.sleep(forTimeInterval: 0.003)
         }

@@ -7673,6 +7673,48 @@ for (rich, profile) in [(true, adding([.lineStartKey, .lineEndKey, .documentStar
     unmeasured.type("ddudd")
     precondition(unmeasured.text == "one\ntwo\nthree", "without readLength, rich=\(rich): \(unmeasured.text.debugDescription)")
 }
+// An undo shown only after the wait lands at the next command, before it plans (LIN-2104).
+for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak), (true, .toBreak), (true, .restored)] {
+    for profile in [axProfile, writeKeys, keyProfile, readProfile] where profile.has(.writeSelection) || profile.has(.lineStartKey) {
+        func late(_ text: String, _ caret: Int) -> Sim {
+            var sim = Sim(text: text, caret: caret, profile: profile)
+            sim.emulatesKeys = true
+            sim.undoSelection = shape
+            sim.undoesAfterWait = true
+            if rich {
+                sim.emptyParagraphs = true
+                sim.readModel = .textContent
+                sim.webContent = true
+            }
+            return sim
+        }
+        let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys")"
+        for (text, caret, keys, after) in [
+            (lastThree, 10, "ddu", "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", "one\ntwo"), (lastThree, 1, "jddu", "one\nthree"),
+            ("one\ntwo\n", 8, "ddu", "one\ntwo"), ("one\n\nthree", 4, "ddu", "one\nthree"), ("one\n  two\nthree", 6, "ddu", "one\nthree"),
+            ("one\ntwo\nthree\nfour", 14, "dddduu", "one\ntwo\nthree"),
+        ] {
+            var sim = late(text, caret)
+            sim.type(keys)
+            sim.type("dd")
+            precondition(sim.text == after, "\(keys)dd shown late in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
+        }
+        var clicked = late(lastThree, 10)
+        clicked.type("ddu")
+        clicked.click(at: 0)
+        clicked.type("dd")
+        precondition(clicked.text == "two\nthree", "ddu shown late, a click, dd, \(context): \(clicked.text.debugDescription)")
+        var nothing = late(lastThree, 4)
+        nothing.type("udd")
+        precondition(nothing.text == "one\nthree", "u with nothing to undo, dd, \(context): \(nothing.text.debugDescription)")
+    }
+}
+var appKey = Sim(text: lastThree, caret: 10, profile: axProfile)
+appKey.undoesAfterWait = true
+appKey.type("ddu")
+appKey.feed("<Esc>")
+appKey.type("dd")
+precondition(appKey.text == "one\nthree", "a key the app gets drops the landing: \(appKey.text.debugDescription)")
 
 // MARK: - Input methods (LIN-2053)
 

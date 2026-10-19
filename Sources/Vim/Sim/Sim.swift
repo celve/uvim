@@ -89,6 +89,13 @@ public struct Sim {
     public var undoesLate = false
     private var lateHistory: [Chord] = []
 
+    /// ⌘Z and ⇧⌘Z shown only after the Controller's wait for them ends, at the next key or click (LIN-2104).
+    public var undoesAfterWait = false
+    private var heldHistory: [Chord] = []
+
+    /// The text a `u` found where its undo did not show, which the next command lands from first, as the Controller's.
+    private var pendingUndo: (before: String, clicks: UInt32)?
+
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
     private var snapshotting = false
@@ -238,6 +245,7 @@ public struct Sim {
     }
 
     public mutating func feed(_ token: String) {
+        releaseHeldHistory()
         let mode: RawMonitor.Mode
         switch state.field.mode {
         case .normal: mode = .normal
@@ -265,6 +273,7 @@ public struct Sim {
         case .pending, .cancelled:
             break
         case .passthrough:
+            pendingUndo = nil
             if mode == .insert, inputMethod { monitor.markInsertLogLossy() }
             if token == "<Esc>" { cancelComposition() }
             applyTyping(token)
@@ -273,6 +282,7 @@ public struct Sim {
                 bells += 1
                 return
             }
+            landPendingUndo()
             run(completed)
         }
     }
@@ -344,6 +354,7 @@ public struct Sim {
 
     /// A click in the bound field: the caret goes to `offset`, two button events are counted, and `Controller.pointerActed` runs.
     public mutating func click(at offset: Int) {
+        releaseHeldHistory()
         let caret = TextModel(text).clamp(offset)
         selection = caret..<caret
         atChipStart = false
@@ -430,15 +441,36 @@ private extension Sim {
         }
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
-        // A late ⌘Z has landed by now, as the Controller waits for it to.
-        if logical.steps.contains(.history(.undo)), let text = snapshot.text,
-           let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()),
-           !executeAside(landing.plan), let lines = landing.ending {
+        // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text, !landRestoredLines(after: text), shownValue == value {
+            pendingUndo = (text, buttonEvents)
+        }
+    }
+
+    /// The Controller's twin, but for its deadline; false where the field shows no lines an undo put back since `before`.
+    @discardableResult
+    mutating func landRestoredLines(after before: String) -> Bool {
+        guard let landing = PhysicalPlanner.undoLanding(before: before, snapshot: snapshotAside()) else { return false }
+        if !executeAside(landing.plan), let lines = landing.ending {
             for selecting in [false, true] {
                 guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
                 executeAside(next)
             }
         }
+        return true
+    }
+
+    /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since.
+    mutating func landPendingUndo() {
+        guard let pending = pendingUndo else { return }
+        pendingUndo = nil
+        if pending.clicks == buttonEvents { landRestoredLines(after: pending.before) }
+    }
+
+    /// An undo held past the Controller's wait shows now.
+    mutating func releaseHeldHistory() {
+        for chord in heldHistory where !ignoredChords.contains(chord) { _ = press(chord) }
+        heldHistory = []
     }
 
     /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.
@@ -577,6 +609,10 @@ private extension Sim {
                 applyReplace(typed)
 
             case .press(let chord, let count):
+                if undoesAfterWait, [.undo, .redo].contains(chord) {
+                    heldHistory += repeatElement(chord, count: count)
+                    break
+                }
                 if undoesLate, [.undo, .redo].contains(chord) {
                     lateHistory += repeatElement(chord, count: count)
                     break

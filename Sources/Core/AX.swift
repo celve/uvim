@@ -20,6 +20,20 @@ public enum AX {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), seconds)
     }
 
+    private static var deadline: Date?
+
+    /// Runs `body` with every read and write past `deadline` failing at once, as an unanswered one does, so work that holds the
+    /// keys ends then, but for one call already waiting on the app (LIN-2104). Main thread only.
+    public static func until<T>(_ deadline: Date, _ body: () -> T) -> T {
+        let outer = self.deadline
+        self.deadline = outer.map { min($0, deadline) } ?? deadline
+        defer { self.deadline = outer }
+        return body()
+    }
+
+    /// Whether `until`'s deadline has passed, for a wait that polls.
+    public static var pastDeadline: Bool { deadline.map { Date() >= $0 } ?? false }
+
     /// The focused UI element, resolved overlay-aware: if a non-activating
     /// accessory panel (Raycast/Spotlight) is frontmost and differs from the
     /// system-wide focus, prefer it.
@@ -56,7 +70,7 @@ public enum AX {
 
     public static func length(of element: AXUIElement) -> Int? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXNumberOfCharactersAttribute as CFString, &ref) == .success,
+        guard !pastDeadline, AXUIElementCopyAttributeValue(element, kAXNumberOfCharactersAttribute as CFString, &ref) == .success,
               let length = ref as? Int else { return nil }
         return length
     }
@@ -69,7 +83,7 @@ public enum AX {
     /// would otherwise trap in the AX read path.
     public static func selectedRange(of element: AXUIElement) -> CFRange? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &ref) == .success,
+        guard !pastDeadline, AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &ref) == .success,
               let value = ref, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var range = CFRange()
         return AXValueGetValue((value as! AXValue), .cfRange, &range) ? range : nil
@@ -92,7 +106,7 @@ public enum AX {
     /// don't expose it); a present `false` means read-only.
     public static func isEnabled(_ element: AXUIElement) -> Bool {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &ref) == .success,
+        guard !pastDeadline, AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &ref) == .success,
               let enabled = ref as? Bool else { return true }
         return enabled
     }
@@ -231,14 +245,14 @@ public enum AX {
     /// recovery policy here keeps every call site free of its own.
     public static func attributes(_ names: [String], of element: AXUIElement) -> AttributeBatch {
         var values: CFArray?
-        if AXUIElementCopyMultipleAttributeValues(
+        if !pastDeadline, AXUIElementCopyMultipleAttributeValues(
             element, names as CFArray, AXCopyMultipleAttributeOptions(), &values
         ) == .success, let list = values as? [AnyObject], list.count == names.count {
             return AttributeBatch(slots: list)
         }
         return AttributeBatch(slots: names.map { name -> AnyObject in
             var ref: CFTypeRef?
-            var error = AXUIElementCopyAttributeValue(element, name as CFString, &ref)
+            var error = pastDeadline ? AXError.cannotComplete : AXUIElementCopyAttributeValue(element, name as CFString, &ref)
             // Keep the batch's error marker, so `error(_:)` works on this path too.
             guard error == .success else {
                 return AXValueCreate(.axError, &error).map { $0 as AnyObject } ?? NSNull()
@@ -271,7 +285,7 @@ public enum AX {
 
     public static func childCount(of element: AXUIElement) -> Int? {
         var count: CFIndex = 0
-        guard AXUIElementGetAttributeValueCount(element, kAXChildrenAttribute as CFString, &count) == .success else {
+        guard !pastDeadline, AXUIElementGetAttributeValueCount(element, kAXChildrenAttribute as CFString, &count) == .success else {
             return nil
         }
         return count
@@ -441,6 +455,7 @@ public enum AX {
     /// Nil on a failed read, so a container is never taken for a leaf.
     public static func children(of node: AXUIElement) -> [AXUIElement]? {
         var ref: CFTypeRef?
+        guard !pastDeadline else { return nil }
         switch AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &ref) {
         case .success: return ref as? [AXUIElement]
         case .noValue, .attributeUnsupported: return []
@@ -493,13 +508,14 @@ public enum AX {
 
     private static func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
+        guard !pastDeadline, AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
         return ref
     }
 
     fileprivate static func parameterized(_ attribute: String, _ parameter: AnyObject, of element: AXUIElement) -> AnyObject? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(element, attribute as CFString, parameter, &ref) == .success else {
+        guard !pastDeadline,
+              AXUIElementCopyParameterizedAttributeValue(element, attribute as CFString, parameter, &ref) == .success else {
             return nil
         }
         return ref
@@ -511,6 +527,7 @@ public enum AX {
     /// settable). Terminals typically return false.
     public static func isInsertable(_ element: AXUIElement) -> Bool {
         var settable: DarwinBoolean = false
+        guard !pastDeadline else { return false }
         let error = AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
         return error == .success && settable.boolValue
     }
@@ -519,6 +536,7 @@ public enum AX {
     /// (`kAXSelectedTextRange` settable). False for some web search fields.
     public static func rangeSettable(_ element: AXUIElement) -> Bool {
         var settable: DarwinBoolean = false
+        guard !pastDeadline else { return false }
         let error = AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &settable)
         return error == .success && settable.boolValue
     }
@@ -526,6 +544,7 @@ public enum AX {
     /// `rangeSettable` with a failed read as nil rather than false.
     public static func rangeSettability(of element: AXUIElement) -> Bool? {
         var settable: DarwinBoolean = false
+        guard !pastDeadline else { return nil }
         switch AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &settable) {
         case .success: return settable.boolValue
         case .noValue, .attributeUnsupported: return false
@@ -540,6 +559,7 @@ public enum AX {
     @discardableResult
     public static func setSelectedRange(_ range: CFRange, on element: AXUIElement) -> AXError {
         var mutable = range
+        guard !pastDeadline else { return .cannotComplete }
         guard let axValue = AXValueCreate(.cfRange, &mutable) else { return .failure }
         return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, axValue)
     }
@@ -549,7 +569,8 @@ public enum AX {
     /// the app's undo stack.
     @discardableResult
     public static func setSelectedText(_ text: String, on element: AXUIElement) -> AXError {
-        AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+        guard !pastDeadline else { return .cannotComplete }
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
     }
 
     public static func ownerPID(of element: AXUIElement) -> pid_t? { pid(of: element) }
@@ -558,14 +579,14 @@ public enum AX {
 
     private static func copyElement(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
+        guard !pastDeadline, AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
               let value = ref, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }
 
     private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
+        guard !pastDeadline, AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
         return ref as? String
     }
 
