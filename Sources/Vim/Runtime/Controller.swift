@@ -546,12 +546,14 @@ public final class Controller {
     }
 
     /// Lands on the lines an undo put back since `before`, stepping onto lines that end the text where that fails; false where
-    /// `AX.until`'s deadline cut it short, or where the field shows no such lines although it has not `changed` since `before`.
+    /// a read went unanswered or `AX.until`'s deadline cut it short, or where the field shows no such lines although it has not
+    /// `changed` since `before`.
     private func landRestoredLines(
         after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64, waited: (polls: Int, milliseconds: Int)?
     ) -> Bool {
         let after = snapshotAside(binding)
-        let landing = AX.pastDeadline ? nil : PhysicalPlanner.undoLanding(before: before, snapshot: after)
+        var read = after.text != nil && !AX.pastDeadline
+        let landing = read ? PhysicalPlanner.undoLanding(before: before, snapshot: after) : nil
         let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
         let evidence = executor.lastRun
         // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
@@ -559,13 +561,13 @@ public final class Controller {
         if landed == false, let lines = landing?.ending {
             for selecting in [false, true] {
                 let field = snapshotAside(binding)
-                guard !AX.pastDeadline,
-                      let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
+                read = field.text != nil && !AX.pastDeadline
+                guard read, let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
                 executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil)
                 fallbacks.append(fallback)
             }
         }
-        let finished = !AX.pastDeadline && (landing != nil || changed)
+        let finished = read && !AX.pastDeadline && (landing != nil || changed)
         Diag.undoLanding(
             tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
             lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks, pending: !finished
