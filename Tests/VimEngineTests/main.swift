@@ -7715,6 +7715,21 @@ for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak
         precondition(nothing.text == "one\nthree", "u with nothing to undo, dd, \(context): \(nothing.text.debugDescription)")
     }
 }
+let restoredTail = (1...60).map { "l\($0)" }.joined(separator: "\n")
+for profile in [keyProfile, readProfile] {
+    let undone = FieldSnapshot(capabilities: profile, text: restoredTail, selection: 2..<restoredTail.utf16.count, length: restoredTail.utf16.count)
+    let landing = PhysicalPlanner.undoLanding(before: "l1", snapshot: undone)
+    let pressed = (landing?.plan.steps ?? []).reduce(0) { if case .press(_, let count) = $1 { return $0 + count }; return $0 }
+    precondition(landing?.ending == 3..<restoredTail.utf16.count && pressed <= 20,
+                 "a landing over 59 restored last lines presses few keys: \(landing?.plan.steps ?? [])")
+    var tail = Sim(text: restoredTail, caret: 3, profile: profile)
+    tail.emulatesKeys = true
+    tail.type("dGu")
+    precondition(tail.text == restoredTail && tail.caret >= 3, "dGu over 59 lines: \(tail.caret)")
+    guard profile.has(.lineStartKey) else { continue }
+    tail.type("dd")
+    precondition(tail.text.hasPrefix("l1\n") && tail.text.split(separator: "\n").count == 59, "dGudd over 59 lines: \(tail.text.suffix(20))")
+}
 var appKey = Sim(text: lastThree, caret: 10, profile: axProfile)
 appKey.undoesAfterWait = true
 appKey.type("ddu")

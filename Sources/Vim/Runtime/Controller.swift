@@ -546,11 +546,13 @@ public final class Controller {
             pendingUndo = nil
             return true
         }
-        let landed = AX.until(Date().addingTimeInterval(0.5)) {
-            // An undo can show only after `u` gave up on it, while this key waited behind that `u`.
+        let start = Date()
+        let landed = AX.until(start.addingTimeInterval(0.5)) {
+            // An undo can show only after `u` gave up on it, while this key waited behind that `u`; half the time stays to land.
+            let shownBy = min(pending.sent.addingTimeInterval(1), start.addingTimeInterval(0.25))
             var shown = AX.value(of: binding.element)
             var waited = 0
-            while (shown ?? pending.value) == pending.value, Date().timeIntervalSince(pending.sent) < 1, waited < 25, !AX.pastDeadline {
+            while (shown ?? pending.value) == pending.value, Date() < shownBy, waited < 25 {
                 Thread.sleep(forTimeInterval: 0.01)
                 waited += 1
                 shown = AX.value(of: binding.element)
@@ -564,10 +566,10 @@ public final class Controller {
 
     /// Lands on the lines an undo put back since `before`, stepping onto lines that end the text where that fails; not finished
     /// where a read went unanswered or `AX.until`'s deadline cut it short, or where the field shows no such lines although it
-    /// has not `changed` since `before`. `moved` says a landing ran, and in, that an earlier one did.
+    /// has not `changed` since `before`. The result's `moved` says a landing ran, and `earlier` that one already had.
     private func landRestoredLines(
-        after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64, waited: (polls: Int, milliseconds: Int)?,
-        moved earlier: Bool = false
+        after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64,
+        waited: (polls: Int, milliseconds: Int)?, moved earlier: Bool = false
     ) -> (finished: Bool, moved: Bool) {
         let after = snapshotAside(binding)
         var read = after.text != nil && !AX.pastDeadline
@@ -584,7 +586,8 @@ public final class Controller {
             for selecting in [false, true] {
                 let field = snapshotAside(binding)
                 read = field.text != nil && !AX.pastDeadline
-                guard read, let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
+                guard read,
+                      let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
                 executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil)
                 fallbacks.append(fallback)
             }

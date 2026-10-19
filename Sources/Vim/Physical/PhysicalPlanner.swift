@@ -190,7 +190,12 @@ public extension PhysicalPlanner {
                 + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
         }
         let landing = planning(LogicalPlan(steps: moves + [.renderCursor]), snapshot: snapshot)
-        return landing.rejection == nil ? (landing.plan, ending ? lines : nil) : nil
+        guard landing.rejection == nil else { return nil }
+        // A walk over many restored lines key by key floods the app with keys it takes seconds to handle (LIN-2104).
+        if ending, pressCount(landing.plan.steps) > 20 {
+            return (undoFallback(onto: lines, snapshot: snapshot) ?? .empty, lines)
+        }
+        return (landing.plan, ending ? lines : nil)
     }
 
     /// After a failed landing, keys onto restored `lines` that end the text from where the cursor stopped above: ↓, → and ⌘↓, or,
