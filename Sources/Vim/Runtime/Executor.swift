@@ -343,6 +343,8 @@ public final class Executor {
         if lastRun.departure == nil, var held = destination {
             lastRun.departure = KeyDestinationReads.departure(of: &held)
             destination = held
+            // Keys already posted are still on their way, and the routing tap drops them only once it knows.
+            if lastRun.departure != nil { KeyRouting.shared.cancel() }
         }
         return lastRun.departure == nil
     }
@@ -353,6 +355,7 @@ public final class Executor {
         guard lastRun.departure == nil, postedKeys, destination?.routed == true else { return lastRun.departure == nil }
         if !KeyRouting.shared.settle() {
             lastRun.departure = .unrouted
+            KeyRouting.shared.cancel()
         } else if KeyRouting.shared.cancelled {
             lastRun.departure = .app
         }

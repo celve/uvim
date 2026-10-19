@@ -7,11 +7,21 @@ import Foundation
 public final class KeyRouting: @unchecked Sendable {
     public static let shared = KeyRouting()
 
+    /// A barrier's `eventSourceUserData`, its number in the low half; the tap drops it, and no key sends key code 0xFF.
+    private static let barrierMark: Int64 = 0x4C49_4E00 << 32
+    private static let barrierKey: CGKeyCode = 0xFF
+
     private let lock = NSLock()
     private var ledger = KeyLedger()
     private var port: CFMachPort?
 
     private init() {}
+
+    /// The session's button presses, which move at the press; releases are left out, as one can end a press made earlier.
+    public static func presses() -> UInt32 {
+        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            .reduce(0) { $0 &+ CGEventSource.counterForEventType(.combinedSessionState, eventType: $1) }
+    }
 
     /// Makes the tap, unless it is up, and returns once a thread of its own services it: the main thread is the one a
     /// command holds.
@@ -40,42 +50,53 @@ public final class KeyRouting: @unchecked Sendable {
         lock.withLock { self.port = port }
     }
 
-    /// Holds the keys this process posts to `pid` until `finish`; false where it cannot, and nothing may then be posted.
-    public func expect(_ pid: pid_t, wait: TimeInterval = 0.1) -> Bool {
+    /// Holds the keys this process posts to `pid`, as checked at `presses` clicks, until `finish`; false where it cannot,
+    /// and nothing may then be posted.
+    public func expect(_ pid: pid_t, presses: UInt32, wait: TimeInterval = 0.1) -> Bool {
         install()
-        return until(wait) { $0.begin(pid, at: Self.now()) }
+        guard settle(wait: wait) else { return false }
+        return lock.withLock { ledger.begin(pid, presses: presses) }
     }
 
-    /// Ends the hold once the command's keys have all reached the tap, or leaves it for the ones still on their way.
+    /// Ends the hold once the command's keys have all passed the tap, or leaves it for the ones still on their way.
     public func finish(wait: TimeInterval = 0.1) {
-        _ = until(wait) { $0.end(at: Self.now()) }
+        guard settle(wait: wait) else { return }
+        _ = lock.withLock { ledger.end() }
     }
 
-    /// Whether every key posted has reached the tap, waiting at most `wait` seconds.
+    /// Whether every key this process posted has passed the tap, as a barrier posted behind them shows, within `wait` seconds.
     public func settle(wait: TimeInterval = 0.1) -> Bool {
-        until(wait) { $0.settled(at: Self.now()) }
+        guard lock.withLock({ port != nil }),
+              let event = CGEvent(keyboardEventSource: CGEventSource(stateID: .combinedSessionState), virtualKey: Self.barrierKey,
+                                  keyDown: false) else { return false }
+        let id = lock.withLock { ledger.barrier() }
+        event.setIntegerValueField(.eventSourceUserData, value: Self.barrierMark | Int64(truncatingIfNeeded: id & 0xFFFF_FFFF))
+        event.post(tap: .cgAnnotatedSessionEventTap)
+        let deadline = Date().addingTimeInterval(wait)
+        while !lock.withLock({ ledger.settled }) {
+            if Date() >= deadline { return false }
+            usleep(50)
+        }
+        return true
     }
 
-    /// Whether a key of the running command was bound elsewhere, or went by while the tap was off.
+    /// Whether a key of the running command was bound elsewhere or behind a click, or the command was cancelled.
     public var cancelled: Bool { lock.withLock { ledger.cancelled } }
 
-    public func willPost() {
-        lock.withLock { ledger.post(at: Self.now()) }
-    }
-
-    private func until(_ wait: TimeInterval, _ attempt: (inout KeyLedger) -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(wait)
-        while true {
-            if lock.withLock({ port != nil && attempt(&ledger) }) { return true }
-            if Date() >= deadline { return false }
-            usleep(100)
-        }
+    public func cancel() {
+        lock.withLock { ledger.cancel() }
     }
 
     fileprivate func admits(_ event: CGEvent) -> Bool {
         guard event.getIntegerValueField(.eventSourceUnixProcessID) == Int64(getpid()) else { return true }
+        let data = event.getIntegerValueField(.eventSourceUserData)
+        if data & ~Int64(0xFFFF_FFFF) == Self.barrierMark {
+            lock.withLock { ledger.saw(barrier: UInt64(data & 0xFFFF_FFFF)) }
+            return false
+        }
         let target = Int32(truncatingIfNeeded: event.getIntegerValueField(.eventTargetUnixProcessID))
-        return lock.withLock { ledger.admit(target: target) }
+        let presses = Self.presses()
+        return lock.withLock { ledger.admit(target: target, presses: presses) }
     }
 
     fileprivate func reenable() {
@@ -84,8 +105,6 @@ public final class KeyRouting: @unchecked Sendable {
             if let port { CGEvent.tapEnable(tap: port, enable: true) }
         }
     }
-
-    private static func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
 }
 
 private func keyRoutingCallback(

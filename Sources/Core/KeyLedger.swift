@@ -1,57 +1,55 @@
 /// The routing tap's rule for this process's own keys, apart from the tap so that it can be tested (LIN-1105). A command's
-/// policy names the one process its keys may reach. It starts once every key posted before it has reached the tap, ends once
-/// every key the command posted has, and from the first key bound elsewhere it drops every later key of the command.
+/// policy names the one process its keys may reach and the click count it was checked at. It starts and ends only once
+/// every barrier posted has reached the tap, and from its first key bound elsewhere or behind a click it drops every key.
 public struct KeyLedger: Sendable {
-    /// Nanoseconds without a post after which keys never seen went by while the tap was off, and are let go.
-    public static let stale: UInt64 = 250_000_000
-
     /// The process the running command's keys may reach; it outlives the command while the command's keys are on their way.
     public private(set) var expected: Int32?
     public private(set) var cancelled = false
-    private var posted = 0
-    private var seen = 0
-    private var lastPost: UInt64 = 0
+    private var presses: UInt32 = 0
+    private var barriersPosted: UInt64 = 0
+    private var barriersSeen: UInt64 = 0
 
     public init() {}
 
-    /// Whether every key posted has reached the tap, or none has been posted for `stale`.
-    public func settled(at time: UInt64) -> Bool {
-        seen >= posted || time >= lastPost + Self.stale
+    /// Whether the tap has seen every barrier posted, and so, keys reaching it in the order posted, every key before them.
+    public var settled: Bool { barriersSeen >= barriersPosted }
+
+    /// Numbers a barrier about to be posted.
+    public mutating func barrier() -> UInt64 {
+        barriersPosted += 1
+        return barriersPosted
     }
 
-    /// Puts a command's policy in force; false while keys from before are on their way, and the old policy then stays.
-    public mutating func begin(_ pid: Int32, at time: UInt64) -> Bool {
-        guard settled(at: time) else { return false }
-        seen = posted
+    /// One barrier vouches for every barrier posted before it.
+    public mutating func saw(barrier id: UInt64) {
+        barriersSeen = max(barriersSeen, id)
+    }
+
+    /// Puts a command's policy in force; false while a barrier is out, and the old policy then stays.
+    public mutating func begin(_ pid: Int32, presses: UInt32) -> Bool {
+        guard settled else { return false }
         expected = pid
+        self.presses = presses
         cancelled = false
         return true
     }
 
-    /// Ends the command's policy; false while its keys are on their way, and the policy then stays for them.
-    public mutating func end(at time: UInt64) -> Bool {
-        guard settled(at: time) else { return false }
-        seen = posted
+    /// Ends the command's policy; false while a barrier is out, and the policy then stays for keys still on their way.
+    public mutating func end() -> Bool {
+        guard settled else { return false }
         expected = nil
         return true
     }
 
-    /// Counts a key before it is posted, since the tap can see it before `post` returns.
-    public mutating func post(at time: UInt64) {
-        posted += 1
-        lastPost = time
-    }
-
-    /// The tap's verdict on one of this process's keys, which the window server is routing to `target`.
-    public mutating func admit(target: Int32) -> Bool {
-        seen += 1
+    /// The tap's verdict on one of this process's keys, routed to `target` when the session had counted `presses` clicks.
+    public mutating func admit(target: Int32, presses now: UInt32) -> Bool {
         guard let expected else { return true }
-        if !cancelled, target == expected { return true }
+        if !cancelled, target == expected, now == presses { return true }
         cancelled = true
         return false
     }
 
-    /// The tap was off for a while, so keys of the running command may have gone by unchecked.
+    /// The command saw the focus leave, or the tap was off: none of its keys may go any more.
     public mutating func cancel() {
         if expected != nil { cancelled = true }
     }

@@ -387,7 +387,7 @@ public final class Controller {
     ) {
         // Every plan below posts its keys only while they land where the command was verified.
         var destination = destination
-        destination.routed = KeyRouting.shared.expect(binding.pid)
+        destination.routed = KeyRouting.shared.expect(binding.pid, presses: destination.presses)
         executor.destination = destination
         defer {
             executor.destination = nil

@@ -675,6 +675,11 @@ private extension Sim {
                 bells += 1
             }
         }
+        // The executor's check after the last step, for keys after the last commit.
+        if destination != nil, routedAway, postedKeys {
+            if departure == nil { departure = .app }
+            return max(0, steps.count - 1)
+        }
         return nil
     }
 

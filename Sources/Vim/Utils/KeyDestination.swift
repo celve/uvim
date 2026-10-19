@@ -5,7 +5,8 @@ public struct KeyDestination: Sendable {
         case click, app, unrouted
     }
 
-    private let presses: UInt32
+    /// The session's button presses when the command was verified.
+    public let presses: UInt32
     /// Whether `KeyRouting` holds this command's keys to its process; without that no key may be posted.
     public var routed = false
     private var departed: Departure?
