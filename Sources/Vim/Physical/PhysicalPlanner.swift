@@ -193,7 +193,8 @@ public extension PhysicalPlanner {
         guard landing.rejection == nil else { return nil }
         // A walk over many restored lines key by key floods the app with keys it takes seconds to handle (LIN-2104).
         if ending, pressCount(landing.plan.steps) > 20 {
-            return (undoFallback(onto: lines, snapshot: snapshot) ?? .empty, lines)
+            let onto = undoFallback(onto: lines, snapshot: snapshot) ?? .empty
+            if pressCount(onto.steps) < pressCount(landing.plan.steps) { return (onto, lines) }
         }
         return (landing.plan, ending ? lines : nil)
     }
