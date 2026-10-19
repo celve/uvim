@@ -491,14 +491,17 @@ public final class Controller {
         let start = Date()
         let deadline = start.addingTimeInterval(0.25)
         var waited = 0
-        while (AX.value(of: binding.element) ?? reading.value) == reading.value, Date() < deadline {
+        var shown = AX.value(of: binding.element) ?? reading.value
+        while shown == reading.value, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01)
             waited += 1
+            shown = AX.value(of: binding.element) ?? reading.value
         }
         let waitedMilliseconds = Int(Date().timeIntervalSince(start) * 1000)
-        let after = snapshotAside(binding)
-        let landing = PhysicalPlanner.undoLanding(before: before, snapshot: after)
-        let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+        // An undo not shown by now lands nothing, and a field this slow would hold the keys through another whole read.
+        let after = shown == reading.value ? nil : snapshotAside(binding)
+        let landing = after.flatMap { PhysicalPlanner.undoLanding(before: before, snapshot: $0) }
+        let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after?.breaks != nil) }
         let evidence = executor.lastRun
         // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
         var fallbacks: [PhysicalPlan] = []
@@ -512,7 +515,7 @@ public final class Controller {
         }
         Diag.undoLanding(
             tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence,
-            waited: (waited, waitedMilliseconds), lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks
+            waited: (waited, waitedMilliseconds), lengths: (before.utf16.count, after?.text?.utf16.count), fallbacks: fallbacks
         )
     }
 
