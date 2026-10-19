@@ -93,8 +93,11 @@ public struct Sim {
     public var undoesAfterWait = false
     private var heldHistory: [Chord] = []
 
-    /// The text a `u` found where its undo did not show, which the next command lands from first, as the Controller's.
-    private var pendingUndo: (before: String, clicks: UInt32)?
+    /// With `undoesAfterWait`, shown no sooner than the next command's own wait for them.
+    public var undoesInNextWait = false
+
+    /// The text and `AXValue` a `u` found where its undo did not show, which the next command lands from first, as the Controller's.
+    private var pendingUndo: (before: String, value: String?, clicks: UInt32)?
 
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
@@ -245,7 +248,7 @@ public struct Sim {
     }
 
     public mutating func feed(_ token: String) {
-        releaseHeldHistory()
+        if !undoesInNextWait { releaseHeldHistory() }
         let mode: RawMonitor.Mode
         switch state.field.mode {
         case .normal: mode = .normal
@@ -443,7 +446,7 @@ private extension Sim {
         recordChange(for: command, from: before, mutated: physical.mutatesText)
         // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
         if logical.steps.contains(.history(.undo)), let text = snapshot.text, !landRestoredLines(after: text), shownValue == value {
-            pendingUndo = (text, buttonEvents)
+            pendingUndo = (text, value, buttonEvents)
         }
     }
 
@@ -464,7 +467,10 @@ private extension Sim {
     mutating func landPendingUndo() {
         guard let pending = pendingUndo else { return }
         pendingUndo = nil
-        if pending.clicks == buttonEvents { landRestoredLines(after: pending.before) }
+        guard pending.clicks == buttonEvents else { return }
+        // The Controller waits here for a field still showing what `u` found.
+        if shownValue == pending.value { releaseHeldHistory() }
+        landRestoredLines(after: pending.before)
     }
 
     /// An undo held past the Controller's wait shows now.

@@ -7675,12 +7675,13 @@ for (rich, profile) in [(true, adding([.lineStartKey, .lineEndKey, .documentStar
 }
 // An undo shown only after the wait lands at the next command, before it plans (LIN-2104).
 for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak), (true, .toBreak), (true, .restored)] {
-    for profile in [axProfile, writeKeys, keyProfile, readProfile] where profile.has(.writeSelection) || profile.has(.lineStartKey) {
+    for (profile, nextWait) in [axProfile, writeKeys, keyProfile, readProfile].flatMap({ p in [(p, false), (p, true)] }) {
         func late(_ text: String, _ caret: Int) -> Sim {
             var sim = Sim(text: text, caret: caret, profile: profile)
             sim.emulatesKeys = true
             sim.undoSelection = shape
             sim.undoesAfterWait = true
+            sim.undoesInNextWait = nextWait
             if rich {
                 sim.emptyParagraphs = true
                 sim.readModel = .textContent
@@ -7688,17 +7689,22 @@ for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak
             }
             return sim
         }
-        let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys")"
-        for (text, caret, keys, after) in [
-            (lastThree, 10, "ddu", "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", "one\ntwo"), (lastThree, 1, "jddu", "one\nthree"),
-            ("one\ntwo\n", 8, "ddu", "one\ntwo"), ("one\n\nthree", 4, "ddu", "one\nthree"), ("one\n  two\nthree", 6, "ddu", "one\nthree"),
-            ("one\ntwo\nthree\nfour", 14, "dddduu", "one\ntwo\nthree"),
+        let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys") nextWait=\(nextWait)"
+        let edits = profile.has(.writeSelection) || profile.has(.lineStartKey)
+        for (text, caret, keys, restoredLine, after) in [
+            (lastThree, 10, "ddu", 8, "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", 10, "one\ntwo"),
+            (lastThree, 1, "jddu", 4, "one\nthree"), ("one\ntwo\n", 8, "ddu", 8, "one\ntwo"), ("one\n\nthree", 4, "ddu", 4, "one\nthree"),
+            ("one\n  two\nthree", 6, "ddu", 6, "one\nthree"), ("one\ntwo\nthree\nfour", 14, "dddduu", 14, "one\ntwo\nthree"),
         ] {
             var sim = late(text, caret)
             sim.type(keys)
+            sim.type("^")
+            precondition(sim.caret == restoredLine, "\(keys)^ shown late in \(text.debugDescription), \(context): \(sim.caret)")
+            guard edits else { continue }
             sim.type("dd")
-            precondition(sim.text == after, "\(keys)dd shown late in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
+            precondition(sim.text == after, "\(keys)^dd shown late in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
         }
+        guard edits else { continue }
         var clicked = late(lastThree, 10)
         clicked.type("ddu")
         clicked.click(at: 0)

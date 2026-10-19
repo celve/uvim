@@ -45,8 +45,9 @@ public enum Synth {
         }
     }
 
+    /// Stops at `AX.until`'s deadline, as a long run holds the keys too (LIN-2104).
     public static func key(_ code: CGKeyCode, _ flags: CGEventFlags = [], times count: Int, gap: TimeInterval = pairGap) {
-        for _ in 0..<max(0, count) { key(code, flags, gap: gap) }
+        for _ in 0..<max(0, count) where !AX.pastDeadline { key(code, flags, gap: gap) }
     }
 
     /// Type arbitrary Unicode (emoji/CJK verbatim — no layout mapping), tagged.
