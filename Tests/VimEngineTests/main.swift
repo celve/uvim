@@ -7717,19 +7717,61 @@ for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak
 }
 let restoredTail = (1...60).map { "l\($0)" }.joined(separator: "\n")
 for profile in [keyProfile, readProfile] {
-    let undone = FieldSnapshot(capabilities: profile, text: restoredTail, selection: 2..<restoredTail.utf16.count, length: restoredTail.utf16.count)
-    let landing = PhysicalPlanner.undoLanding(before: "l1", snapshot: undone)
-    let pressed = (landing?.plan.steps ?? []).reduce(0) { if case .press(_, let count) = $1 { return $0 + count }; return $0 }
-    precondition(landing?.ending == 3..<restoredTail.utf16.count && pressed <= 20,
-                 "a landing over 59 restored last lines presses few keys: \(landing?.plan.steps ?? [])")
+    // The fallback reaches lines that end the text from a caret far above them in a few keys, ⌘↓ among them.
+    let far = FieldSnapshot(capabilities: profile, text: restoredTail, selection: 0..<0, length: restoredTail.utf16.count)
+    for selecting in [false, true] {
+        let steps = PhysicalPlanner.undoFallback(onto: 119..<restoredTail.utf16.count, snapshot: far, selecting: selecting)?.steps ?? []
+        let pressed = steps.reduce(0) { if case .press(_, let count) = $1 { return $0 + count }; return $0 }
+        precondition(pressed > 0 && pressed <= 21 && (selecting || steps.contains(.press(.documentEnd, count: 1))), "\(steps)")
+    }
     var tail = Sim(text: restoredTail, caret: 3, profile: profile)
     tail.emulatesKeys = true
     tail.type("dGu")
-    precondition(tail.text == restoredTail && tail.caret >= 3, "dGu over 59 lines: \(tail.caret)")
+    precondition(tail.text == restoredTail && tail.caret == 3, "dGu over 59 lines: \(tail.caret)")
     guard profile.has(.lineStartKey) else { continue }
     tail.type("dd")
     precondition(tail.text.hasPrefix("l1\n") && tail.text.split(separator: "\n").count == 59, "dGudd over 59 lines: \(tail.text.suffix(20))")
 }
+// A caret left far above the restored lines with ⌘↓ ignored: the fallbacks' ten ↓ at a time go on at the next command.
+for nextWait in [false, true] {
+    var far = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+    far.emulatesKeys = true
+    far.undoSelection = .start
+    far.type("dG")
+    far.ignoredChords = [.documentEnd]
+    far.undoesAfterWait = nextWait
+    far.type("u")
+    far.ignoredChords = []
+    far.type("dd")
+    let rows = far.text.split(separator: "\n")
+    precondition(rows.count == 59 && !rows.contains("l40") && rows.contains("l39") && rows.contains("l41"),
+                 "dG, u from a caret far above, dd: \(far.text.suffix(30).debugDescription)")
+}
+// A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
+var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+ignoring.emulatesKeys = true
+ignoring.undoSelection = .start
+ignoring.type("dG")
+ignoring.ignoredChords = [.up, .down, .left, .right, .lineStart, .lineEnd, .documentEnd, .selectDown, .paragraphStart, .paragraphEnd]
+ignoring.type("u")
+let rang = ignoring.bells
+ignoring.type("iX")
+precondition(ignoring.text == "X" + restoredTail && ignoring.bells == rang,
+             "\(ignoring.bells - rang) refused after a landing the field ignored: \(ignoring.text.prefix(20).debugDescription)")
+// Lark's field with ↓ and ⌘↓ ignored during `u`: the walk's check fails, and the fallbacks' ⇧↓ and → reach the restored lines.
+let larkLines = (1...30).map { "l\($0)\(zw)" }
+var larkTail = blankSim(larkLines, caret: 4, profile: keyProfile)
+(larkTail.webContent, larkTail.pullsBackFromLineEnds, larkTail.runsAreNewlines) = (true, true, true)
+larkTail.undoSelection = .toBreak
+larkTail.type("dG")
+larkTail.ignoredChords = [.down, .documentEnd]
+larkTail.type("u")
+larkTail.ignoredChords = []
+larkTail.type("iX")
+larkTail.feed("<Esc>")
+let larkRows = larkTail.text.split(separator: "\n", omittingEmptySubsequences: false)
+precondition(larkRows.count == 30 && larkRows[0] == "l1\(zw)" && larkRows.dropFirst().contains { $0.contains("X") },
+             "dG u iX over 29 Lark lines, ↓ and ⌘↓ ignored: \(larkTail.text.prefix(40).debugDescription)")
 var appKey = Sim(text: lastThree, caret: 10, profile: axProfile)
 appKey.undoesAfterWait = true
 appKey.type("ddu")

@@ -178,8 +178,8 @@ public enum PhysicalPlanner {
 
 public extension PhysicalPlanner {
     /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
-    /// `ending` holds those lines where they end the text, for `undoFallback`.
-    static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?)? {
+    /// `lines` are those lines, and `ending` holds them where they end the text, for `undoFallback`.
+    static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?, lines: Range<Int>)? {
         guard let model = Context(snapshot: snapshot).model,
               let (lines, ending) = model.restoredLines(from: before, selection: snapshot.selection) else { return nil }
         var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
@@ -190,13 +190,7 @@ public extension PhysicalPlanner {
                 + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
         }
         let landing = planning(LogicalPlan(steps: moves + [.renderCursor]), snapshot: snapshot)
-        guard landing.rejection == nil else { return nil }
-        // A walk over many restored lines key by key floods the app with keys it takes seconds to handle (LIN-2104).
-        if ending, pressCount(landing.plan.steps) > 20 {
-            let onto = undoFallback(onto: lines, snapshot: snapshot) ?? .empty
-            if pressCount(onto.steps) < pressCount(landing.plan.steps) { return (onto, lines) }
-        }
-        return (landing.plan, ending ? lines : nil)
+        return landing.rejection == nil ? (landing.plan, ending ? lines : nil, lines) : nil
     }
 
     /// After a failed landing, keys onto restored `lines` that end the text from where the cursor stopped above: ↓, → and ⌘↓, or,
@@ -207,12 +201,13 @@ public extension PhysicalPlanner {
         if let selection = snapshot.selection, selection.lowerBound >= lines.lowerBound { return nil }
         guard snapshot.selection != nil || !selecting else { return nil }
         let above = snapshot.selection?.lowerBound ?? lines.lowerBound - 1
-        let down = max(1, model.newlineCount(in: above..<lines.lowerBound))
+        // Ten of a kind at most, so ⌘↓, which reaches lines that end the text from anywhere, stays within a landing's keys (LIN-2104).
+        let down = min(10, max(1, model.newlineCount(in: above..<lines.lowerBound)))
         // ⌘↓ is the chord the blind lane presses for `G` unlearned; the settle, and the selecting stage after it, check what it did.
         // → collapses a selection at its end, where AppKit's ⌘→ took an undo's selection to its first line's end, the line above.
         let keys: [PhysicalStep] = selecting ? [.press(.selectDown, count: down), .press(.right, count: 1)] : [
             .press(.down, count: down),
-            .press(.right, count: max(1, model.graphemes(in: above..<lines.lowerBound))),
+            .press(.right, count: min(10, max(1, model.graphemes(in: above..<lines.lowerBound)))),
             .press(.documentEnd, count: 1),
         ]
         guard snapshot.selection != nil else { return PhysicalPlan(steps: keys) }

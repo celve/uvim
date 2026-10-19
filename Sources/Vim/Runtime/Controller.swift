@@ -79,7 +79,7 @@ public final class Controller {
     private var letterAt: UInt64?
 
     /// The text a `u` found where its landing did not finish in time, which the next command lands from first (LIN-2104).
-    private var pendingUndo: (before: String, value: String?, sent: Date, moved: Bool, element: AXUIElement, clicks: UInt32)?
+    private var pendingUndo: (before: String, value: String?, sent: Date, distance: Int?, element: AXUIElement, clicks: UInt32)?
 
     public init() {
         tracker.onRebind = { [weak self] binding, transition in
@@ -525,7 +525,7 @@ public final class Controller {
             let wait = (waited, Int(Date().timeIntervalSince(start) * 1000))
             // A field that left the last read unanswered would leave a snapshot unanswered too.
             guard shown != nil else {
-                pendingUndo = (before, reading.value, start, false, binding.element, Self.buttonEvents())
+                pendingUndo = (before, reading.value, start, nil, binding.element, Self.buttonEvents())
                 return Diag.undoLanding(
                     tracker.epoch, seq, plan: nil, executed: true, evidence: executor.lastRun, waited: wait,
                     lengths: (before.utf16.count, nil), fallbacks: [], pending: true
@@ -533,7 +533,7 @@ public final class Controller {
             }
             let landed = landRestoredLines(after: before, changed: shown != reading.value, on: binding, seq: seq, waited: wait)
             if !landed.finished {
-                pendingUndo = (before, reading.value, start, landed.moved, binding.element, Self.buttonEvents())
+                pendingUndo = (before, reading.value, start, landed.distance, binding.element, Self.buttonEvents())
             }
         }
     }
@@ -557,47 +557,59 @@ public final class Controller {
                 waited += 1
                 shown = AX.value(of: binding.element)
             }
-            guard shown != nil else { return (finished: false, moved: false) }
-            return landRestoredLines(after: pending.before, changed: true, on: binding, seq: seq, waited: nil, moved: pending.moved)
+            guard shown != nil else { return (finished: false, distance: pending.distance) }
+            return landRestoredLines(after: pending.before, changed: true, on: binding, seq: seq, waited: nil, distance: pending.distance)
         }
-        if landed.finished { pendingUndo = nil } else { pendingUndo?.moved = pending.moved || landed.moved }
+        if landed.finished { pendingUndo = nil } else { pendingUndo?.distance = landed.distance }
         return landed.finished
     }
 
-    /// Lands on the lines an undo put back since `before`, stepping onto lines that end the text where that fails; not finished
-    /// where a read went unanswered or `AX.until`'s deadline cut it short, or where the field shows no such lines although it
-    /// has not `changed` since `before`. The result's `moved` says a landing ran, and `earlier` that one already had.
+    /// Lands on the lines an undo put back since `before`, stepping onto lines that end the text where that fails, each plan
+    /// pressing at most 25 keys; not finished where a read went unanswered, the deadline came first, the field shows no such
+    /// lines although it has not `changed` since `before`, or a missed landing left the cursor off them, for the next attempt.
+    /// The result's `distance` is how far from those lines the last landing started, `earlier`'s where none ran now.
     private func landRestoredLines(
         after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64,
-        waited: (polls: Int, milliseconds: Int)?, moved earlier: Bool = false
-    ) -> (finished: Bool, moved: Bool) {
+        waited: (polls: Int, milliseconds: Int)?, distance earlier: Int? = nil
+    ) -> (finished: Bool, distance: Int?) {
         let after = snapshotAside(binding)
-        var read = after.text != nil && !AX.pastDeadline
-        var landing = read ? PhysicalPlanner.undoLanding(before: before, snapshot: after) : nil
-        // A move the deadline cut from the text's end has already put the cursor on restored lines that end the text.
-        if earlier, let lines = landing?.ending, let selection = after.selection, selection.lowerBound >= lines.lowerBound {
-            landing = nil
+        let read = after.text != nil && !AX.pastDeadline
+        let found = read ? PhysicalPlanner.undoLanding(before: before, snapshot: after) : nil
+        func distance(_ field: FieldSnapshot) -> Int {
+            guard let found, let at = field.selection?.lowerBound else { return .max }
+            if at < found.lines.lowerBound { return found.lines.lowerBound - at }
+            return found.ending == nil ? max(0, at - found.lines.upperBound + 1) : 0
         }
-        let landed = landing.map { executor.execute($0.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+        let start = distance(after)
+        // After an earlier attempt, a cursor on the restored lines has landed, and one no nearer them since is stuck, as in #64.
+        let stops = earlier.map { start == 0 || start >= $0 } ?? false
+        let landing = stops ? nil : found
+        let landed = landing.map { landing in
+            AX.keys(25) { executor.execute(landing.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+        }
         let evidence = executor.lastRun
         // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
         var fallbacks: [PhysicalPlan] = []
         if landed == false, let lines = landing?.ending {
             for selecting in [false, true] {
                 let field = snapshotAside(binding)
-                read = field.text != nil && !AX.pastDeadline
-                guard read,
+                guard field.text != nil, !AX.pastDeadline,
                       let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
-                executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil)
+                AX.keys(25) { executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil) }
                 fallbacks.append(fallback)
             }
         }
-        let finished = read && !AX.pastDeadline && (landing != nil || changed)
+        var finished = read && !AX.pastDeadline && (found != nil || changed)
+        if read, landing != nil, landed == false {
+            // Only the next attempt can tell keys an app shows late from keys it ignored.
+            let field = snapshotAside(binding)
+            finished = field.text != nil && !AX.pastDeadline && distance(field) == 0
+        }
         Diag.undoLanding(
             tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
             lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks, pending: !finished
         )
-        return (finished, landing != nil)
+        return (finished, landing != nil ? start : earlier)
     }
 
     /// The field as it reads now, outside a command, as the Sim's `snapshotAside` reads it.

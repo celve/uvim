@@ -71,8 +71,8 @@ public struct Sim {
     private var inListGap: KeyModel.Stop?
 
     /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
-    /// in Chrome's textarea, up to that break in Chrome's rich text.
-    public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak }
+    /// in Chrome's textarea, up to that break in Chrome's rich text; `start`, a caret at the text's start, no host measured.
+    public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak, start }
     public var undoSelection = UndoSelection.restored
 
     /// Each undo group's text before it and its first edit's offset, newest last, as the host's undo stack holds them.
@@ -96,8 +96,8 @@ public struct Sim {
     /// With `undoesAfterWait`, shown no sooner than the next command's own wait for them.
     public var undoesInNextWait = false
 
-    /// The text and `AXValue` a `u` found where its undo did not show, which the next command lands from first, as the Controller's.
-    private var pendingUndo: (before: String, value: String?, clicks: UInt32)?
+    /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
+    private var pendingUndo: (before: String, value: String?, clicks: UInt32, distance: Int?)?
 
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
@@ -285,7 +285,10 @@ public struct Sim {
                 bells += 1
                 return
             }
-            landPendingUndo()
+            guard landPendingUndo() else {
+                bells += 1
+                return
+            }
             run(completed)
         }
     }
@@ -445,32 +448,50 @@ private extension Sim {
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
         // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
-        if logical.steps.contains(.history(.undo)), let text = snapshot.text, !landRestoredLines(after: text), shownValue == value {
-            pendingUndo = (text, value, buttonEvents)
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
+            let landed = landRestoredLines(after: text, changed: shownValue != value)
+            if !landed.finished { pendingUndo = (text, value, buttonEvents, landed.distance) }
         }
     }
 
-    /// The Controller's twin, but for its deadline; false where the field shows no lines an undo put back since `before`.
-    @discardableResult
-    mutating func landRestoredLines(after before: String) -> Bool {
-        guard let landing = PhysicalPlanner.undoLanding(before: before, snapshot: snapshotAside()) else { return false }
-        if !executeAside(landing.plan), let lines = landing.ending {
+    /// The Controller's twin, but for its deadline and key budget: not finished where the field shows no lines an undo put back
+    /// although it has not `changed` since `before`, or a missed landing left the caret off them.
+    mutating func landRestoredLines(after before: String, changed: Bool, distance earlier: Int? = nil) -> (finished: Bool, distance: Int?) {
+        let after = snapshotAside()
+        let found = PhysicalPlanner.undoLanding(before: before, snapshot: after)
+        func distance(_ field: FieldSnapshot) -> Int {
+            guard let found, let at = field.selection?.lowerBound else { return .max }
+            if at < found.lines.lowerBound { return found.lines.lowerBound - at }
+            return found.ending == nil ? max(0, at - found.lines.upperBound + 1) : 0
+        }
+        let start = distance(after)
+        let stops = earlier.map { start == 0 || start >= $0 } ?? false
+        let landing = stops ? nil : found
+        let landed = landing.map { executeAside($0.plan) }
+        if landed == false, let lines = landing?.ending {
             for selecting in [false, true] {
                 guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
                 executeAside(next)
             }
         }
-        return true
+        var finished = found != nil || changed
+        if landing != nil, landed == false { finished = distance(snapshotAside()) == 0 }
+        return (finished, landing != nil ? start : earlier)
     }
 
-    /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since.
-    mutating func landPendingUndo() {
-        guard let pending = pendingUndo else { return }
-        pendingUndo = nil
-        guard pending.clicks == buttonEvents else { return }
+    /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since; false where it still
+    /// cannot finish, so the command is refused.
+    mutating func landPendingUndo() -> Bool {
+        guard let pending = pendingUndo else { return true }
+        guard pending.clicks == buttonEvents else {
+            pendingUndo = nil
+            return true
+        }
         // The Controller waits here for a field still showing what `u` found.
         if shownValue == pending.value { releaseHeldHistory() }
-        landRestoredLines(after: pending.before)
+        let landed = landRestoredLines(after: pending.before, changed: true, distance: pending.distance)
+        if landed.finished { pendingUndo = nil } else { pendingUndo?.distance = landed.distance }
+        return landed.finished
     }
 
     /// An undo held past the Controller's wait shows now.
@@ -902,8 +923,9 @@ private extension Sim {
         case .restored: put.count
         case .throughBreak: toBreak.map { $0 + 1 } ?? put.count
         case .toBreak: toBreak ?? put.count
+        case .start: 0
         }
-        selection = group.at..<group.at + length
+        selection = undoSelection == .start ? 0..<0 : group.at..<group.at + length
         return true
     }
 
