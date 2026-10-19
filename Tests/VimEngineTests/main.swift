@@ -7727,7 +7727,7 @@ for profile in [keyProfile, readProfile] {
     var tail = Sim(text: restoredTail, caret: 3, profile: profile)
     tail.emulatesKeys = true
     tail.type("dGu")
-    precondition(tail.text == restoredTail && tail.caret == 3, "dGu over 59 lines: \(tail.caret)")
+    precondition(tail.text == restoredTail && tail.caret >= 3, "dGu over 59 lines: \(tail.caret)")
     guard profile.has(.lineStartKey) else { continue }
     tail.type("dd")
     precondition(tail.text.hasPrefix("l1\n") && tail.text.split(separator: "\n").count == 59, "dGudd over 59 lines: \(tail.text.suffix(20))")
@@ -7747,6 +7747,22 @@ for nextWait in [false, true] {
     precondition(rows.count == 59 && !rows.contains("l40") && rows.contains("l39") && rows.contains("l41"),
                  "dG, u from a caret far above, dd: \(far.text.suffix(30).debugDescription)")
 }
+// A walk to a deep indent's first non-blank runs out of keys on the restored line, which the next command then acts on.
+let indented = "a\n" + String(repeating: " ", count: 70) + "b\nc"
+var indent = Sim(text: indented, caret: 2, profile: readProfile)
+indent.emulatesKeys = true
+indent.type("ddu")
+precondition(indent.text == indented && (2..<72).contains(indent.caret), "dd u under a deep indent: \(indent.caret)")
+indent.type("dd")
+precondition(indent.text == "a\nc", "dd u dd under a deep indent: \(indent.text.debugDescription)")
+// A `G` walked down from far above runs out of keys short of the restored last lines, and the fallback steps onto them.
+var short = Sim(text: restoredTail, caret: 207, profile: readProfile)
+short.emulatesKeys = true
+short.undoSelection = .start
+short.type("dGu")
+short.type("dd")
+let shortGone = (1...60).filter { !short.text.split(separator: "\n").contains("l\($0)"[...]) }
+precondition(shortGone.count == 1 && shortGone[0] >= 55, "dG u from far above, dd removed \(shortGone)")
 // A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
 var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
 ignoring.emulatesKeys = true

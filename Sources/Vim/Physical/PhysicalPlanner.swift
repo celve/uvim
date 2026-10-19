@@ -177,6 +177,9 @@ public enum PhysicalPlanner {
 // MARK: - Repair and release
 
 public extension PhysicalPlanner {
+    /// The most keys one landing plan after `u` presses, as an app can take seconds to handle a long run of them (LIN-2104).
+    static let undoKeys = 50
+
     /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
     /// `lines` are those lines, and `ending` holds them where they end the text, for `undoFallback`.
     static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?, lines: Range<Int>)? {

@@ -558,15 +558,17 @@ public final class Controller {
                 shown = AX.value(of: binding.element)
             }
             guard shown != nil else { return (finished: false, distance: pending.distance) }
-            return landRestoredLines(after: pending.before, changed: true, on: binding, seq: seq, waited: nil, distance: pending.distance)
+            return landRestoredLines(
+                after: pending.before, changed: true, on: binding, seq: seq, waited: nil, distance: pending.distance
+            )
         }
         if landed.finished { pendingUndo = nil } else { pendingUndo?.distance = landed.distance }
         return landed.finished
     }
 
     /// Lands on the lines an undo put back since `before`, stepping onto lines that end the text where that fails, each plan
-    /// pressing at most 25 keys; not finished where a read went unanswered, the deadline came first, the field shows no such
-    /// lines although it has not `changed` since `before`, or a missed landing left the cursor off them, for the next attempt.
+    /// pressing at most `undoKeys` keys; not finished where a read went unanswered, the deadline came first, the field shows no
+    /// such lines although it has not `changed` since `before`, or a missed landing left the cursor off them, for the next attempt.
     /// The result's `distance` is how far from those lines the last landing started, `earlier`'s where none ran now.
     private func landRestoredLines(
         after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64,
@@ -585,7 +587,9 @@ public final class Controller {
         let stops = earlier.map { start == 0 || start >= $0 } ?? false
         let landing = stops ? nil : found
         let landed = landing.map { landing in
-            AX.keys(25) { executor.execute(landing.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) }
+            AX.keys(PhysicalPlanner.undoKeys) {
+                executor.execute(landing.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil)
+            }
         }
         let evidence = executor.lastRun
         // A failed landing can leave the cursor above lines that end the text, where the next command would take the line above.
@@ -595,7 +599,9 @@ public final class Controller {
                 let field = snapshotAside(binding)
                 guard field.text != nil, !AX.pastDeadline,
                       let fallback = PhysicalPlanner.undoFallback(onto: lines, snapshot: field, selecting: selecting) else { break }
-                AX.keys(25) { executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil) }
+                AX.keys(PhysicalPlanner.undoKeys) {
+                    executor.execute(fallback, on: binding.element, state: &state, paragraphs: field.breaks != nil)
+                }
                 fallbacks.append(fallback)
             }
         }

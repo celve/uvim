@@ -273,7 +273,8 @@ public final class Executor {
             if record(outcome, expectation, at: index, hard: true) {
                 return true
             }
-            NSSound.beep()
+            // A landing after `u` cut short by its deadline or keys rings nothing: a fresh read or the next command decides it.
+            if !AX.keysCut, !AX.pastDeadline { NSSound.beep() }
             return false
 
         case .softSettle(let expectation):

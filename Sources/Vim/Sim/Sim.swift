@@ -99,6 +99,9 @@ public struct Sim {
     /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
     private var pendingUndo: (before: String, value: String?, clicks: UInt32, distance: Int?)?
 
+    /// The presses a landing plan has left, as the Controller's `AX.keys`.
+    private var keysLeft: Int?
+
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
     private var snapshotting = false
@@ -454,7 +457,7 @@ private extension Sim {
         }
     }
 
-    /// The Controller's twin, but for its deadline and key budget: not finished where the field shows no lines an undo put back
+    /// The Controller's twin, but for its deadline: not finished where the field shows no lines an undo put back
     /// although it has not `changed` since `before`, or a missed landing left the caret off them.
     mutating func landRestoredLines(after before: String, changed: Bool, distance earlier: Int? = nil) -> (finished: Bool, distance: Int?) {
         let after = snapshotAside()
@@ -467,11 +470,11 @@ private extension Sim {
         let start = distance(after)
         let stops = earlier.map { start == 0 || start >= $0 } ?? false
         let landing = stops ? nil : found
-        let landed = landing.map { executeAside($0.plan) }
+        let landed = landing.map { executeAside($0.plan, keys: PhysicalPlanner.undoKeys) }
         if landed == false, let lines = landing?.ending {
             for selecting in [false, true] {
                 guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
-                executeAside(next)
+                executeAside(next, keys: PhysicalPlanner.undoKeys)
             }
         }
         var finished = found != nil || changed
@@ -644,7 +647,10 @@ private extension Sim {
                     lateHistory += repeatElement(chord, count: count)
                     break
                 }
-                for _ in 0..<count where !ignoredChords.contains(chord) {
+                for _ in 0..<count {
+                    guard keysLeft != 0 else { break }
+                    keysLeft = keysLeft.map { $0 - 1 }
+                    if ignoredChords.contains(chord) { continue }
                     guard emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord),
                           press(reboundChords[chord] ?? chord) else {
                         unsupportedSteps += 1
@@ -884,6 +890,14 @@ private extension Sim {
         let aborted = execute(plan.steps)
         attribution = evidence
         return aborted == nil
+    }
+
+    /// `executeAside` pressing at most `keys` keys.
+    @discardableResult
+    mutating func executeAside(_ plan: PhysicalPlan, keys: Int) -> Bool {
+        keysLeft = keys
+        defer { keysLeft = nil }
+        return executeAside(plan)
     }
 
     /// The twin of the real executor's surviving-commit scan.
