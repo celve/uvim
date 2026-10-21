@@ -172,7 +172,8 @@ The menu-bar icon shows the mode as a letter in a square:
 | **!** | Accessibility is not granted, or the input tap is not running |
 
 Where uvim can set the selection, Normal mode also draws a block cursor. Nothing shows a half-typed command,
-or a `/` search as you type it. A click cancels either, and so does a key the app keeps.
+or a `/` search as you type it. A click cancels either, and so does a key the app keeps. A command's keys go
+only to its own app, and a click, or another app coming to the front, while it runs stops it there.
 
 In Insert mode uvim takes only Esc and ⌃[, or only ⌃[ if you chose it. In Normal and Visual mode apps still
 keep every ⌘ and ⌥ combination, Esc if you chose ⌃[, Home, End, Page Up and Page Down, the function keys, and
@@ -1140,6 +1141,9 @@ uvim tags every event it posts with `SynthTag.magic` (`0x4345_4C56`, in `Sources
 and its tap passes tagged events through before any handler runs. **The magic is a cross-app ABI:**
 Vibe, the author's dictation app, tags its typing with the same value, so Normal mode never runs a
 transcript as commands. Never change the magic in one app without the other.
+
+A running command posts its keys to its field's process (`CGEvent.postToPid`), not to the front app, so a
+focus change mid-command cannot hand them to another app.
 
 </details>
 
