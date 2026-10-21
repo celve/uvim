@@ -99,8 +99,9 @@ public struct Sim {
     /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
     private var pendingUndo: (before: String, value: String?, clicks: UInt32, distance: Int?)?
 
-    /// The presses a landing plan has left, as the Controller's `AX.keys`.
+    /// The presses a landing plan has left, as the Controller's `AX.keys`, and whether one was refused.
     private var keysLeft: Int?
+    private var keysCut = false
 
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
@@ -194,6 +195,8 @@ public struct Sim {
     /// Soft settles that missed, which ring nothing and abort nothing, as the executor logs them.
     public private(set) var softMisses = 0
     public private(set) var unsupportedSteps = 0
+    /// Keys pressed, ignored ones included.
+    public private(set) var presses = 0
 
     /// The last command's evidence from its settles.
     public private(set) var attribution = RunAttribution()
@@ -648,8 +651,12 @@ private extension Sim {
                     break
                 }
                 for _ in 0..<count {
-                    guard keysLeft != 0 else { break }
+                    guard keysLeft != 0 else {
+                        keysCut = true
+                        break
+                    }
                     keysLeft = keysLeft.map { $0 - 1 }
+                    presses += 1
                     if ignoredChords.contains(chord) { continue }
                     guard emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord),
                           press(reboundChords[chord] ?? chord) else {
@@ -892,12 +899,12 @@ private extension Sim {
         return aborted == nil
     }
 
-    /// `executeAside` pressing at most `keys` keys.
+    /// `executeAside` pressing at most `keys` keys, false where they ran out.
     @discardableResult
     mutating func executeAside(_ plan: PhysicalPlan, keys: Int) -> Bool {
-        keysLeft = keys
+        (keysLeft, keysCut) = (keys, false)
         defer { keysLeft = nil }
-        return executeAside(plan)
+        return executeAside(plan) && !keysCut
     }
 
     /// The twin of the real executor's surviving-commit scan.

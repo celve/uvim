@@ -27,9 +27,9 @@ public enum AX {
     /// Runs `body` on the main thread with every read, write and key press past `deadline` failing at once, as an unanswered read
     /// does, so work that holds the keyboard ends then, but for one call already waiting on the app (LIN-2104).
     public static func until<T>(_ deadline: Date, _ body: () -> T) -> T {
-        let outer = self.deadline
-        self.deadline = outer.map { min($0, deadline) } ?? deadline
-        defer { self.deadline = outer }
+        let outer = (self.deadline, cut)
+        self.deadline = outer.0.map { min($0, deadline) } ?? deadline
+        defer { (self.deadline, cut) = outer }
         return body()
     }
 

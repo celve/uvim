@@ -588,7 +588,8 @@ public final class Controller {
         let landing = stops ? nil : found
         let landed = landing.map { landing in
             AX.keys(PhysicalPlanner.undoKeys) {
-                executor.execute(landing.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil)
+                // A soft settle passes a run whose keys ran out.
+                executor.execute(landing.plan, on: binding.element, state: &state, paragraphs: after.breaks != nil) && !AX.keysCut
             }
         }
         let evidence = executor.lastRun

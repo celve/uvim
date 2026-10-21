@@ -7726,8 +7726,11 @@ for profile in [keyProfile, readProfile] {
     }
     var tail = Sim(text: restoredTail, caret: 3, profile: profile)
     tail.emulatesKeys = true
-    tail.type("dGu")
-    precondition(tail.text == restoredTail && tail.caret >= 3, "dGu over 59 lines: \(tail.caret)")
+    tail.type("dG")
+    let beforeU = tail.presses
+    tail.type("u")
+    precondition(tail.text == restoredTail && tail.caret >= 3 && tail.presses - beforeU <= PhysicalPlanner.undoKeys + 1,
+                 "dGu over 59 lines: \(tail.caret), \(tail.presses - beforeU) keys")
     guard profile.has(.lineStartKey) else { continue }
     tail.type("dd")
     precondition(tail.text.hasPrefix("l1\n") && tail.text.split(separator: "\n").count == 59, "dGudd over 59 lines: \(tail.text.suffix(20))")
@@ -7763,6 +7766,19 @@ short.type("dGu")
 short.type("dd")
 let shortGone = (1...60).filter { !short.text.split(separator: "\n").contains("l\($0)"[...]) }
 precondition(shortGone.count == 1 && shortGone[0] >= 55, "dG u from far above, dd removed \(shortGone)")
+// A walk cut short with ↓ ignored leaves the fallbacks their own keys, and their → and ⌘↓ reach the restored lines.
+var cutWalk = Sim(text: restoredTail, caret: 3, profile: readProfile)
+cutWalk.emulatesKeys = true
+cutWalk.undoSelection = .start
+cutWalk.type("dG")
+cutWalk.ignoredChords = [.down]
+let beforeCut = cutWalk.presses
+cutWalk.type("u")
+cutWalk.ignoredChords = []
+precondition(cutWalk.presses - beforeCut <= PhysicalPlanner.undoKeys + 33, "u pressed \(cutWalk.presses - beforeCut) keys")
+cutWalk.type("dd")
+let cutRows = cutWalk.text.split(separator: "\n")
+precondition(cutRows.count == 59 && cutRows.first == "l1", "dG u dd, ↓ ignored during u: \(cutWalk.text.prefix(12).debugDescription)")
 // A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
 var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
 ignoring.emulatesKeys = true
