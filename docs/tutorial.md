@@ -216,8 +216,8 @@ We met the team at the office,
 and the plan is ready.
 ```
 
-`?` searches backward, and `N` jumps to the match before. A search matches the case you type, and wraps
-around the end of the text.
+`?` searches backward. `n` repeats the last search in its direction, and `N` in the other. A search matches
+the case you type, and wraps around the end of the text.
 
 ## 10. Visual mode
 
@@ -245,10 +245,13 @@ selects characters, not lines.
 What you have learned works in the text fields of most native Mac apps, where uvim reads and edits the text
 directly. Elsewhere:
 
-- **Browsers and Electron apps**, such as Chrome, Dia and Linear: where a field takes no edits, uvim runs the
-  same commands by pressing keys, with no block cursor, and checks the field after each step. When the field
-  does not answer as planned, it beeps and stops rather than edit the wrong text, and it learns what each kind
-  of field supports. `o` and `O` paste their new line there, because ⏎ could send a message. See
+- **Chromium browsers and Electron apps**, such as Chrome, Dia and Linear, show uvim a page's fields only once
+  their accessibility support is on, which an assistive app can switch on. In Chrome on a Mac where nothing
+  has, a page's fields show the dashed square, and **Force** (below) is what works there. Where uvim does see
+  a field but the field takes no edits, uvim runs the same commands by pressing keys, with no block cursor,
+  and checks the field after each step. When the field does not answer as planned, it beeps and stops rather
+  than edit the wrong text, and it learns what each kind of field supports. `o` and `O` paste their new line
+  there, because ⏎ could send a message. See
   [Browsers and Electron apps](../README.md#browsers-and-electron-apps).
 - **Terminals and code editors**, such as Terminal, Visual Studio Code and Xcode, start Off, and **password
   fields** are never uvim's.
@@ -272,7 +275,8 @@ The menu sets where uvim works:
 - **Nothing shows a half-typed command.** If keys seem to do the wrong thing, press Esc: it cancels a
   half-typed command, and so does a click.
 - **The icon shows a dashed square in a text field**: click in the field. If the square stays dashed, check
-  **Vim in _App_**.
+  **Vim in _App_**. A Chromium browser or an Electron app may be keeping its pages from uvim
+  ([Beyond TextEdit](#11-beyond-textedit)), and **Force** works there.
 
 If something goes wrong that you can repeat, [report a bug](../README.md#reporting-a-bug).
 
