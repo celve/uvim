@@ -85,6 +85,7 @@ enum Diag {
             || bell != nil
             || evidence.failedCapability != nil
             || !evidence.settleFailures.isEmpty
+            || evidence.departure != nil
         guard anomalous || cmdLevel.isEnabled(type: .debug) else { return }
 
         let tag = "e\(epoch).c\(seq)"
@@ -99,6 +100,9 @@ enum Diag {
         }
         if let abortedAt = evidence.abortedAt {
             line += " abort@\(abortedAt)"
+        }
+        if let departure = evidence.departure {
+            line += " left=\(departure.rawValue)"
         }
         line += " ok=\(executed ? 1 : 0)"
         line += " fail=\(evidence.failedCapability?.traceName ?? "nil")"
@@ -137,6 +141,7 @@ enum Diag {
             + (waited.map { " waited=\($0.polls) ms=\($0.milliseconds)" } ?? "")
             + " len=\(lengths.0)→\(lengths.1.map(String.init) ?? "nil")"
             + (fallbacks.isEmpty ? "" : " fallback=" + fallbacks.map(\.traceShape).joined(separator: ","))
+            + (evidence.departure.map { " left=\($0.rawValue)" } ?? "")
             + (route.map { " pending=1 route=\($0)" } ?? "")
         if executed, route == nil { cmd.debug("\(line, privacy: .public)") } else { cmd.log("\(line, privacy: .public)") }
         for failure in evidence.settleFailures {

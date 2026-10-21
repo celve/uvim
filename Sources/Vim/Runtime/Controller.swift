@@ -243,6 +243,8 @@ public final class Controller {
             // Numbered here, not in `run`, so the three silent drops below are too.
             seq &+= 1
             let commandSeq = seq
+            // Read before the checks below, so the focus moving after them stops the command's keys.
+            var destination = KeyDestinationReads.verified(binding.pid)
             // Never mutate a field focus has left (an overlay emits no event); an engage key already reverified.
             if !Self.engageTokens.contains(token) {
                 if binding.isForced {
@@ -288,12 +290,12 @@ public final class Controller {
                 return true
             }
             // No command plans on the line above lines an undo put back while their landing cannot finish.
-            guard landPendingUndo(on: binding, seq: commandSeq) else {
+            guard landPendingUndo(on: binding, seq: commandSeq, destination: &destination) else {
                 NSSound.beep()
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "undo-landing")
                 return true
             }
-            run(completed, on: binding, seq: commandSeq)
+            run(completed, on: binding, seq: commandSeq, destination: destination)
             // Publish even on mid-plan aborts: a .setMode commit may have
             // landed before a later step failed.
             publishMode()
@@ -406,7 +408,12 @@ public final class Controller {
         }
     }
 
-    private func run(_ completed: RawMonitor.Completed, on binding: FocusTracker.Binding, seq commandSeq: UInt64) {
+    private func run(
+        _ completed: RawMonitor.Completed, on binding: FocusTracker.Binding, seq commandSeq: UInt64, destination: KeyDestination
+    ) {
+        // Every plan below posts its keys to the bound field's process, and only while the focus stays.
+        executor.destination = destination
+        defer { executor.destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
@@ -514,7 +521,8 @@ public final class Controller {
     /// Puts the cursor on the lines `u` put back, as Vim does, from the field as the undo left it, or leaves that to the next
     /// command where the field has not shown them in time.
     private func landUndo(from before: String, reading: Snapshotter.Reading, on binding: FocusTracker.Binding, seq: UInt64) {
-        let start = Date()
+        // Counted before the landing, so a click during it drops what it leaves.
+        let (start, clicks) = (Date(), Self.buttonEvents())
         // A read may take the whole messaging timeout, and no key is handled meanwhile (LIN-2104).
         AX.until(start.addingTimeInterval(0.5)) {
             // Chrome can apply ⌘Z after reads that follow it, and a read it cannot answer yet is no change (LIN-1980).
@@ -528,7 +536,7 @@ public final class Controller {
             let wait = (waited, Int(Date().timeIntervalSince(start) * 1000))
             // A field that left the last read unanswered would leave a snapshot unanswered too.
             guard shown != nil else {
-                pendingUndo = (before, reading.value, start, 0, nil, binding.element, Self.buttonEvents())
+                pendingUndo = (before, reading.value, start, 0, nil, binding.element, clicks)
                 return Diag.undoLanding(
                     tracker.epoch, seq, plan: nil, executed: true, evidence: executor.lastRun, waited: wait,
                     lengths: (before.utf16.count, nil), fallbacks: [], route: 0
@@ -536,19 +544,23 @@ public final class Controller {
             }
             let landed = landRestoredLines(after: before, changed: shown != reading.value, on: binding, seq: seq, waited: wait)
             if !landed.finished {
-                pendingUndo = (before, reading.value, start, landed.route, landed.near, binding.element, Self.buttonEvents())
+                pendingUndo = (before, reading.value, start, landed.route, landed.near, binding.element, clicks)
             }
         }
     }
 
-    /// The landing a `u` left to this command, before it plans; false where it still cannot finish.
-    private func landPendingUndo(on binding: FocusTracker.Binding, seq: UInt64) -> Bool {
+    /// The landing a `u` left to this command, before it plans, its keys going where the command's will; false where it still
+    /// cannot finish.
+    private func landPendingUndo(on binding: FocusTracker.Binding, seq: UInt64, destination: inout KeyDestination) -> Bool {
         guard let pending = pendingUndo else { return true }
         // A click, or another field, leaves the caret somewhere the undo did not put it.
         guard CFEqual(pending.element, binding.element), pending.clicks == Self.buttonEvents() else {
             pendingUndo = nil
             return true
         }
+        executor.destination = destination
+        // A focus that left during the landing stops the command's keys from its first.
+        defer { (destination, executor.destination) = (executor.destination ?? destination, nil) }
         let start = Date()
         let landed = AX.until(start.addingTimeInterval(0.5)) {
             // An undo can show only after `u` gave up on it, while this key waited behind that `u`; half the time stays to land.
@@ -609,10 +621,14 @@ public final class Controller {
                 continue
             }
             let ran = AX.keys(PhysicalPlanner.undoKeys) {
-                // A soft settle passes a run whose keys ran out.
-                executor.execute(plan, on: binding.element, state: &state, paragraphs: field.breaks != nil) && !AX.keysCut
+                executor.execute(plan, on: binding.element, state: &state, paragraphs: field.breaks != nil)
             }
             if route == 0 { (walk, executed, evidence) = (plan, ran, executor.lastRun) } else { fallbacks.append(plan) }
+            // The focus leaving ends the landing as it ends a command, and a click or another field would drop it anyway.
+            if let left = executor.lastRun.departure {
+                (evidence.departure, finished) = (left, true)
+                break
+            }
             // The walk's checks put the cursor on Vim's place, and where no caret reads nothing can confirm more, as in #64.
             if route == 0, ran || field.selection == nil {
                 finished = true
@@ -705,6 +721,11 @@ public final class Controller {
         let observed = reading.observed
         let items = (observed.evidence.map { [$0] } ?? []) + run
         Diag.evidence(epoch, seq, items)
+        // Checks made after the focus left judged keys it may have taken elsewhere in the app.
+        guard evidence.departure == nil else {
+            Diag.notLearned(epoch, seq, reason: "left", items.filter(Learning.teaches))
+            return
+        }
         // A forced binding resolves nothing to learn against.
         guard let beliefs = binding.beliefs else { return }
         let model = beliefs.readModel

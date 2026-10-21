@@ -30,6 +30,9 @@ public final class Executor {
         /// Recorder only.
         public internal(set) var abortedAt: Int?
 
+        /// Why the run stopped posting keys, which then teach nothing about the field.
+        public internal(set) var departure: KeyDestination.Departure?
+
         /// Hard and soft: a soft one rings nothing and aborts nothing, so it was invisible.
         public internal(set) var settleFailures: [SettleFailure] = []
 
@@ -52,6 +55,17 @@ public final class Executor {
     }
 
     public private(set) var lastRun = RunEvidence()
+
+    /// The running command's, set around it by the controller: its keys go to its process and stop once the focus leaves;
+    /// nil posts them to the front app, unchecked.
+    var destination: KeyDestination?
+
+    /// This run posted a key, so its commits and its end check where the focus is.
+    private var postedKeys = false
+
+    /// When the bound app's activity was last read: a read costs about 3 ms under a flood of keys, so keys in between share one.
+    private var activeReadAt: UInt64 = 0
+    private static let activeReadGap: UInt64 = 50_000_000
 
     /// From the write a following settle verifies; cleared where attribution is.
     private var lastWriteError: Int32?
@@ -151,6 +165,7 @@ public final class Executor {
         self.paragraphs = paragraphs
         self.generated = generated
         pressed = 0
+        postedKeys = false
         kept = [:]
         let outside: [PhysicalStep] = [.press(.selectLeft, count: 1), .press(.right, count: 1)]
         afterNormalizing = Set(plan.steps.indices.filter { $0 >= 2 && Array(plan.steps[$0 - 2..<$0]) == outside })
@@ -162,10 +177,12 @@ public final class Executor {
                 kept[slot] = caret
             }
             let failure = passed ? nil : lastRun.settleFailures.last
-            lastRun.attribution.record(
-                step, passed: passed, selection: lastObserved, length: lastLength,
-                selectedText: failure?.observedSelectedText, writeError: failure?.writeError
-            )
+            if passed || lastRun.departure == nil {
+                lastRun.attribution.record(
+                    step, passed: passed, selection: lastObserved, length: lastLength,
+                    selectedText: failure?.observedSelectedText, writeError: failure?.writeError
+                )
+            }
             switch step {
             case .setSelection, .replaceSelection:
                 break
@@ -183,6 +200,11 @@ public final class Executor {
                 }
                 return false
             }
+        }
+        // Keys after the last commit did what they did only if the focus stayed.
+        guard landed() else {
+            lastRun.abortedAt = max(0, plan.steps.count - 1)
+            return false
         }
         return true
     }
@@ -214,25 +236,37 @@ public final class Executor {
                 NSSound.beep()
                 return false
             }
-            Synth.key(code, flags(for: chord.modifiers), times: count, gap: Self.backToBack(chord) ? 0 : Synth.pairGap)
-            pressed += count
-            return true
+            let gap = Self.backToBack(chord) ? 0 : Synth.pairGap
+            // `AX.until`'s deadline and keys stop a run too: a long one holds the keyboard and floods the app (LIN-2104).
+            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap, to: target) {
+                stays() && AX.spendKey()
+            }
+            pressed += posted
+            postedKeys = postedKeys || posted > 0
+            return posted == count
 
         case .typeText(let text):
-            Synth.type(text)
+            guard stays() else { return false }
+            postedKeys = true
+            Synth.type(text, to: target)
             return true
 
         case .clipboardCut:
+            guard stays() else { return false }
+            postedKeys = true
             // The pasteboard IS the register (clipboard=unnamed): post the
             // cut and move on — nothing read back, silence on failure.
-            Synth.key(7, .maskCommand)   // kVK_ANSI_X
+            Synth.key(7, .maskCommand, to: target)   // kVK_ANSI_X
             return true
 
         case .clipboardCopy:
-            Synth.key(8, .maskCommand)   // kVK_ANSI_C
+            guard stays() else { return false }
+            postedKeys = true
+            Synth.key(8, .maskCommand, to: target)   // kVK_ANSI_C
             return true
 
         case .clipboardInsert(let content):
+            guard stays() else { return false }
             if let content {
                 // No sleep before ⌘V: the app reads the pasteboard only as it handles the ⌘V, queued after the write.
                 PasteboardLoan.shared.put(content)
@@ -241,12 +275,17 @@ public final class Executor {
                 pastedFrom = paragraphs ? Snapshotter.markedSelection(of: element).flatMap {
                     $0.isCollapsed ? ($0.range, Snapshotter.paragraphSide(of: $0, upper: true)) : nil
                 } : nil
-                Synth.commandV()
             } else {
                 // Registers +/* and pasteboard markers paste what the user has there, not a register still on loan.
                 PasteboardLoan.shared.restore()
-                Synth.commandV()
             }
+            // The loan and the reads above take long enough for the focus to move.
+            guard stays() else {
+                if content != nil { PasteboardLoan.shared.restore() }
+                return false
+            }
+            postedKeys = true
+            Synth.commandV(to: target)
             return true
 
         case .captureSelectedText(let slot):
@@ -273,8 +312,8 @@ public final class Executor {
             if record(outcome, expectation, at: index, hard: true) {
                 return true
             }
-            // A landing after `u` cut short by its deadline or keys rings nothing: a fresh read or the next command decides it.
-            if !AX.keysCut, !AX.pastDeadline { NSSound.beep() }
+            // Keys the focus left, and reads `AX.until`'s deadline refused, fail it without saying anything of this field.
+            if stays(fresh: true), !AX.pastDeadline { NSSound.beep() }
             return false
 
         case .softSettle(let expectation):
@@ -289,10 +328,15 @@ public final class Executor {
             lastLength = outcome.observedLength
             confirmPaste(outcome, expectation, at: index)
             _ = record(outcome, expectation, at: index, hard: ignored)
-            if ignored { NSSound.beep() }
+            if ignored, stays(fresh: true) { NSSound.beep() }
             return !ignored
 
         case .commit(let effect):
+            // Keys the focus left did only part of what this records, and only an effect that survives an abort then applies.
+            guard landed() else {
+                if effect.survivesAbort { commit(effect, state: &state) }
+                return false
+            }
             commit(effect, state: &state)
             return true
 
@@ -300,6 +344,25 @@ public final class Executor {
             NSSound.beep()
             return true
         }
+    }
+
+    private var target: pid_t? { destination?.pid }
+
+    /// Whether the focus is still where the command was verified, read before every key; once not, the run says why.
+    private func stays(fresh: Bool = false) -> Bool {
+        if lastRun.departure == nil, var held = destination {
+            let now = DispatchTime.now().uptimeNanoseconds
+            let readsActive = fresh || now &- activeReadAt >= Self.activeReadGap
+            if readsActive { activeReadAt = now }
+            lastRun.departure = KeyDestinationReads.departure(of: &held, readsActive: readsActive)
+            destination = held
+        }
+        return lastRun.departure == nil
+    }
+
+    /// Whether the keys this run posted, if any, met the field with the focus still there.
+    private func landed() -> Bool {
+        postedKeys ? stays(fresh: true) : lastRun.departure == nil
     }
 
     /// The observed values ride every exit, so a timeout costs no extra round trip.
@@ -395,7 +458,7 @@ public final class Executor {
                 Snapshotter.showsOnlyGeneratedText(element)
             }
             if met { return outcome(true) }
-            guard Date() < deadline, !AX.pastDeadline, !AX.keysCut else { return outcome(false) }
+            guard Date() < deadline, !AX.pastDeadline else { return outcome(false) }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).
             Thread.sleep(forTimeInterval: 0.003)
         }
