@@ -587,7 +587,7 @@ public final class Controller {
         func answered(_ field: FieldSnapshot) -> Bool {
             field.text != nil && !AX.pastDeadline && (field.selection != nil || !field.capabilities.has(.readCaret))
         }
-        // Keys an earlier attempt sent can still be on their way, and only a caret holding still shows where they leave it.
+        // Keys an earlier attempt sent can still be on their way; a caret holding still is taken as where they leave it.
         let still = resumed == nil || caretHolds(binding)
         let after = snapshotAside(binding)
         // Equal lines are told apart by the selection the undo left, which a landing's keys have since moved.
@@ -635,7 +635,7 @@ public final class Controller {
     }
 
     /// Whether the caret read the same for 60 ms before `AX.until`'s deadline, longer than any gap measured between a route's keys
-    /// landing (LIN-2104), so the keys a landing sent are handled when it is judged; true where uvim reads no caret.
+    /// landing (LIN-2104): a sign, not proof, that the keys a landing sent are handled; true where uvim reads no caret.
     private func caretHolds(_ binding: FocusTracker.Binding) -> Bool {
         guard binding.capabilities.has(.readCaret) else { return true }
         var (last, since) = (AX.selectedRange(of: binding.element), Date())
