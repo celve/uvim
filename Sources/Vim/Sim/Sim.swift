@@ -99,8 +99,11 @@ public struct Sim {
     /// How many plans of a landing after `u` run before the Controller's deadline cuts it, as slow live faults showed.
     public var plansBeforeDeadline: Int?
 
+    /// Snapshots taken aside, as a landing's, whose `AXSelectedTextRange` goes unanswered, one fewer each.
+    public var unansweredSelectionsAside = 0
+
     /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
-    private var pendingUndo: (before: String, value: String?, clicks: UInt32, distance: Int?)?
+    private var pendingUndo: (before: String, value: String?, clicks: UInt32, route: Int)?
 
     /// The presses a landing plan has left, as the Controller's `AX.keys`, and whether one was refused.
     private var keysLeft: Int?
@@ -171,6 +174,9 @@ public struct Sim {
 
     /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
     public var pullsBackFromLineEnds = false
+
+    /// → from a caret at a line's end does nothing, as the live fault host's `right-at-line-end` (LIN-2104).
+    public var holdsRightAtLineEnds = false
 
     /// Lark's editor: ⌫ at a line's start deletes the line above's closing invisible characters with the `\n`, as its newline.
     public var runsAreNewlines = false
@@ -459,40 +465,44 @@ private extension Sim {
         // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
         if logical.steps.contains(.history(.undo)), let text = snapshot.text {
             let landed = landRestoredLines(after: text, changed: shownValue != value)
-            if !landed.finished { pendingUndo = (text, value, buttonEvents, landed.distance) }
+            if !landed.finished { pendingUndo = (text, value, buttonEvents, landed.route) }
         }
     }
 
-    /// The Controller's twin, its deadline counted in plans: not finished where the field shows no lines an undo put back
-    /// although it has not `changed` since `before`, a missed landing left the caret off them, or the deadline cut it.
-    mutating func landRestoredLines(after before: String, changed: Bool, distance earlier: Int? = nil) -> (finished: Bool, distance: Int?) {
+    /// The Controller's twin, its deadline counted in plans.
+    mutating func landRestoredLines(after before: String, changed: Bool, resumed: Int? = nil) -> (finished: Bool, route: Int) {
+        func answered(_ field: FieldSnapshot) -> Bool {
+            field.text != nil && (field.selection != nil || !field.capabilities.has(.readCaret))
+        }
         let after = snapshotAside()
-        let found = PhysicalPlanner.undoLanding(before: before, snapshot: after)
-        func distance(_ field: FieldSnapshot) -> Int {
-            guard let found, let at = field.selection?.lowerBound else { return .max }
+        let found = answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after) : nil
+        func distance(_ field: FieldSnapshot) -> Int? {
+            guard let found, let at = field.selection?.lowerBound else { return nil }
             if at < found.lines.lowerBound { return found.lines.lowerBound - at }
             return found.ending == nil ? max(0, at - found.lines.upperBound + 1) : 0
         }
-        let start = distance(after)
-        let stops = earlier.map { start == 0 || start >= $0 } ?? false
-        let landing = stops ? nil : found
+        var finished = found == nil ? answered(after) && changed : resumed != nil && distance(after) == 0
+        var (field, route, routes) = (after, resumed ?? 0, found?.ending == nil ? 1 : 3)
         var plansLeft = plansBeforeDeadline ?? .max
-        let landed = landing.map { landing -> Bool in
-            plansLeft -= 1
-            return plansLeft >= 0 && executeAside(landing.plan, keys: PhysicalPlanner.undoKeys)
-        }
-        if landed == false, let lines = landing?.ending {
-            for selecting in [false, true] {
-                plansLeft -= 1
-                guard plansLeft >= 0,
-                      let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
-                executeAside(next, keys: PhysicalPlanner.undoKeys)
+        while let found, !finished, route < routes, plansLeft > 0 {
+            guard let plan = route == 0 ? found.plan
+                    : PhysicalPlanner.undoFallback(onto: found.lines, snapshot: field, selecting: route == 2) else {
+                route += 1
+                continue
             }
+            plansLeft -= 1
+            let ran = executeAside(plan, keys: PhysicalPlanner.undoKeys)
+            if route == 0, ran || field.selection == nil {
+                finished = true
+                break
+            }
+            let now = snapshotAside()
+            guard answered(now), let from = distance(field), let to = distance(now) else { break }
+            field = now
+            if to == 0 { finished = true } else if to < from { break } else { route += 1 }
         }
-        let cut = plansLeft < 0
-        var finished = found != nil || changed
-        if landing != nil, landed == false { finished = !cut && distance(snapshotAside()) == 0 }
-        return (finished, landing == nil ? earlier : cut ? nil : start)
+        if found != nil, route >= routes { finished = true }
+        return (finished, route)
     }
 
     /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since; false where it still
@@ -505,8 +515,8 @@ private extension Sim {
         }
         // The Controller waits here for a field still showing what `u` found.
         if shownValue == pending.value { releaseHeldHistory() }
-        let landed = landRestoredLines(after: pending.before, changed: true, distance: pending.distance)
-        if landed.finished { pendingUndo = nil } else { pendingUndo?.distance = landed.distance }
+        let landed = landRestoredLines(after: pending.before, changed: true, resumed: pending.route)
+        if landed.finished { pendingUndo = nil } else { pendingUndo?.route = landed.route }
         return landed.finished
     }
 
@@ -785,6 +795,10 @@ private extension Sim {
                 return true
             }
         }
+        if holdsRightAtLineEnds, chord == .right, selection.isEmpty,
+           TextModel(text).lineBreak(of: selection.lowerBound) == selection.lowerBound {
+            return true
+        }
         if chord == .deleteBack, runsAreNewlines, selection.isEmpty, selection.lowerBound > 0 {
             let model = TextModel(text)
             if model.lineStart(of: selection.lowerBound) == selection.lowerBound {
@@ -890,6 +904,10 @@ private extension Sim {
         let learned = learner
         defer { learner = learned }
         var (reads, observed) = read()
+        if unansweredSelectionsAside > 0 {
+            unansweredSelectionsAside -= 1
+            reads.field.plain = nil
+        }
         var memo = foundEmptyParagraphs
         var unreachable = foundUnreachable
         return FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {

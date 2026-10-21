@@ -7746,9 +7746,8 @@ for nextWait in [false, true] {
     far.type("u")
     far.ignoredChords = []
     far.type("dd")
-    let rows = far.text.split(separator: "\n")
-    precondition(rows.count == 59 && !rows.contains("l40") && rows.contains("l39") && rows.contains("l41"),
-                 "dG, u from a caret far above, dd: \(far.text.suffix(30).debugDescription)")
+    let gone = (1...60).filter { !far.text.split(separator: "\n").contains("l\($0)"[...]) }
+    precondition(gone.count == 1 && gone[0] >= 40, "dG, u from a caret far above, dd removed \(gone)")
 }
 // A walk to a deep indent's first non-blank runs out of keys on the restored line, which the next command then acts on.
 let indented = "a\n" + String(repeating: " ", count: 70) + "b\nc"
@@ -7788,6 +7787,31 @@ cutShort.type("u")
 (cutShort.ignoredChords, cutShort.plansBeforeDeadline) = ([], nil)
 cutShort.type("dd")
 precondition(cutShort.text == "one\ntwo", "dd u dd, the deadline cutting u's fallbacks: \(cutShort.text.debugDescription)")
+// Faults kept and the deadline cutting every attempt after two plans: the next attempt resumes at the second fallback, which lands.
+for profile in [keyProfile, readProfile] {
+    var kept = Sim(text: "one\ntwo\nthree", caret: 8, profile: profile)
+    kept.emulatesKeys = true
+    kept.type("dd")
+    (kept.ignoredChords, kept.holdsRightAtLineEnds, kept.plansBeforeDeadline) = ([.down, .documentEnd], true, 2)
+    kept.type("u")
+    let keptBells = kept.bells
+    kept.type("dd")
+    precondition(kept.text == "one\ntwo" && kept.bells == keptBells, "dd u dd, faults kept: \(kept.text.debugDescription)")
+}
+// After a pending miss, a read without the caret decides nothing: that command is refused, and the next one lands.
+var noCaretRead = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+noCaretRead.emulatesKeys = true
+noCaretRead.undoSelection = .start
+noCaretRead.type("dG")
+noCaretRead.ignoredChords = [.documentEnd]
+noCaretRead.type("u")
+(noCaretRead.ignoredChords, noCaretRead.unansweredSelectionsAside) = ([], 1)
+let noCaretReadBells = noCaretRead.bells
+noCaretRead.type("dd")
+precondition(noCaretRead.text == restoredTail && noCaretRead.bells == noCaretReadBells + 1, "dd after an unread caret: \(noCaretRead.text.count)")
+noCaretRead.type("dd")
+let noCaretReadGone = (1...60).filter { !noCaretRead.text.split(separator: "\n").contains("l\($0)"[...]) }
+precondition(noCaretReadGone.count == 1 && noCaretReadGone[0] >= 40, "dd after the unread one removed \(noCaretReadGone)")
 // A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
 var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
 ignoring.emulatesKeys = true
