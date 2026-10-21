@@ -96,6 +96,9 @@ public struct Sim {
     /// With `undoesAfterWait`, shown no sooner than the next command's own wait for them.
     public var undoesInNextWait = false
 
+    /// How many plans of a landing after `u` run before the Controller's deadline cuts it, as slow live faults showed.
+    public var plansBeforeDeadline: Int?
+
     /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
     private var pendingUndo: (before: String, value: String?, clicks: UInt32, distance: Int?)?
 
@@ -460,8 +463,8 @@ private extension Sim {
         }
     }
 
-    /// The Controller's twin, but for its deadline: not finished where the field shows no lines an undo put back
-    /// although it has not `changed` since `before`, or a missed landing left the caret off them.
+    /// The Controller's twin, its deadline counted in plans: not finished where the field shows no lines an undo put back
+    /// although it has not `changed` since `before`, a missed landing left the caret off them, or the deadline cut it.
     mutating func landRestoredLines(after before: String, changed: Bool, distance earlier: Int? = nil) -> (finished: Bool, distance: Int?) {
         let after = snapshotAside()
         let found = PhysicalPlanner.undoLanding(before: before, snapshot: after)
@@ -473,16 +476,23 @@ private extension Sim {
         let start = distance(after)
         let stops = earlier.map { start == 0 || start >= $0 } ?? false
         let landing = stops ? nil : found
-        let landed = landing.map { executeAside($0.plan, keys: PhysicalPlanner.undoKeys) }
+        var plansLeft = plansBeforeDeadline ?? .max
+        let landed = landing.map { landing -> Bool in
+            plansLeft -= 1
+            return plansLeft >= 0 && executeAside(landing.plan, keys: PhysicalPlanner.undoKeys)
+        }
         if landed == false, let lines = landing?.ending {
             for selecting in [false, true] {
-                guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
+                plansLeft -= 1
+                guard plansLeft >= 0,
+                      let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
                 executeAside(next, keys: PhysicalPlanner.undoKeys)
             }
         }
+        let cut = plansLeft < 0
         var finished = found != nil || changed
-        if landing != nil, landed == false { finished = distance(snapshotAside()) == 0 }
-        return (finished, landing != nil ? start : earlier)
+        if landing != nil, landed == false { finished = !cut && distance(snapshotAside()) == 0 }
+        return (finished, landing == nil ? earlier : cut ? nil : start)
     }
 
     /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since; false where it still

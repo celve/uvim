@@ -7779,6 +7779,15 @@ precondition(cutWalk.presses - beforeCut <= PhysicalPlanner.undoKeys + 33, "u pr
 cutWalk.type("dd")
 let cutRows = cutWalk.text.split(separator: "\n")
 precondition(cutRows.count == 59 && cutRows.first == "l1", "dG u dd, ↓ ignored during u: \(cutWalk.text.prefix(12).debugDescription)")
+// The deadline cutting `u`'s landing before its second fallback stage, every key ignored meanwhile: the next command still lands.
+var cutShort = Sim(text: "one\ntwo\nthree", caret: 8, profile: keyProfile)
+cutShort.emulatesKeys = true
+cutShort.type("dd")
+(cutShort.ignoredChords, cutShort.plansBeforeDeadline) = ([.documentEnd, .down, .right], 2)
+cutShort.type("u")
+(cutShort.ignoredChords, cutShort.plansBeforeDeadline) = ([], nil)
+cutShort.type("dd")
+precondition(cutShort.text == "one\ntwo", "dd u dd, the deadline cutting u's fallbacks: \(cutShort.text.debugDescription)")
 // A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
 var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
 ignoring.emulatesKeys = true

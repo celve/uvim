@@ -569,7 +569,8 @@ public final class Controller {
     /// Lands on the lines an undo put back since `before`, stepping onto lines that end the text where that fails, each plan
     /// pressing at most `undoKeys` keys; not finished where a read went unanswered, the deadline came first, the field shows no
     /// such lines although it has not `changed` since `before`, or a missed landing left the cursor off them, for the next attempt.
-    /// The result's `distance` is how far from those lines the last landing started, `earlier`'s where none ran now.
+    /// The result's `distance` is how far from those lines the last landing started, `earlier`'s where none ran now, and nil
+    /// where the deadline cut it, as it then tried too little to show the cursor stuck.
     private func landRestoredLines(
         after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64,
         waited: (polls: Int, milliseconds: Int)?, distance earlier: Int? = nil
@@ -616,7 +617,7 @@ public final class Controller {
             tracker.epoch, seq, plan: landing?.plan, executed: landed ?? true, evidence: evidence, waited: waited,
             lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks, pending: !finished
         )
-        return (finished, landing != nil ? start : earlier)
+        return (finished, landing == nil ? earlier : AX.pastDeadline ? nil : start)
     }
 
     /// The field as it reads now, outside a command, as the Sim's `snapshotAside` reads it.
