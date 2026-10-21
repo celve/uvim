@@ -12,6 +12,7 @@
 <p align="center">
   <a href="https://github.com/celve/uvim/releases/latest"><b>Download</b></a> ·
   <a href="https://uvim.app">Home page</a> ·
+  <a href="docs/tutorial.md">Tutorial</a> ·
   <a href="#what-works">What works</a> ·
   <a href="#development">Development</a>
 </p>
@@ -54,6 +55,8 @@ event tap. Type as usual, and press **Esc** for Normal mode.
    **Accessibility: not granted** in uvim's menu opens the same list.
 3. uvim starts within a few seconds of the switch, restarting itself if it has to: the **!** leaves its
    menu-bar icon, and the menu reads `Input tap: running` and `Accessibility: granted`.
+
+New to uvim, or to Vim? The [tutorial](docs/tutorial.md) takes you through your first edits, in TextEdit.
 
 A release is signed with a Developer ID certificate and notarized by Apple. It [updates](#updates) itself: on
 its second launch uvim asks whether to check once a day, and `brew upgrade` updates a Homebrew install as
