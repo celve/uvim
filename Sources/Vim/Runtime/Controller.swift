@@ -78,8 +78,11 @@ public final class Controller {
     /// When the app last got a letter in Insert mode, in uptime nanoseconds: an input method shows it pending only later.
     private var letterAt: UInt64?
 
-    /// What a `u` found where its landing did not finish in time, which the next command resumes from `route` (LIN-2104).
-    private var pendingUndo: (before: String, value: String?, sent: Date, route: Int, element: AXUIElement, clicks: UInt32)?
+    /// What a `u` found where its landing did not finish in time, which the next command resumes from `route`, telling the restored
+    /// lines apart by `near`, the selection the undo left (LIN-2104).
+    private var pendingUndo: (
+        before: String, value: String?, sent: Date, route: Int, near: Range<Int>?, element: AXUIElement, clicks: UInt32
+    )?
 
     public init() {
         tracker.onRebind = { [weak self] binding, transition in
@@ -525,7 +528,7 @@ public final class Controller {
             let wait = (waited, Int(Date().timeIntervalSince(start) * 1000))
             // A field that left the last read unanswered would leave a snapshot unanswered too.
             guard shown != nil else {
-                pendingUndo = (before, reading.value, start, 0, binding.element, Self.buttonEvents())
+                pendingUndo = (before, reading.value, start, 0, nil, binding.element, Self.buttonEvents())
                 return Diag.undoLanding(
                     tracker.epoch, seq, plan: nil, executed: true, evidence: executor.lastRun, waited: wait,
                     lengths: (before.utf16.count, nil), fallbacks: [], route: 0
@@ -533,7 +536,7 @@ public final class Controller {
             }
             let landed = landRestoredLines(after: before, changed: shown != reading.value, on: binding, seq: seq, waited: wait)
             if !landed.finished {
-                pendingUndo = (before, reading.value, start, landed.route, binding.element, Self.buttonEvents())
+                pendingUndo = (before, reading.value, start, landed.route, landed.near, binding.element, Self.buttonEvents())
             }
         }
     }
@@ -557,29 +560,37 @@ public final class Controller {
                 waited += 1
                 shown = AX.value(of: binding.element)
             }
-            guard shown != nil else { return (finished: false, route: pending.route) }
+            guard shown != nil else { return (finished: false, route: pending.route, near: pending.near) }
             return landRestoredLines(
-                after: pending.before, changed: true, on: binding, seq: seq, waited: nil, resumed: pending.route
+                after: pending.before, changed: true, on: binding, seq: seq, waited: nil, resumed: (pending.route, pending.near)
             )
         }
-        if landed.finished { pendingUndo = nil } else { pendingUndo?.route = landed.route }
+        if landed.finished {
+            pendingUndo = nil
+        } else {
+            pendingUndo?.route = landed.route
+            pendingUndo?.near = landed.near
+        }
         return landed.finished
     }
 
     /// Lands on the lines an undo put back since `before` by its routes in turn, from `resumed`, where a pending landing stopped:
     /// the walk to Vim's place, then for lines that end the text the two fallbacks, each pressing at most `undoKeys` keys. Finished
     /// where the walk lands, a fresh read shows the cursor on those lines, every route ran its course without bringing it nearer,
-    /// or the field shows no such lines although it has `changed`; otherwise the result's `route` is the one the next attempt runs.
+    /// or the field shows no such lines although it has `changed`; otherwise the result's `route` is the one the next attempt runs,
+    /// and `near` the selection that told those lines apart.
     private func landRestoredLines(
         after before: String, changed: Bool, on binding: FocusTracker.Binding, seq: UInt64,
-        waited: (polls: Int, milliseconds: Int)?, resumed: Int? = nil
-    ) -> (finished: Bool, route: Int) {
+        waited: (polls: Int, milliseconds: Int)?, resumed: (route: Int, near: Range<Int>?)? = nil
+    ) -> (finished: Bool, route: Int, near: Range<Int>?) {
         // Only a read that answered the text and, in a field whose caret uvim reads, the caret decides anything.
         func answered(_ field: FieldSnapshot) -> Bool {
             field.text != nil && !AX.pastDeadline && (field.selection != nil || !field.capabilities.has(.readCaret))
         }
         let after = snapshotAside(binding)
-        let found = answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after) : nil
+        // Equal lines are told apart by the selection the undo left, which a landing's keys have since moved.
+        let near = resumed?.near ?? after.selection
+        let found = answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after, near: near) : nil
         func distance(_ field: FieldSnapshot) -> Int? {
             guard let found, let at = field.selection?.lowerBound else { return nil }
             if at < found.lines.lowerBound { return found.lines.lowerBound - at }
@@ -587,7 +598,7 @@ public final class Controller {
         }
         // A resumed landing can find the cursor on the lines already, where the app showed its last keys late.
         var finished = found == nil ? answered(after) && changed : resumed != nil && distance(after) == 0
-        var (field, route, routes) = (after, resumed ?? 0, found?.ending == nil ? 1 : 3)
+        var (field, route, routes) = (after, resumed?.route ?? 0, found?.ending == nil ? 1 : 3)
         var (walk, executed, evidence, fallbacks) = (PhysicalPlan?.none, true, executor.lastRun, [PhysicalPlan]())
         while let found, !finished, route < routes, !AX.pastDeadline {
             guard let plan = route == 0 ? found.plan
@@ -617,7 +628,7 @@ public final class Controller {
             tracker.epoch, seq, plan: walk, executed: executed, evidence: evidence, waited: waited,
             lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks, route: finished ? nil : route
         )
-        return (finished, route)
+        return (finished, route, found == nil ? resumed?.near : near)
     }
 
     /// The field as it reads now, outside a command, as the Sim's `snapshotAside` reads it.

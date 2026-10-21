@@ -181,10 +181,13 @@ public extension PhysicalPlanner {
     static let undoKeys = 50
 
     /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
-    /// `lines` are those lines, and `ending` holds them where they end the text, for `undoFallback`.
-    static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?, lines: Range<Int>)? {
+    /// `lines` are those lines, told from equal ones by `near`, the selection the undo left, where a landing moved the caret since;
+    /// `ending` holds them where they end the text, for `undoFallback`.
+    static func undoLanding(
+        before: String, snapshot: FieldSnapshot, near: Range<Int>? = nil
+    ) -> (plan: PhysicalPlan, ending: Range<Int>?, lines: Range<Int>)? {
         guard let model = Context(snapshot: snapshot).model,
-              let (lines, ending) = model.restoredLines(from: before, selection: snapshot.selection) else { return nil }
+              let (lines, ending) = model.restoredLines(from: before, selection: near ?? snapshot.selection) else { return nil }
         var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
         // Lines that end the text are reached from its end, as no key need cross the break above them, which Lark pulls a caret back over.
         if ending {

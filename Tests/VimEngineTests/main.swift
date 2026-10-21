@@ -7812,6 +7812,19 @@ precondition(noCaretRead.text == restoredTail && noCaretRead.bells == noCaretRea
 noCaretRead.type("dd")
 let noCaretReadGone = (1...60).filter { !noCaretRead.text.split(separator: "\n").contains("l\($0)"[...]) }
 precondition(noCaretReadGone.count == 1 && noCaretReadGone[0] >= 40, "dd after the unread one removed \(noCaretReadGone)")
+// A restored last line equal to the one above stays the target after the walk's keys moved the caret onto that one.
+for keep in [true, false] {
+    var twin = Sim(text: "a\na", caret: 2, profile: readProfile)
+    (twin.emulatesKeys, twin.undoSelection) = (true, .toBreak)
+    twin.type("dd")
+    (twin.ignoredChords, twin.holdsRightAtLineEnds, twin.plansBeforeDeadline) = ([.down, .documentEnd], true, 1)
+    twin.type("u")
+    if !keep { (twin.ignoredChords, twin.holdsRightAtLineEnds, twin.plansBeforeDeadline) = ([], false, nil) }
+    twin.type("iX")
+    twin.feed("<Esc>")
+    let twinRows = twin.text.split(separator: "\n", omittingEmptySubsequences: false)
+    precondition(twinRows.first == "a" && (keep || twinRows.last?.contains("X") == true), "dd u iX on twin lines: \(twin.text.debugDescription)")
+}
 // A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
 var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
 ignoring.emulatesKeys = true
