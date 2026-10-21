@@ -587,17 +587,19 @@ public final class Controller {
         func answered(_ field: FieldSnapshot) -> Bool {
             field.text != nil && !AX.pastDeadline && (field.selection != nil || !field.capabilities.has(.readCaret))
         }
+        // Keys an earlier attempt sent can still be on their way, and only a caret holding still shows where they leave it.
+        let still = resumed == nil || caretHolds(binding)
         let after = snapshotAside(binding)
         // Equal lines are told apart by the selection the undo left, which a landing's keys have since moved.
         let near = resumed?.near ?? after.selection
-        let found = answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after, near: near) : nil
+        let found = still && answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after, near: near) : nil
         func distance(_ field: FieldSnapshot) -> Int? {
             guard let found, let at = field.selection?.lowerBound else { return nil }
             if at < found.lines.lowerBound { return found.lines.lowerBound - at }
             return found.ending == nil ? max(0, at - found.lines.upperBound + 1) : 0
         }
         // A resumed landing can find the cursor on the lines already, where the app showed its last keys late.
-        var finished = found == nil ? answered(after) && changed : resumed != nil && distance(after) == 0
+        var finished = found == nil ? still && answered(after) && changed : resumed != nil && distance(after) == 0
         var (field, route, routes) = (after, resumed?.route ?? 0, found?.ending == nil ? 1 : 3)
         var (walk, executed, evidence, fallbacks) = (PhysicalPlan?.none, true, executor.lastRun, [PhysicalPlan]())
         while let found, !finished, route < routes, !AX.pastDeadline {
@@ -616,6 +618,7 @@ public final class Controller {
                 finished = true
                 break
             }
+            guard caretHolds(binding) else { break }
             let now = snapshotAside(binding)
             guard answered(now), let from = distance(field), let to = distance(now) else { break }
             field = now
@@ -629,6 +632,20 @@ public final class Controller {
             lengths: (before.utf16.count, after.text?.utf16.count), fallbacks: fallbacks, route: finished ? nil : route
         )
         return (finished, route, found == nil ? resumed?.near : near)
+    }
+
+    /// Whether the caret read the same twice 20 ms apart before `AX.until`'s deadline, so the keys a landing sent are handled
+    /// when it is judged, and the next command does not write under them; true where uvim reads no caret.
+    private func caretHolds(_ binding: FocusTracker.Binding) -> Bool {
+        guard binding.capabilities.has(.readCaret) else { return true }
+        var last = AX.selectedRange(of: binding.element)
+        while !AX.pastDeadline {
+            Thread.sleep(forTimeInterval: 0.02)
+            let now = AX.selectedRange(of: binding.element)
+            if let now, let last, now.location == last.location, now.length == last.length { return true }
+            last = now
+        }
+        return false
     }
 
     /// The field as it reads now, outside a command, as the Sim's `snapshotAside` reads it.

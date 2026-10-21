@@ -218,8 +218,11 @@ public extension PhysicalPlanner {
         ]
         guard snapshot.selection != nil else { return PhysicalPlan(steps: keys) }
         context.selection = model.length..<model.length
+        // Each settle waits for its stage's last key, as ↓ alone can reach the lines with ⌘↓ on its way and the next command then
+        // writes under it; ⇧↓'s selection matches no caret until → collapses it.
         return PhysicalPlan(steps: keys + settle(
-            context, profile: snapshot.capabilities, hard: false, landing: .caretWithin(lines.lowerBound...model.length)
+            context, profile: snapshot.capabilities, hard: false,
+            landing: selecting ? .caretWithin(lines.lowerBound...model.length) : nil
         ))
     }
 

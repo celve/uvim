@@ -7518,13 +7518,14 @@ precondition(PhysicalPlanner.undoLanding(
     before: "one\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 4..<8, length: 13)
 )?.ending == nil, "a middle line restored")
 let onLines = PhysicalStep.softSettle(Expectation(landing: .caretWithin(8...13), length: 13))
+let atEnd = PhysicalStep.softSettle(Expectation(selection: 13..<13, length: 13))
 let fallen = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [
-    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1), onLines,
+    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1), atEnd,
 ])
 let twoAbove = FieldSnapshot(capabilities: keyProfile, text: "one\ntwo\nthree", selection: 3..<3, length: 13)
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove)?.steps == [
-    .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), onLines,
+    .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), atEnd,
 ])
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove, selecting: true)?.steps == [
     .press(.selectDown, count: 2), .press(.right, count: 1), onLines,
@@ -7723,6 +7724,10 @@ for profile in [keyProfile, readProfile] {
         let steps = PhysicalPlanner.undoFallback(onto: 119..<restoredTail.utf16.count, snapshot: far, selecting: selecting)?.steps ?? []
         let pressed = steps.reduce(0) { if case .press(_, let count) = $1 { return $0 + count }; return $0 }
         precondition(pressed > 0 && pressed <= 21 && (selecting || steps.contains(.press(.documentEnd, count: 1))), "\(steps)")
+        // Each stage's settle waits for its last key: ⌘↓'s text end, or a caret only → leaves.
+        guard case .softSettle(let last)? = steps.last else { preconditionFailure("\(steps)") }
+        let end = restoredTail.utf16.count
+        precondition(last.landing == (selecting ? .caretWithin(119...end) : .exact(end..<end)), "\(String(describing: last.landing))")
     }
     var tail = Sim(text: restoredTail, caret: 3, profile: profile)
     tail.emulatesKeys = true
