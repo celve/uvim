@@ -634,15 +634,19 @@ public final class Controller {
         return (finished, route, found == nil ? resumed?.near : near)
     }
 
-    /// Whether the caret read the same twice 20 ms apart before `AX.until`'s deadline, so the keys a landing sent are handled
-    /// when it is judged, and the next command does not write under them; true where uvim reads no caret.
+    /// Whether the caret read the same for 60 ms before `AX.until`'s deadline, longer than any gap measured between a route's keys
+    /// landing (LIN-2104), so the keys a landing sent are handled when it is judged; true where uvim reads no caret.
     private func caretHolds(_ binding: FocusTracker.Binding) -> Bool {
         guard binding.capabilities.has(.readCaret) else { return true }
-        var last = AX.selectedRange(of: binding.element)
+        var (last, since) = (AX.selectedRange(of: binding.element), Date())
         while !AX.pastDeadline {
             Thread.sleep(forTimeInterval: 0.02)
             let now = AX.selectedRange(of: binding.element)
-            if let now, let last, now.location == last.location, now.length == last.length { return true }
+            if let now, let last, now.location == last.location, now.length == last.length {
+                if Date().timeIntervalSince(since) >= 0.06 { return true }
+            } else {
+                since = Date()
+            }
             last = now
         }
         return false
