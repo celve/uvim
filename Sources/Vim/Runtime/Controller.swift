@@ -90,7 +90,6 @@ public final class Controller {
     /// Starts focus tracking, once. Only with Accessibility granted: its click monitor costs a process without it its tap.
     public func start() {
         tracker.start()
-        KeyRouting.shared.install()
     }
 
     /// A click in a forced app moved the caret invisibly — Normal-mode
@@ -232,7 +231,7 @@ public final class Controller {
             seq &+= 1
             let commandSeq = seq
             // Read before the checks below, so the focus moving after them stops the command's keys.
-            let destination = KeyDestinationReads.verified()
+            let destination = KeyDestinationReads.verified(binding.pid)
             // Never mutate a field focus has left (an overlay emits no event); an engage key already reverified.
             if !Self.engageTokens.contains(token) {
                 if binding.isForced {
@@ -385,14 +384,9 @@ public final class Controller {
     private func run(
         _ completed: RawMonitor.Completed, on binding: FocusTracker.Binding, seq commandSeq: UInt64, destination: KeyDestination
     ) {
-        // Every plan below posts its keys only while they land where the command was verified.
-        var destination = destination
-        destination.routed = KeyRouting.shared.expect(binding.pid, presses: destination.presses)
+        // Every plan below posts its keys to the bound field's process, and only while the focus stays.
         executor.destination = destination
-        defer {
-            executor.destination = nil
-            KeyRouting.shared.finish()
-        }
+        defer { executor.destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
@@ -578,6 +572,11 @@ public final class Controller {
         let observed = reading.observed
         let items = (observed.evidence.map { [$0] } ?? []) + run
         Diag.evidence(epoch, seq, items)
+        // Checks made after the focus left judged keys it may have taken elsewhere in the app.
+        guard evidence.departure == nil else {
+            Diag.notLearned(epoch, seq, reason: "left", items.filter(Learning.teaches))
+            return
+        }
         // A forced binding resolves nothing to learn against.
         guard let beliefs = binding.beliefs else { return }
         let model = beliefs.readModel

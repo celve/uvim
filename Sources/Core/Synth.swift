@@ -15,8 +15,8 @@ public enum SynthTag {
 
 /// Synthesized-input primitives — the blind lane's actuator and the clipboard
 /// paste fallback. Events go to the frontmost app (uvim is an accessory
-/// agent), but `KeyRouting` drops any a running command meant for another.
-/// Requires Accessibility permission. Every event is tagged.
+/// agent), or to the one process `pid` names, which no other app's focus can
+/// redirect (LIN-1105). Requires Accessibility permission. Every event is tagged.
 public enum Synth {
     /// Below every session-level tap — including uvim's own. The executor
     /// settles *inside* the tap callback (main run loop held), so an event
@@ -31,46 +31,51 @@ public enum Synth {
     public static let pairGap: TimeInterval = 0.002
     private static func nudge(_ seconds: TimeInterval = pairGap) { if seconds > 0 { Thread.sleep(forTimeInterval: seconds) } }
 
+    private static func post(_ event: CGEvent, to pid: pid_t?) {
+        SynthTag.tag(event)
+        if let pid { event.postToPid(pid) } else { event.post(tap: tapLocation) }
+    }
+
     /// Synthesize ⌘V (clipboard paste). Used by clipboard-insert steps.
-    public static func commandV() { key(0x09, .maskCommand) }   // 0x09 = kVK_ANSI_V
+    public static func commandV(to pid: pid_t? = nil) { key(0x09, .maskCommand, to: pid) }   // 0x09 = kVK_ANSI_V
 
     /// Post a key down+up with modifier flags (tagged), `gap` apart.
-    public static func key(_ code: CGKeyCode, _ flags: CGEventFlags = [], gap: TimeInterval = pairGap) {
+    public static func key(_ code: CGKeyCode, _ flags: CGEventFlags = [], gap: TimeInterval = pairGap, to pid: pid_t? = nil) {
         let src = source()
         if let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true) {
-            down.flags = flags; SynthTag.tag(down); down.post(tap: tapLocation)
+            down.flags = flags; post(down, to: pid)
         }
         nudge(gap)
         if let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) {
-            up.flags = flags; SynthTag.tag(up); up.post(tap: tapLocation)
+            up.flags = flags; post(up, to: pid)
         }
     }
 
     /// Posts `count` presses, stopping before the first `proceed` refuses; returns how many it posted.
     @discardableResult
     public static func key(
-        _ code: CGKeyCode, _ flags: CGEventFlags = [], times count: Int, gap: TimeInterval = pairGap,
+        _ code: CGKeyCode, _ flags: CGEventFlags = [], times count: Int, gap: TimeInterval = pairGap, to pid: pid_t? = nil,
         while proceed: () -> Bool = { true }
     ) -> Int {
         for posted in 0..<max(0, count) {
             guard proceed() else { return posted }
-            key(code, flags, gap: gap)
+            key(code, flags, gap: gap, to: pid)
         }
         return max(0, count)
     }
 
     /// Type arbitrary Unicode (emoji/CJK verbatim — no layout mapping), tagged.
-    public static func type(_ text: String) {
+    public static func type(_ text: String, to pid: pid_t? = nil) {
         let src = source()
         let units = Array(text.utf16)
         if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
             down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-            SynthTag.tag(down); down.post(tap: tapLocation)
+            post(down, to: pid)
         }
         nudge()
         if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
             up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-            SynthTag.tag(up); up.post(tap: tapLocation)
+            post(up, to: pid)
         }
     }
 }

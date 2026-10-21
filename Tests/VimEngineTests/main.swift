@@ -7818,53 +7818,28 @@ precondition(switched.state.session.lastChange == VimState.ChangeMemory(body: "c
 
 // MARK: - Where a command's keys land (LIN-1105)
 
-var clicked = KeyDestination(presses: 4)
-clicked.routed = true
-precondition(clicked.departure(presses: 4, routedAway: false) == nil)
-precondition(clicked.departure(presses: 5, routedAway: false) == .click)
-precondition(clicked.departure(presses: 4, routedAway: true) == .click, "the first departure stays")
-var routedAway = KeyDestination(presses: 4)
-routedAway.routed = true
-precondition(routedAway.departure(presses: 4, routedAway: true) == .app)
-precondition(routedAway.departure(presses: 9, routedAway: false) == .app)
-var unrouted = KeyDestination(presses: 4)
-precondition(unrouted.departure(presses: 4, routedAway: false) == .unrouted, "no key without the routing tap")
-
-var ledger = KeyLedger()
-precondition(ledger.admit(target: 9, presses: 0), "a key outside any command passes")
-precondition(ledger.begin(7, presses: 4))
-precondition(ledger.admit(target: 7, presses: 4))
-let finishing = ledger.barrier()
-precondition(!ledger.end() && ledger.expected == 7, "the policy waits for the command's barrier")
-precondition(!ledger.begin(8, presses: 4) && ledger.expected == 7, "and the next command waits too")
-precondition(!ledger.admit(target: 8, presses: 4) && ledger.cancelled, "a late key is judged by its own command's policy")
-let next = ledger.barrier()
-ledger.saw(barrier: next)
-precondition(next > finishing && ledger.settled, "a later barrier vouches for an earlier one it overtook")
-precondition(ledger.end() && ledger.expected == nil && ledger.begin(8, presses: 4) && !ledger.cancelled)
-precondition(!ledger.admit(target: 3, presses: 4) && !ledger.admit(target: 8, presses: 4), "after one key bound elsewhere, none goes")
-precondition(ledger.begin(8, presses: 4) && !ledger.admit(target: 8, presses: 5), "a key behind a click goes nowhere")
-precondition(!ledger.admit(target: 8, presses: 4), "nor any after it")
-precondition(ledger.begin(8, presses: 6))
-ledger.cancel()
-precondition(!ledger.admit(target: 8, presses: 6), "a departure the command saw stops keys already on their way")
-var quiet = KeyLedger()
-_ = quiet.barrier()
-precondition(!quiet.begin(7, presses: 0), "no policy starts while a barrier is out, however long it takes")
-quiet.saw(barrier: 1)
-precondition(quiet.begin(7, presses: 0))
+var clicked = KeyDestination(pid: 7, presses: 4, active: true)
+precondition(clicked.departure(presses: 4, active: true) == nil && clicked.departure(presses: 4, active: nil) == nil)
+precondition(clicked.departure(presses: 5, active: true) == .click)
+precondition(clicked.departure(presses: 4, active: false) == .click, "the first departure stays")
+var deactivated = KeyDestination(pid: 7, presses: 4, active: true)
+precondition(deactivated.departure(presses: 4, active: false) == .app)
+precondition(deactivated.departure(presses: 9, active: true) == .app)
+var overlay = KeyDestination(pid: 7, presses: 4, active: false)
+precondition(overlay.departure(presses: 4, active: false) == nil, "an app that was not active has none to lose")
+precondition(overlay.departure(presses: 6, active: false) == .click)
 
 let fiveLines = "a\nb\nc\nd\ne"
 var blindCut = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
 blindCut.emulatesKeys = true
 blindCut.type("d3j")
 precondition(blindCut.text == "e" && blindCut.pasteboard == "a\nb\nc\nd\n" && blindCut.departure == nil, blindCut.text.debugDescription)
-for (after, inFlight) in [(0, 0), (1, 0), (2, 3), (5, 0)] {
+for (after, unseen) in [(0, 0), (1, 0), (2, 3), (5, 0)] {
     var leaving = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
     leaving.emulatesKeys = true
-    leaving.focusLeaves = (after, inFlight)
+    leaving.focusLeaves = (after, unseen, .click)
     leaving.type("d3j")
-    let context = "after \(after) in flight \(inFlight)"
+    let context = "after \(after), unseen \(unseen)"
     precondition(leaving.text == fiveLines && leaving.pasteboard == nil && leaving.departure == .click, context)
     precondition(leaving.bells == 0 && leaving.settleFailures == 0 && leaving.state.field.mode == .normal, context)
     leaving.type("d3j")
@@ -7873,31 +7848,49 @@ for (after, inFlight) in [(0, 0), (1, 0), (2, 3), (5, 0)] {
 
 var cutAway = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
 cutAway.emulatesKeys = true
-cutAway.focusLeaves = (after: 5, inFlight: 1)
+cutAway.focusLeaves = (after: 5, unseen: 1, by: .app)
 cutAway.type("d3j")
 precondition(cutAway.text == fiveLines && cutAway.pasteboard == nil && cutAway.departure == .app)
-precondition(cutAway.state.session.registers == VimState.initial.session.registers, "a cut that went elsewhere stores nothing")
+precondition(cutAway.state.session.registers == VimState.initial.session.registers, "a cut the focus left stores nothing")
+
+var unseenAway = Sim(text: fiveLines, caret: 0, profile: CapabilityProfile())
+unseenAway.emulatesKeys = true
+unseenAway.focusLeaves = (after: 2, unseen: 2, by: .app)
+unseenAway.type("d3j")
+precondition(unseenAway.selection == 0..<6 && unseenAway.text == fiveLines && unseenAway.departure == .app,
+             "keys posted before the executor saw its app go still reach the field, and the run stops at its next")
 
 var repairAway = Sim(text: paragraphs, caret: 24, profile: readProfile)
 repairAway.reads = omitsBreaks
-repairAway.focusLeaves = (after: 7, inFlight: 1)
+repairAway.focusLeaves = (after: 7, unseen: 1, by: .click)
 repairAway.type("ciw")
-precondition(repairAway.departure == .app && repairAway.selection == 24..<31, "the repair's only key, dropped, fails its run")
+precondition(repairAway.departure == .click && repairAway.selection == 24..<31, "the repair's only key, unseen, fails its run")
+
+var leftAfterMisread = false
+for after in 0...24 {
+    var leaving = chromiumSim(paragraphs, caret: 24, profile: readProfile, markers: false)
+    leaving.focusLeaves = (after, 0, .click)
+    leaving.type("ciw")
+    guard leaving.departure != nil else { continue }
+    leftAfterMisread = leftAfterMisread || leaving.settleFailures > 0
+    precondition(leaving.learner!.model.answer == .value && leaving.learner!.lessons.isEmpty, "a run the focus left teaches nothing: \(after)")
+}
+precondition(leftAfterMisread)
 
 var leavingInsert = Sim(text: "abc", caret: 2, profile: CapabilityProfile())
 leavingInsert.emulatesKeys = true
 leavingInsert.type("i")
-leavingInsert.focusLeaves = (after: 0, inFlight: 1)
+leavingInsert.focusLeaves = (after: 0, unseen: 1, by: .app)
 leavingInsert.feed("<Esc>")
-precondition(leavingInsert.departure == .app && leavingInsert.state.field.mode == .normal, "a mode change survives its step left")
+precondition(leavingInsert.departure == .app && leavingInsert.state.field.mode == .normal, "a mode change survives a run the focus left")
 
 var wordLeft = keyedSim(nativeThreeParagraphs, caret: 10)
-wordLeft.focusLeaves = (after: 0, inFlight: 1)
+wordLeft.focusLeaves = (after: 0, unseen: 1, by: .click)
 wordLeft.type("w")
 precondition(wordLeft.departure == .click && wordLeft.blamed.isEmpty && wordLeft.attribution.evidence.isEmpty)
 precondition(wordLeft.caret == 10 && wordLeft.settleFailures == 0)
 var deleteLeft = keyedSim(nativeThreeParagraphs, caret: 0, profile: readProfile)
-deleteLeft.focusLeaves = (after: 1, inFlight: 0)
+deleteLeft.focusLeaves = (after: 1, unseen: 0, by: .click)
 deleteLeft.type("dw")
 precondition(deleteLeft.text == nativeThreeParagraphs && deleteLeft.departure == .click && deleteLeft.state.field.mode == .normal)
 

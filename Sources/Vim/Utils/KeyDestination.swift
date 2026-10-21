@@ -1,25 +1,27 @@
-/// Where a command's keys land, as read when it was verified: the session's button presses, and the process the keys are
-/// routed to, which `KeyRouting` holds them to. A key posted once a press was made reaches another place (LIN-1105).
+/// Where a running command's keys go: the bound field's process, which each key is addressed to so that no other app can
+/// take one (LIN-1105), with the session's button presses and whether that app was active when the command was verified.
 public struct KeyDestination: Sendable {
     public enum Departure: String, Equatable, Sendable {
-        case click, app, unrouted
+        case click, app
     }
 
+    public let pid: Int32
     /// The session's button presses when the command was verified.
     public let presses: UInt32
-    /// Whether `KeyRouting` holds this command's keys to its process; without that no key may be posted.
-    public var routed = false
+    /// An app that was not active then, as an overlay's is not, has no activation to lose.
+    public let active: Bool
     private var departed: Departure?
 
-    public init(presses: UInt32) {
+    public init(pid: Int32, presses: UInt32, active: Bool) {
+        self.pid = pid
         self.presses = presses
+        self.active = active
     }
 
-    /// Why a key posted now would land elsewhere, for good once it has; `routedAway` is a key already dropped as bound elsewhere.
-    public mutating func departure(presses now: UInt32, routedAway: Bool) -> Departure? {
-        if departed == nil, !routed { departed = .unrouted }
+    /// Why the focus has left the field, for good once it has; `active` is nil where it was not read.
+    public mutating func departure(presses now: UInt32, active nowActive: Bool?) -> Departure? {
         if departed == nil, now != presses { departed = .click }
-        if departed == nil, routedAway { departed = .app }
+        if departed == nil, active, nowActive == false { departed = .app }
         return departed
     }
 }

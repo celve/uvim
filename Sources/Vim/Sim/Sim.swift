@@ -173,9 +173,10 @@ public struct Sim {
     /// The reads fail once the commit key is sent, so nothing reads the commit.
     public var failsReadAfterCommit = false
 
-    /// After this many more keys reach the field a click takes the focus elsewhere, and the `inFlight` keys posted
-    /// next go with it, as keys the window server routes after the click do (LIN-1105).
-    public var focusLeaves: (after: Int, inFlight: Int)?
+    /// After this many more keys reach the field the focus moves, and the executor's reads see that only `unseen` keys
+    /// later. Those keys are addressed to the field's app (LIN-1105): after a click they reach another of its fields,
+    /// and after another app's activation they reach this one, which then takes plain keys but no ⌘ menu equivalent.
+    public var focusLeaves: (after: Int, unseen: Int, by: KeyDestination.Departure)?
 
     /// Why the last command stopped posting keys, as the executor's run says.
     public private(set) var departure: KeyDestination.Departure?
@@ -183,8 +184,8 @@ public struct Sim {
     /// The running command's, as the Controller hands it to the executor.
     private var destination: KeyDestination?
 
-    /// A key went with the focus, which the routing tap would have dropped.
-    private var routedAway = false
+    /// What the executor's read of the field's app says.
+    private var appActive = true
 
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
@@ -373,10 +374,9 @@ public struct Sim {
 
 private extension Sim {
     mutating func run(_ completed: RawMonitor.Completed) {
-        destination = KeyDestination(presses: buttonEvents)
-        destination?.routed = true
+        destination = KeyDestination(pid: 0, presses: buttonEvents, active: true)
         departure = nil
-        routedAway = false
+        appActive = true
         defer { destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
@@ -593,16 +593,16 @@ private extension Sim {
                 if !swallowsReplace { applyReplace(replacement) }
 
             case .typeText(let typed):
-                guard let lands = posts() else { return stop(steps, at: index) }
+                guard let takes = posts(menu: false) else { return stop(steps, at: index) }
                 postedKeys = true
-                if lands { applyReplace(typed) }
+                if takes { applyReplace(typed) }
 
             case .press(let chord, let count):
                 var unsupported = false
                 for _ in 0..<count {
-                    guard let lands = posts() else { return stop(steps, at: index) }
+                    guard let takes = posts(menu: Self.menuChords.contains(chord)) else { return stop(steps, at: index) }
                     postedKeys = true
-                    guard lands, !unsupported, !ignoredChords.contains(chord) else { continue }
+                    guard takes, !unsupported, !ignoredChords.contains(chord) else { continue }
                     if undoesLate, [.undo, .redo].contains(chord) {
                         lateHistory.append(chord)
                     } else if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
@@ -614,22 +614,22 @@ private extension Sim {
                 if !undoesLate || ![.undo, .redo].contains(chord) { landLateHistory() }
 
             case .clipboardCut:
-                guard let lands = posts() else { return stop(steps, at: index) }
+                guard let takes = posts(menu: true) else { return stop(steps, at: index) }
                 postedKeys = true
-                if lands {
+                if takes {
                     pasteboard = TextModel(text).substring(selection)
                     applyReplace("")
                 }
 
             case .clipboardCopy:
-                guard let lands = posts() else { return stop(steps, at: index) }
+                guard let takes = posts(menu: true) else { return stop(steps, at: index) }
                 postedKeys = true
-                if lands { pasteboard = TextModel(text).substring(selection) }
+                if takes { pasteboard = TextModel(text).substring(selection) }
 
             case .clipboardInsert(let content):
-                guard let lands = posts() else { return stop(steps, at: index) }
+                guard let takes = posts(menu: true) else { return stop(steps, at: index) }
                 postedKeys = true
-                if lands { applyReplace(content ?? pasteboard ?? "") }
+                if takes { applyReplace(content ?? pasteboard ?? "") }
 
             case .captureSelectedText(let slot):
                 captures[slot] = readSelectedText
@@ -663,9 +663,8 @@ private extension Sim {
                 generated = !passed || expectation.metByEmptyField
 
             case .commit(let effect):
-                // The executor's check before a commit: a key that went with the focus never did what this records.
-                if destination != nil, routedAway, postedKeys {
-                    if departure == nil { departure = .app }
+                // The executor's check before a commit: keys the focus left did only part of what this records.
+                if destination != nil, postedKeys, departs() {
                     if effect.survivesAbort { state = VimReducer.reduce(state, effect, captures: captures) }
                     return stop(steps, at: index)
                 }
@@ -676,8 +675,7 @@ private extension Sim {
             }
         }
         // The executor's check after the last step, for keys after the last commit.
-        if destination != nil, routedAway, postedKeys {
-            if departure == nil { departure = .app }
+        if destination != nil, postedKeys, departs() {
             return max(0, steps.count - 1)
         }
         return nil
@@ -711,6 +709,9 @@ private extension Sim {
 
     /// The keys lane B counts with, which run whether or not `emulatesKeys` is on.
     static let countedKeys: Set<Chord> = [.left, .right, .up, .down, .lineStart, .selectRight, .selectLeft, .deleteBack]
+
+    /// ⌘ menu equivalents, which an app the focus has left ignores (LIN-1105).
+    static let menuChords: Set<Chord> = [.selectAll, .undo, .redo]
 
     /// One key as `KeyModel` has Cocoa's bindings do it, which is how LIN-1533 measured Chromium's arrows; false for
     /// a key the model does not know.
@@ -867,8 +868,8 @@ private extension Sim {
         return aborted == nil
     }
 
-    /// The executor's check before each key: nil where the run stops there, false where the key goes with the focus.
-    mutating func posts() -> Bool? {
+    /// The executor's check before each key: nil where the run stops there, else whether the field takes the key.
+    mutating func posts(menu: Bool) -> Bool? {
         guard !departs() else { return nil }
         guard var leaves = focusLeaves else { return true }
         if leaves.after > 0 {
@@ -876,31 +877,27 @@ private extension Sim {
             focusLeaves = leaves
             return true
         }
-        if leaves.inFlight > 0 {
-            leaves.inFlight -= 1
-            focusLeaves = leaves
-            // The tap's verdict on these reaches the executor only after the keys already posted.
-            if leaves.inFlight == 0 {
-                leave()
-                routedAway = true
-            }
-            return false
+        guard leaves.unseen > 0 else {
+            seen(leaves.by)
+            return departs() ? nil : true
         }
-        leave()
-        return departs() ? nil : true
+        leaves.unseen -= 1
+        focusLeaves = leaves
+        if leaves.unseen == 0 { seen(leaves.by) }
+        return leaves.by == .app && !menu
     }
 
-    /// The click `focusLeaves` makes, outside the field.
-    mutating func leave() {
+    /// What the executor's reads find once the focus has gone: the click's presses, or the app inactive.
+    mutating func seen(_ move: KeyDestination.Departure) {
         focusLeaves = nil
-        buttonEvents &+= 2
+        if move == .click { buttonEvents &+= 2 } else { appActive = false }
     }
 
-    /// Whether the run's keys left, by the executor's reads.
+    /// Whether the focus left, by the executor's reads.
     mutating func departs() -> Bool {
         guard var held = destination else { return false }
         if departure == nil {
-            departure = held.departure(presses: buttonEvents, routedAway: routedAway)
+            departure = held.departure(presses: buttonEvents, active: appActive)
             destination = held
         }
         return departure != nil
@@ -1145,7 +1142,8 @@ extension Sim {
     }
 
     mutating func learn(from observed: Learning.Observation) {
-        guard var learner else { return }
+        // The controller's: a run the focus left teaches nothing.
+        guard var learner, departure == nil else { return }
         if observed.source.observes {
             for item in attribution.evidence { learner.tally.count(item) }
         }
