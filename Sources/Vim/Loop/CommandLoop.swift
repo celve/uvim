@@ -19,9 +19,29 @@ struct CommandLoop<Host: CommandHost> {
         var near: Range<Int>?
     }
 
-    /// Why a command was refused, with a beep.
+    /// Why a command or an engage key was refused, with a beep.
     enum Refusal {
+        case composing(RawMonitor.Completed)
         case undoLanding(RawMonitor.Completed)
+        /// Nothing read the letters an input method held as committed after ⌃[, so Insert mode stays.
+        case uncommitted
+    }
+
+    /// The field as a command's snapshot read it.
+    struct Reading {
+        let snapshot: FieldSnapshot
+        let observed: Learning.Observation
+        /// `AXValue` as read, which a later read compares with to tell the field changed.
+        let value: String?
+        /// The field may show only text its page generates (LIN-1930).
+        let generated: Bool
+    }
+
+    /// A selection read outside a plan, through the markers where `marked` holds them.
+    struct Selection {
+        let range: Range<Int>
+        let caret: Bool
+        let marked: Host.Marked?
     }
 
     /// One attempt at a landing after `u`, for the host's recorder.
@@ -43,6 +63,8 @@ struct CommandLoop<Host: CommandHost> {
 /// What the loop runs a command against, where the runtime and the Sim differ: the field's reads and keys, the waits that time
 /// them, the commits and the records.
 protocol CommandHost {
+    /// A selection's read through the markers, which tell its paragraph side.
+    associatedtype Marked
     /// What a pending landing keeps of the field and moment `u` ran in.
     associatedtype Witness
     /// A plan's run, as the host records it.
@@ -50,15 +72,48 @@ protocol CommandHost {
 
     var loop: CommandLoop<Self> { get set }
     var state: VimState { get }
+    var profile: CapabilityProfile { get }
     /// The session's button presses and releases, which a click moves.
     var buttonEvents: UInt32 { get }
 
     mutating func commit(_ effect: VimEffect)
     mutating func refuse(_ reason: CommandLoop<Self>.Refusal)
 
+    /// What an engage key does where an input method is selected, which may hold letters pending; nil where none is.
+    mutating func engage(_ token: String) -> Composition.Engage?
+    /// The engage key goes to the app, whose input method cancels the letters the Insert log cannot say.
+    mutating func passToInputMethod()
+    /// The read of the letters an input method holds pending; nil where none is selected.
+    var compositionRead: (() -> Composition)? { get }
+
+    /// Runs `body` with the command's keys going to the field's process, and only while the focus stays.
+    mutating func postingKeys<T>(_ body: (inout Self) -> T) -> T
+    /// The field as it reads for a command, Visual mode's `anchor` with it.
+    mutating func snapshot(anchor: Int?) -> CommandLoop<Self>.Reading
+    /// The optional routes to plan without.
+    func missedRoutes(under offsets: OffsetsAnswer) -> Set<Route>
+    /// Runs a command's plan: whether every step ran, and where it stopped.
+    mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?)
+    /// Records the command and learns from its run, once the loop is done with it.
+    mutating func record(
+        _ completed: RawMonitor.Completed, logical: LogicalPlan, planned: PhysicalPlanner.Planning, from before: VimState.Mode,
+        reading: CommandLoop<Self>.Reading, executed: Bool
+    )
+
+    /// The selection as it reads now, in field offsets; nil where it went unanswered.
+    mutating func selectionRead(paragraphs: Bool) -> CommandLoop<Self>.Selection?
+    mutating func side(of marked: Marked) -> ParagraphBreaks.Side?
+    /// `AXValue` as it reads now.
+    mutating func value() -> String?
+    /// The field as it reads now, outside a command.
+    mutating func snapshotAside() -> FieldSnapshot
+    /// Runs a plan that cleans up after the command's: whether every step ran.
+    @discardableResult mutating func runAside(_ plan: PhysicalPlan, paragraphs: Bool) -> Bool
+    /// Whether the selection reads as a caret, in the time the field takes to show one.
+    mutating func becomesCaret(paragraphs: Bool) -> Bool
+
     /// Whether the focus left during a resumed landing, which refuses the command it held.
     mutating func leftDuringLanding(_ completed: RawMonitor.Completed) -> Bool
-
     /// Runs `body` as one landing attempt, within the deadline that bounds it.
     mutating func attemptLanding<T>(_ body: (inout Self) -> T) -> T
     var witness: Witness { get }
@@ -69,8 +124,6 @@ protocol CommandHost {
     mutating func awaitResumed(_ pending: CommandLoop<Self>.PendingUndo) -> String?
     /// Whether the caret reads the same for a while, a sign that keys an earlier attempt sent are handled.
     mutating func caretHolds() -> Bool
-    /// The field as it reads now, outside a command.
-    mutating func snapshotAside() -> FieldSnapshot
     /// The deadline has passed, so no landing plan starts.
     var pastDeadline: Bool { get }
     /// A read made now answers nothing.
@@ -79,6 +132,129 @@ protocol CommandHost {
     mutating func runLanding(_ plan: PhysicalPlan, paragraphs: Bool) -> (ran: Bool, departure: KeyDestination.Departure?)
     var lastRun: RunRecord { get }
     mutating func traceLanding(_ trace: CommandLoop<Self>.LandingTrace)
+}
+
+// MARK: - A command
+
+extension CommandLoop {
+    /// An engage key in Insert mode, which an input method holding letters pending may take (#69): nil where Normal mode follows,
+    /// else whether uvim takes the key.
+    static func engage(_ token: String, host: inout Host) -> Bool? {
+        switch host.engage(token) {
+        case .normal?, nil:
+            return nil
+        case .passThrough?:
+            host.passToInputMethod()
+            return false
+        case .refuse?:
+            host.refuse(.uncommitted)
+            return true
+        }
+    }
+
+    /// A completed command, run unless letters an input method holds pending, or a landing after `u` it waits behind, refuse it;
+    /// whether it ran.
+    @discardableResult
+    static func command(_ completed: RawMonitor.Completed, mode: RawMonitor.Mode, host: inout Host) -> Bool {
+        // Pending letters take the field's keys and selection, so a command would misfire and teach uvim wrong.
+        if mode != .insert, let read = host.compositionRead, !Composition.runs(completed.command, read: read) {
+            host.refuse(.composing(completed))
+            return false
+        }
+        return host.postingKeys { host in
+            guard landsPending(completed, host: &host) else { return false }
+            run(completed, host: &host)
+            return true
+        }
+    }
+
+    /// Plans a command against the field as it reads now and runs it; then the cleanup where it failed, the bookkeeping for `.`,
+    /// the landing after `u`, and last the host's record and lesson.
+    static func run(_ completed: RawMonitor.Completed, host: inout Host) {
+        let command = completed.command
+        let logical = LogicalPlanner.plan(command, state: host.state)
+        var anchor: Int?
+        var visual = false
+        if case .visual(let context) = host.state.field.mode {
+            (anchor, visual) = (context.anchor, true)
+        }
+        let reading = host.snapshot(anchor: anchor)
+        let snapshot = reading.snapshot
+        let paragraphs = snapshot.breaks != nil
+        let planned = PhysicalPlanner.planning(
+            logical, snapshot: snapshot, missed: host.missedRoutes(under: reading.observed.after), visual: visual
+        )
+        let physical = planned.plan
+        let before = host.state.field.mode
+        let ran = host.execute(physical, paragraphs: paragraphs, generated: reading.generated)
+        // After the cleanup and the bookkeeping, on both paths, so the republish a lesson causes happens as `run` unwinds.
+        defer {
+            host.record(completed, logical: logical, planned: planned, from: before, reading: reading, executed: ran.executed)
+        }
+        guard ran.executed else {
+            if planned.abortedAtTextCheck(ran.abortedAt) {
+                // Other text than the plan meant was selected, so the mode it asked for goes too.
+                if let read = host.selectionRead(paragraphs: paragraphs), !read.caret {
+                    host.runAside(
+                        PhysicalPlanner.collapse(read.range, misread: true, toEnd: planned.collapsesToEnd, profile: host.profile),
+                        paragraphs: paragraphs
+                    )
+                    _ = host.becomesCaret(paragraphs: paragraphs)
+                }
+                if host.state.field.mode.isInserting {
+                    host.commit(.setMode(before.nonVisual))
+                }
+            } else if !repairStrandedSelection(
+                operand: planned.operand, toEnd: planned.collapsesToEnd, reading: reading, host: &host
+            ), host.state.field.mode.isInserting {
+                // A selection we could not collapse is one the app would type over.
+                host.commit(.setMode(before.nonVisual))
+            }
+            // `RawMonitor` drained the payload it will never offer again.
+            if let payload = completed.insertPayload, !host.state.field.mode.isInserting {
+                closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &host)
+            }
+            recordChange(for: command, from: before, mutated: physical.mutatesText, aborted: true, host: &host)
+            return
+        }
+
+        if let payload = completed.insertPayload {
+            closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &host)
+        }
+
+        recordChange(for: command, from: before, mutated: physical.mutatesText, host: &host)
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
+            landUndo(from: text, value: reading.value, host: &host)
+        }
+    }
+
+    /// Collapse a stranded selection, and report whether the field is safe to type into.
+    static func repairStrandedSelection(operand: Range<Int>?, toEnd: Bool, reading: Reading, host: inout Host) -> Bool {
+        let paragraphs = reading.snapshot.breaks != nil
+        // Unknown is not empty: a settle can fail *because* the read went dark.
+        guard let read = host.selectionRead(paragraphs: paragraphs) else { return false }
+        guard !read.caret else { return true }
+        // Still the operand: the app's own editor substitutes on the first keystroke.
+        if host.state.field.mode.isInserting, read.range == operand { return true }
+        var side: ParagraphBreaks.Side?
+        var snapshot: FieldSnapshot?
+        if let marked = read.marked {
+            side = host.side(of: marked)
+            // An edit, or a caret Linear drew or took away, leaves the run's snapshot describing other text.
+            snapshot = host.value() == reading.value ? reading.snapshot : host.snapshotAside()
+        }
+        let collapse = PhysicalPlanner.collapse(
+            read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, toEnd: toEnd, profile: host.profile
+        )
+        let settled = host.runAside(collapse, paragraphs: paragraphs)
+        // Keys the field ignored fail their settle, and a write lane then writes the start as it was read.
+        if !settled, host.profile.has(.writeSelection) {
+            let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, profile: host.profile)
+            host.runAside(asRead, paragraphs: paragraphs)
+        }
+        // The write that stranded this may be the one that lies, so confirm.
+        return host.becomesCaret(paragraphs: paragraphs)
+    }
 }
 
 // MARK: - The bookkeeping for `.`

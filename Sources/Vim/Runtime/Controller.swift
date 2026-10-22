@@ -2,11 +2,8 @@ import AppKit
 import ApplicationServices
 import Core
 
-/// The runtime loop — `Sim`'s impure twin. Wires the tap's key events
-/// through monitor → planners → executor against the currently-bound
-/// field, and carries the runtime lore the Sim mirrors in pure form:
-/// binding + probing on focus change, dot-body bookkeeping, and the
-/// insert-payload commits.
+/// The runtime: routes the tap's key events through the monitor to the `CommandLoop`, which runs each command against the bound
+/// field through `Host`, the runtime's AX reads, keys and waits; and binds and probes fields as the focus moves.
 ///
 /// The per-key path costs zero AX: the `FocusTracker` keeps the binding as
 /// event-driven state, and `handle` only reads it (InputHub's contract —
@@ -210,9 +207,9 @@ public final class Controller {
         case .insert, .replace: mode = .insert
         }
 
-        if mode == .insert, Self.engageTokens.contains(token), let method = InputSource.selectedMethod(),
-           let engaged = engage(token, on: binding, method: method) {
-            return engaged
+        if mode == .insert, Self.engageTokens.contains(token) {
+            var host = Host(controller: self, binding: binding, seq: seq)
+            if let engaged = CommandLoop.engage(token, host: &host) { return engaged }
         }
 
         // Insert-mode non-Esc tokens must keep flowing through the monitor:
@@ -275,23 +272,12 @@ public final class Controller {
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "app-key")
                 return false
             }
-            // Pending letters take the field's keys and selection, so a command would misfire and teach uvim wrong.
-            if mode != .insert, let method = InputSource.selectedMethod(), !Composition.runs(completed.command, read: {
-                CompositionReads.answer(of: binding, method: method, letter: letterAt)
-            }) {
-                NSSound.beep()
-                Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "composing")
-                return true
+            var host = Host(controller: self, binding: binding, seq: commandSeq, destination: destination)
+            if CommandLoop.command(completed, mode: mode, host: &host) {
+                // Publish even on mid-plan aborts: a .setMode commit may have
+                // landed before a later step failed.
+                publishMode()
             }
-            // Every plan below, a landing's too, posts its keys to the bound field's process, and only while the focus stays.
-            executor.destination = destination
-            defer { executor.destination = nil }
-            var host = Host(controller: self, binding: binding, seq: commandSeq)
-            guard CommandLoop.landsPending(completed, host: &host) else { return true }
-            run(completed, host: &host)
-            // Publish even on mid-plan aborts: a .setMode commit may have
-            // landed before a later step failed.
-            publishMode()
             return true
         }
     }
@@ -321,30 +307,6 @@ public final class Controller {
     private func drop(_ completed: RawMonitor.Completed, _ seq: UInt64, _ reason: String) {
         Diag.dropped(tracker.epoch, seq, command: completed.command, reason: reason)
         tracker.reverify(force: true)
-    }
-
-    /// An engage key in Insert mode with an input method selected: its consume verdict, or nil to enter Normal mode.
-    private func engage(_ token: String, on binding: FocusTracker.Binding, method: String) -> Bool? {
-        let start = DispatchTime.now().uptimeNanoseconds
-        var answers: [Composition] = []
-        let engaged = Composition.engage(token, read: {
-            answers.append(CompositionReads.answer(of: binding, method: method, letter: letterAt))
-            return answers[answers.count - 1]
-        }, commit: {
-            answers.append(CompositionReads.commit(on: binding, method: method))
-            return answers[answers.count - 1]
-        })
-        Diag.engaged(tracker.epoch, key: token, method: method, answers: answers, engaged, since: start)
-        switch engaged {
-        case .normal:
-            return nil
-        case .passThrough:
-            monitor.markInsertLogLossy()
-            return false
-        case .refuse:
-            NSSound.beep()
-            return true
-        }
     }
 
     /// Focus moved (tracker event). The element plumbing is unconditional;
@@ -401,112 +363,6 @@ public final class Controller {
         }
     }
 
-    private func run(_ completed: RawMonitor.Completed, host: inout Host) {
-        let (binding, commandSeq) = (host.binding, host.seq)
-        let command = completed.command
-        let logical = LogicalPlanner.plan(command, state: state)
-        var anchor: Int?
-        var visual = false
-        if case .visual(let context) = state.field.mode {
-            (anchor, visual) = (context.anchor, true)
-        }
-        let reading = Snapshotter.snapshot(
-            of: binding.element,
-            capabilities: binding.capabilities,
-            anchor: anchor,
-            cursor: state.field.cursor,
-            chromium: binding.isChromium,
-            model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
-            sampling: sampling,
-            known: emptyParagraphs,
-            knownUnreachable: unreachable
-        )
-        if reading.emptyParagraphs != emptyParagraphs, let memo = reading.emptyParagraphs {
-            Diag.emptyParagraphs(tracker.epoch, commandSeq, memo)
-        }
-        emptyParagraphs = reading.emptyParagraphs
-        if reading.unreachable != unreachable, let memo = reading.unreachable {
-            Diag.unreachable(tracker.epoch, commandSeq, memo)
-        }
-        unreachable = reading.unreachable
-        if reading.sampled {
-            sampling.sampled(markers: reading.markers, evidence: reading.observed.evidence, text: reading.reads.text,
-                             plain: reading.reads.plain)
-        }
-        let snapshot = reading.snapshot
-        fieldBreaks = snapshot.breaks
-        let paragraphs = snapshot.breaks != nil
-        let planned = PhysicalPlanner.planning(
-            logical, snapshot: snapshot, missed: missedRoutes(on: binding, under: reading.observed.after), visual: visual
-        )
-        let physical = planned.plan
-        let epoch = tracker.epoch
-        let before = state.field.mode
-        let executed = executor.execute(
-            physical, on: binding.element, state: &state, paragraphs: paragraphs, generated: reading.generated > 0
-        )
-        // Harvested before anything else can touch the executor: the abort path
-        // below runs `repairStrandedSelection`, which executes its own plan and
-        // resets `lastRun` — and that is precisely the path a failed write takes.
-        let evidence = executor.lastRun
-        // Deferred so it runs after hygiene and the dot bookkeeping, on both
-        // paths, and so the republish a commit triggers happens as `run`
-        // unwinds rather than re-entering the tracker mid-command.
-        defer { learn(from: evidence, reading: reading, on: binding, epoch: epoch, seq: commandSeq) }
-        // Declared second so LIFO runs it first, before the republish it may cause.
-        defer {
-            Diag.command(
-                epoch, commandSeq,
-                command: command,
-                from: before, to: state.field.mode,
-                plan: physical,
-                rejection: planned.rejection,
-                bell: Self.bellReason(logical),
-                executed: executed,
-                evidence: evidence,
-                insertPayload: completed.insertPayload,
-                emptyLines: snapshot.valueGap,
-                foldedLength: snapshot.foldedLength,
-                generated: reading.generated
-            )
-        }
-        guard executed else {
-            if planned.abortedAtTextCheck(evidence.abortedAt) {
-                // Other text than the plan meant was selected, so the mode it asked for goes too.
-                if let read = selection(of: binding.element, paragraphs: paragraphs), !read.caret {
-                    let collapse = PhysicalPlanner.collapse(
-                        read.range, misread: true, toEnd: planned.collapsesToEnd, profile: binding.capabilities
-                    )
-                    executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
-                    _ = becomesCaret(binding.element, paragraphs: paragraphs)
-                }
-                if state.field.mode.isInserting {
-                    executor.commit(.setMode(before.nonVisual), state: &state)
-                }
-            } else if !repairStrandedSelection(on: binding, operand: planned.operand, toEnd: planned.collapsesToEnd,
-                                               reading: reading),
-                      state.field.mode.isInserting {
-                // A selection we could not collapse is one the app would type over.
-                executor.commit(.setMode(before.nonVisual), state: &state)
-            }
-            // `RawMonitor` drained the payload it will never offer again.
-            if let payload = completed.insertPayload, !state.field.mode.isInserting {
-                CommandLoop.closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &host)
-            }
-            CommandLoop.recordChange(for: command, from: before, mutated: physical.mutatesText, aborted: true, host: &host)
-            return
-        }
-
-        if let payload = completed.insertPayload {
-            CommandLoop.closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &host)
-        }
-
-        CommandLoop.recordChange(for: command, from: before, mutated: physical.mutatesText, host: &host)
-        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
-            CommandLoop.landUndo(from: text, value: reading.value, host: &host)
-        }
-    }
-
     /// The lowering drops `BellReason`, but it never had to survive the planner.
     private static func bellReason(_ logical: LogicalPlan) -> LogicalStep.BellReason? {
         for step in logical.steps {
@@ -523,11 +379,10 @@ public final class Controller {
 
     /// A change applies at once, keeping the session (`.sameElement`), so the next command routes around it.
     private func learn(
-        from evidence: Executor.RunEvidence, reading: Snapshotter.Reading, on binding: FocusTracker.Binding,
+        from evidence: Executor.RunEvidence, observed: Learning.Observation, on binding: FocusTracker.Binding,
         epoch: UInt64, seq: UInt64
     ) {
         let run = evidence.attribution.evidence
-        let observed = reading.observed
         let items = (observed.evidence.map { [$0] } ?? []) + run
         Diag.evidence(epoch, seq, items)
         // Checks made after the focus left judged keys it may have taken elsewhere in the app.
@@ -581,61 +436,6 @@ public final class Controller {
         Diag.learned(epoch, seq, lesson, rung: rung, versions: binding.versions)
         if lesson.republish { tracker.reresolveCapabilities() }
     }
-
-    /// Collapse a stranded selection, and report whether the field is safe to type into.
-    private func repairStrandedSelection(
-        on binding: FocusTracker.Binding, operand: Range<Int>?, toEnd: Bool, reading: Snapshotter.Reading
-    ) -> Bool {
-        let paragraphs = reading.snapshot.breaks != nil
-        // Unknown is not empty: a settle can fail *because* the read went dark.
-        guard let read = selection(of: binding.element, paragraphs: paragraphs) else { return false }
-        guard !read.caret else { return true }
-        // Still the operand: the app's own editor substitutes on the first keystroke.
-        if state.field.mode.isInserting, read.range == operand { return true }
-        var side: ParagraphBreaks.Side?
-        var snapshot: FieldSnapshot?
-        if let marked = read.marked {
-            side = Snapshotter.paragraphSide(of: marked, upper: false)
-            // An edit, or a caret Linear drew or took away, leaves the run's snapshot describing other text.
-            snapshot = AX.value(of: binding.element) == reading.value ? reading.snapshot : Snapshotter.snapshot(
-                of: binding.element, capabilities: binding.capabilities, anchor: nil, cursor: state.field.cursor,
-                chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
-                sampling: sampling, known: emptyParagraphs, knownUnreachable: unreachable
-            ).snapshot
-        }
-        let collapse = PhysicalPlanner.collapse(
-            read.range, side: side, paragraphs: paragraphs, snapshot: snapshot, toEnd: toEnd, profile: binding.capabilities
-        )
-        let settled = executor.execute(collapse, on: binding.element, state: &state, paragraphs: paragraphs)
-        // Keys the field ignored fail their settle, and a write lane then writes the start as it was read.
-        if !settled, binding.capabilities.has(.writeSelection) {
-            let asRead = PhysicalPlanner.collapse(read.range, paragraphs: paragraphs, profile: binding.capabilities)
-            executor.execute(asRead, on: binding.element, state: &state, paragraphs: paragraphs)
-        }
-        // The write that stranded this may be the one that lies, so confirm.
-        return becomesCaret(binding.element, paragraphs: paragraphs)
-    }
-
-    /// Whether the selection reads as a caret within 100 ms: Chromium shows a write or key milliseconds after it is sent,
-    /// and a command typed ahead would plan on the selection still shown (LIN-1931).
-    private func becomesCaret(_ element: AXUIElement, paragraphs: Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(0.1)
-        while let read = selection(of: element, paragraphs: paragraphs) {
-            if read.caret || Date() >= deadline { return read.caret }
-            Thread.sleep(forTimeInterval: 0.003)
-        }
-        return false
-    }
-
-    /// In field offsets, through the markers (`marked`) in a text-content field, where a selected paragraph break is no caret.
-    private func selection(
-        of element: AXUIElement, paragraphs: Bool
-    ) -> (range: Range<Int>, caret: Bool, marked: AX.MarkedSelection?)? {
-        guard paragraphs, let marked = Snapshotter.markedSelection(of: element) else {
-            return AX.selectedRange(of: element).map { ($0.location..<($0.location + $0.length), $0.length == 0, nil) }
-        }
-        return (marked.range, marked.isCollapsed, marked)
-    }
 }
 
 // MARK: - The loop's host
@@ -651,15 +451,22 @@ extension Controller {
 
         unowned let controller: Controller
         let binding: FocusTracker.Binding
+        /// The command's number, and where its keys go; an engage key has neither of its own.
         let seq: UInt64
+        let destination: KeyDestination?
 
         /// When the current landing attempt started, which its deadline counts from.
         private var landingStart = Date()
+        /// The epoch the command ran in, its snapshot's generated text, and its run, harvested before a cleanup's plans reset it.
+        private var epoch: UInt64 = 0
+        private var generated = 0
+        private var evidence = Executor.RunEvidence()
 
-        init(controller: Controller, binding: FocusTracker.Binding, seq: UInt64) {
+        init(controller: Controller, binding: FocusTracker.Binding, seq: UInt64, destination: KeyDestination? = nil) {
             self.controller = controller
             self.binding = binding
             self.seq = seq
+            self.destination = destination
         }
 
         var loop: CommandLoop<Host> {
@@ -668,6 +475,8 @@ extension Controller {
         }
 
         var state: VimState { controller.state }
+
+        var profile: CapabilityProfile { binding.capabilities }
 
         var buttonEvents: UInt32 { Controller.buttonEvents() }
 
@@ -678,9 +487,152 @@ extension Controller {
         func refuse(_ reason: CommandLoop<Host>.Refusal) {
             NSSound.beep()
             switch reason {
+            case .composing(let completed):
+                Diag.dropped(controller.tracker.epoch, seq, command: completed.command, reason: "composing")
             case .undoLanding(let completed):
                 Diag.dropped(controller.tracker.epoch, seq, command: completed.command, reason: "undo-landing")
+            case .uncommitted:
+                break
             }
+        }
+
+        // MARK: Input methods
+
+        func engage(_ token: String) -> Composition.Engage? {
+            guard let method = InputSource.selectedMethod() else { return nil }
+            let start = DispatchTime.now().uptimeNanoseconds
+            var answers: [Composition] = []
+            let engaged = Composition.engage(token, read: {
+                answers.append(CompositionReads.answer(of: binding, method: method, letter: controller.letterAt))
+                return answers[answers.count - 1]
+            }, commit: {
+                answers.append(CompositionReads.commit(on: binding, method: method))
+                return answers[answers.count - 1]
+            })
+            Diag.engaged(controller.tracker.epoch, key: token, method: method, answers: answers, engaged, since: start)
+            return engaged
+        }
+
+        func passToInputMethod() {
+            controller.monitor.markInsertLogLossy()
+        }
+
+        var compositionRead: (() -> Composition)? {
+            guard let method = InputSource.selectedMethod() else { return nil }
+            let (binding, letter) = (binding, controller.letterAt)
+            return { CompositionReads.answer(of: binding, method: method, letter: letter) }
+        }
+
+        // MARK: The command
+
+        mutating func postingKeys<T>(_ body: (inout Host) -> T) -> T {
+            controller.executor.destination = destination
+            defer { controller.executor.destination = nil }
+            return body(&self)
+        }
+
+        mutating func snapshot(anchor: Int?) -> CommandLoop<Host>.Reading {
+            let reading = Snapshotter.snapshot(
+                of: binding.element,
+                capabilities: binding.capabilities,
+                anchor: anchor,
+                cursor: controller.state.field.cursor,
+                chromium: binding.isChromium,
+                model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
+                sampling: controller.sampling,
+                known: controller.emptyParagraphs,
+                knownUnreachable: controller.unreachable
+            )
+            if reading.emptyParagraphs != controller.emptyParagraphs, let memo = reading.emptyParagraphs {
+                Diag.emptyParagraphs(controller.tracker.epoch, seq, memo)
+            }
+            controller.emptyParagraphs = reading.emptyParagraphs
+            if reading.unreachable != controller.unreachable, let memo = reading.unreachable {
+                Diag.unreachable(controller.tracker.epoch, seq, memo)
+            }
+            controller.unreachable = reading.unreachable
+            if reading.sampled {
+                controller.sampling.sampled(
+                    markers: reading.markers, evidence: reading.observed.evidence, text: reading.reads.text,
+                    plain: reading.reads.plain
+                )
+            }
+            controller.fieldBreaks = reading.snapshot.breaks
+            generated = reading.generated
+            return CommandLoop.Reading(
+                snapshot: reading.snapshot, observed: reading.observed, value: reading.value, generated: reading.generated > 0
+            )
+        }
+
+        func missedRoutes(under offsets: OffsetsAnswer) -> Set<Route> {
+            controller.missedRoutes(on: binding, under: offsets)
+        }
+
+        mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?) {
+            epoch = controller.tracker.epoch
+            let executed = controller.executor.execute(
+                plan, on: binding.element, state: &controller.state, paragraphs: paragraphs, generated: generated
+            )
+            evidence = controller.executor.lastRun
+            return (executed, evidence.abortedAt)
+        }
+
+        func record(
+            _ completed: RawMonitor.Completed, logical: LogicalPlan, planned: PhysicalPlanner.Planning,
+            from before: VimState.Mode, reading: CommandLoop<Host>.Reading, executed: Bool
+        ) {
+            Diag.command(
+                epoch, seq,
+                command: completed.command,
+                from: before, to: controller.state.field.mode,
+                plan: planned.plan,
+                rejection: planned.rejection,
+                bell: Controller.bellReason(logical),
+                executed: executed,
+                evidence: evidence,
+                insertPayload: completed.insertPayload,
+                emptyLines: reading.snapshot.valueGap,
+                foldedLength: reading.snapshot.foldedLength,
+                generated: generated
+            )
+            // After the record, as the republish a lesson causes re-enters the tracker.
+            controller.learn(from: evidence, observed: reading.observed, on: binding, epoch: epoch, seq: seq)
+        }
+
+        // MARK: The cleanup after a failed command
+
+        /// In field offsets, through the markers in a text-content field, where a selected paragraph break is no caret.
+        func selectionRead(paragraphs: Bool) -> CommandLoop<Host>.Selection? {
+            guard paragraphs, let marked = Snapshotter.markedSelection(of: binding.element) else {
+                return AX.selectedRange(of: binding.element).map {
+                    CommandLoop.Selection(range: $0.location..<($0.location + $0.length), caret: $0.length == 0, marked: nil)
+                }
+            }
+            return CommandLoop.Selection(range: marked.range, caret: marked.isCollapsed, marked: marked)
+        }
+
+        func side(of marked: AX.MarkedSelection) -> ParagraphBreaks.Side? {
+            Snapshotter.paragraphSide(of: marked, upper: false)
+        }
+
+        func value() -> String? {
+            AX.value(of: binding.element)
+        }
+
+        @discardableResult
+        func runAside(_ plan: PhysicalPlan, paragraphs: Bool) -> Bool {
+            controller.executor.execute(plan, on: binding.element, state: &controller.state, paragraphs: paragraphs)
+        }
+
+        /// Whether the selection reads as a caret within 100 ms: Chromium shows a write or key milliseconds after it is sent,
+        /// and a command typed ahead would plan on the selection still shown (LIN-1931).
+        func becomesCaret(paragraphs: Bool) -> Bool {
+            let deadline = Date().addingTimeInterval(0.1)
+            while let read = selectionRead(paragraphs: paragraphs) {
+                if read.caret || Date() >= deadline { return read.caret }
+                Thread.sleep(forTimeInterval: 0.003)
+            }
+            return false
         }
 
         // MARK: The landing after `u`

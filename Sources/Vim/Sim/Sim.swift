@@ -1,13 +1,10 @@
-/// A simulated host: an in-memory text field plus the full engine loop.
+/// A simulated field: an in-memory text field that the `CommandLoop` runs commands against, as it does a real field through the
+/// Controller.
 ///
-/// The Sim plays the runtime's role against a fake field — it feeds tokens
-/// through the monitor, plans against its own text/selection, interprets
-/// the physical steps by string surgery, verifies settles against itself,
-/// and hands commits to the reducer. That closes the loop entirely in pure
-/// code: end-to-end goldens of the form
-/// `(text, caret, keystrokes) → (text′, caret′, state′)` run under
-/// `make test`, and later the flight recorder can replay through the same
-/// machine.
+/// The Sim feeds tokens through the monitor and hands each command to the loop, interprets the physical steps by string surgery,
+/// verifies settles against itself, and hands commits to the reducer. That closes the loop entirely in pure code: end-to-end
+/// goldens of the form `(text, caret, keystrokes) → (text′, caret′, state′)` run under `make test`, and later the flight recorder
+/// can replay through the same machine.
 ///
 /// It executes lane-A/B AX and clipboard steps exactly — including the
 /// modeled pasteboard, written by `clipboardCut`/`clipboardCopy` and read
@@ -240,7 +237,7 @@ public struct Sim {
     /// The last snapshot's, to convert the drawn cursor at unbind.
     private var fieldBreaks: ParagraphBreaks?
 
-    /// The last discoveries, kept as the Controller keeps them.
+    /// The last snapshot's discoveries, found again when the text changes.
     private var foundEmptyParagraphs: EmptyParagraphs.Memo?
     private var foundUnreachable: UnreachableLines.Memo?
 
@@ -285,23 +282,7 @@ public struct Sim {
         case .visual: mode = .visual
         case .insert, .replace: mode = .insert
         }
-        // The Controller's engage path, against the modeled input method.
-        if mode == .insert, inputMethod, token == "<Esc>" || token == "<C-[>" {
-            switch Composition.engage(token, read: { composition }, commit: {
-                if !ignoresCommit { composing = nil }
-                return failsReadAfterCommit ? .unknown : composition
-            }) {
-            case .normal:
-                break
-            case .passThrough:
-                monitor.markInsertLogLossy()
-                cancelComposition()
-                return
-            case .refuse:
-                bells += 1
-                return
-            }
-        }
+        if mode == .insert, token == "<Esc>" || token == "<C-[>", CommandLoop.engage(token, host: &self) != nil { return }
         switch monitor.feed(token, mode: mode, clicks: mode == .insert ? nil : buttonEvents) {
         case .pending, .cancelled:
             break
@@ -311,17 +292,7 @@ public struct Sim {
             if token == "<Esc>" { cancelComposition() }
             applyTyping(token)
         case .command(let completed):
-            guard mode == .insert || !inputMethod || Composition.runs(completed.command, read: { composition }) else {
-                bells += 1
-                return
-            }
-            // The Controller's, read before the landing a `u` left, whose keys go where the command's do.
-            destination = KeyDestination(pid: 0, presses: buttonEvents, active: true)
-            departure = nil
-            appActive = true
-            defer { destination = nil }
-            guard CommandLoop.landsPending(completed, host: &self) else { return }
-            run(completed)
+            CommandLoop.command(completed, mode: mode, host: &self)
         }
     }
 
@@ -405,111 +376,13 @@ public struct Sim {
     }
 }
 
-// MARK: - The runtime loop
+// MARK: - The fake field's keys and typing
 
 private extension Sim {
-    mutating func run(_ completed: RawMonitor.Completed) {
-        let command = completed.command
-        let logical = LogicalPlanner.plan(command, state: state)
-        var anchor: Int?
-        var visual = false
-        if case .visual(let context) = state.field.mode {
-            (anchor, visual) = (context.anchor, true)
-        }
-        var memo = foundEmptyParagraphs
-        var unreachable = foundUnreachable
-        func snapshot() -> (built: (snapshot: FieldSnapshot, memo: EmptyParagraphs.Memo?, unreachable: UnreachableLines.Memo?),
-                            observed: Learning.Observation, value: String?) {
-            var (reads, observed) = read()
-            let built = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
-                FieldSnapshot.build(
-                    reads, capabilities: profile, answer: observed.after, anchor: anchor, cursor: state.field.cursor, memo: memo,
-                    unreachable: unreachable
-                )
-            }
-            return (built, observed, shownValue)
-        }
-        snapshotting = true
-        var (built, observed, value) = snapshot()
-        snapshotting = false
-        // The Snapshotter waits for the caret drawn at a code span's end that ends a paragraph, whose `<br>` moves offsets.
-        let caret = selection.lowerBound
-        if drawsLate, built.snapshot.breaks != nil, !built.snapshot.holdsDrawnCaret, selection.isEmpty,
-           isCodeEdge(caret, start: false), TextModel(text).lineBreak(of: caret) == caret {
-            (built, observed, value) = snapshot()
-        }
-        foundEmptyParagraphs = built.memo
-        foundUnreachable = built.unreachable
-        let snapshot = built.snapshot
-        fieldBreaks = snapshot.breaks
-        let missed = learner.map { $0.strikes.missed(judgedUnder: observed.after, app: $0.versions.app) } ?? []
-        let planned = PhysicalPlanner.planning(logical, snapshot: snapshot, missed: missed, visual: visual)
-        let physical = planned.plan
-        let before = state.field.mode
-
-        captures = [:]
-        let abortedAt = execute(physical.steps, generated: showsPlaceholder)
-        abortedStep = abortedAt.map { physical.steps[$0] }
-        // After the hygiene below, as the Controller's is.
-        defer { learn(from: observed) }
-        guard abortedAt == nil else {
-            // Abort hygiene, mirroring the Controller down to the stand-down.
-            if planned.abortedAtTextCheck(abortedAt) {
-                if !unreadableSelection, !readsCaret(paragraphs: snapshot.breaks != nil) {
-                    executeAside(PhysicalPlanner.collapse(readSelection, misread: true, toEnd: planned.collapsesToEnd, profile: profile))
-                }
-                if state.field.mode.isInserting {
-                    state = VimReducer.reduce(state, .setMode(before.nonVisual))
-                }
-            } else if !repairStrandedSelection(operand: planned.operand, toEnd: planned.collapsesToEnd, snapshot: snapshot,
-                                               value: value),
-                      state.field.mode.isInserting {
-                state = VimReducer.reduce(state, .setMode(before.nonVisual))
-            }
-            // The monitor drained the payload it will never offer again.
-            if let payload = completed.insertPayload, !state.field.mode.isInserting {
-                CommandLoop.closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &self)
-            }
-            CommandLoop.recordChange(for: command, from: before, mutated: physical.mutatesText, aborted: true, host: &self)
-            return
-        }
-
-        if let payload = completed.insertPayload {
-            CommandLoop.closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &self)
-        }
-
-        CommandLoop.recordChange(for: command, from: before, mutated: physical.mutatesText, host: &self)
-        // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
-        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
-            CommandLoop.landUndo(from: text, value: value, host: &self)
-        }
-    }
-
     /// An undo held past the Controller's wait shows now.
     mutating func releaseHeldHistory() {
         for chord in heldHistory where !ignoredChords.contains(chord) { _ = press(chord) }
         heldHistory = []
-    }
-
-    /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.
-    mutating func repairStrandedSelection(
-        operand: Range<Int>?, toEnd: Bool, snapshot: FieldSnapshot, value: String?
-    ) -> Bool {
-        guard !unreadableSelection else { return false }   // unknown is not empty
-        let paragraphs = snapshot.breaks != nil
-        guard !readsCaret(paragraphs: paragraphs) else { return true }
-        if state.field.mode.isInserting, readSelection == operand { return true }
-        let read = readSelection
-        // As the Controller: the markers answer for the side, and the field is read again once `AXValue` has changed.
-        let marked = paragraphs && (markers || emptyParagraphs)
-        let collapse = PhysicalPlanner.collapse(
-            read, side: marked ? chromium.side(selection.lowerBound) : nil, paragraphs: paragraphs,
-            snapshot: marked ? (shownValue == value ? snapshot : snapshotAside()) : nil, toEnd: toEnd, profile: profile
-        )
-        if !executeAside(collapse), profile.has(.writeSelection) {
-            executeAside(PhysicalPlanner.collapse(read, paragraphs: paragraphs, profile: profile))
-        }
-        return readsCaret(paragraphs: paragraphs)
     }
 
     /// As the Controller reads a caret: through the markers where it reads paragraphs, where selected breaks alone are no caret.
@@ -540,6 +413,7 @@ private extension Sim {
 // MARK: - The loop's host
 
 extension Sim: CommandHost {
+    typealias Marked = Void
     typealias Witness = Void
     typealias RunRecord = Void
 
@@ -549,6 +423,111 @@ extension Sim: CommandHost {
 
     mutating func refuse(_ reason: CommandLoop<Sim>.Refusal) {
         bells += 1
+    }
+
+    // MARK: Input methods
+
+    mutating func engage(_ token: String) -> Composition.Engage? {
+        guard inputMethod else { return nil }
+        return Composition.engage(token, read: { composition }, commit: {
+            if !ignoresCommit { composing = nil }
+            return failsReadAfterCommit ? .unknown : composition
+        })
+    }
+
+    mutating func passToInputMethod() {
+        monitor.markInsertLogLossy()
+        cancelComposition()
+    }
+
+    var compositionRead: (() -> Composition)? {
+        guard inputMethod else { return nil }
+        let composition = composition
+        return { composition }
+    }
+
+    // MARK: The command
+
+    /// The keys go to the fake field until `focusLeaves` says otherwise.
+    mutating func postingKeys<T>(_ body: (inout Sim) -> T) -> T {
+        destination = KeyDestination(pid: 0, presses: buttonEvents, active: true)
+        departure = nil
+        appActive = true
+        defer { destination = nil }
+        return body(&self)
+    }
+
+    mutating func snapshot(anchor: Int?) -> CommandLoop<Sim>.Reading {
+        var memo = foundEmptyParagraphs
+        var unreachable = foundUnreachable
+        func reading() -> (built: (snapshot: FieldSnapshot, memo: EmptyParagraphs.Memo?, unreachable: UnreachableLines.Memo?),
+                           observed: Learning.Observation, value: String?) {
+            var (reads, observed) = read()
+            let built = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
+                FieldSnapshot.build(
+                    reads, capabilities: profile, answer: observed.after, anchor: anchor, cursor: state.field.cursor, memo: memo,
+                    unreachable: unreachable
+                )
+            }
+            return (built, observed, shownValue)
+        }
+        snapshotting = true
+        var (built, observed, value) = reading()
+        snapshotting = false
+        // The Snapshotter waits for the caret drawn at a code span's end that ends a paragraph, whose `<br>` moves offsets.
+        let caret = selection.lowerBound
+        if drawsLate, built.snapshot.breaks != nil, !built.snapshot.holdsDrawnCaret, selection.isEmpty,
+           isCodeEdge(caret, start: false), TextModel(text).lineBreak(of: caret) == caret {
+            (built, observed, value) = reading()
+        }
+        foundEmptyParagraphs = built.memo
+        foundUnreachable = built.unreachable
+        fieldBreaks = built.snapshot.breaks
+        return CommandLoop.Reading(snapshot: built.snapshot, observed: observed, value: value, generated: showsPlaceholder)
+    }
+
+    func missedRoutes(under offsets: OffsetsAnswer) -> Set<Route> {
+        learner.map { $0.strikes.missed(judgedUnder: offsets, app: $0.versions.app) } ?? []
+    }
+
+    mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?) {
+        captures = [:]
+        let abortedAt = execute(plan.steps, generated: generated)
+        abortedStep = abortedAt.map { plan.steps[$0] }
+        return (abortedAt == nil, abortedAt)
+    }
+
+    mutating func record(
+        _ completed: RawMonitor.Completed, logical: LogicalPlan, planned: PhysicalPlanner.Planning, from before: VimState.Mode,
+        reading: CommandLoop<Sim>.Reading, executed: Bool
+    ) {
+        learn(from: reading.observed)
+    }
+
+    // MARK: The cleanup after a failed command
+
+    func selectionRead(paragraphs: Bool) -> CommandLoop<Sim>.Selection? {
+        guard !unreadableSelection else { return nil }
+        let marked = paragraphs && (markers || emptyParagraphs)
+        return CommandLoop.Selection(range: readSelection, caret: readsCaret(paragraphs: paragraphs), marked: marked ? () : nil)
+    }
+
+    func side(of marked: Void) -> ParagraphBreaks.Side? {
+        chromium.side(selection.lowerBound)
+    }
+
+    func value() -> String? {
+        shownValue
+    }
+
+    @discardableResult
+    mutating func runAside(_ plan: PhysicalPlan, paragraphs: Bool) -> Bool {
+        executeAside(plan)
+    }
+
+    /// The fake field shows a write as it is made.
+    func becomesCaret(paragraphs: Bool) -> Bool {
+        readsCaret(paragraphs: paragraphs)
     }
 
     // MARK: The landing after `u`
@@ -916,7 +895,7 @@ private extension Sim {
         }
     }
 
-    /// Runs a repair or release, keeping the command's evidence, which the Controller harvests before them; false when a step failed.
+    /// Runs a cleanup, landing or release plan, keeping the command's evidence for its lesson; false when a step failed.
     @discardableResult
     mutating func executeAside(_ plan: PhysicalPlan) -> Bool {
         let evidence = attribution
