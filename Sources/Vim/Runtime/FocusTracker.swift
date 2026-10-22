@@ -395,7 +395,7 @@ public final class FocusTracker {
     private static func documentWindow(
         of element: AXUIElement, report: CapabilityReport
     ) -> AXUIElement? {
-        FocusTransition.windowIsDocument(report.entries[.fieldIsSession]) ? AX.window(of: element) : nil
+        report.windowIsDocument ? AX.window(of: element) : nil
     }
 
     /// The forced fallback: no engageable element anywhere, but the
@@ -481,7 +481,8 @@ public final class FocusTracker {
             pid: binding.pid,
             site: binding.surface.site,
             forcedWindow: binding.isForced ? binding.windowID : nil,
-            session: binding.capabilityReport?.entries[.fieldIsSession],
+            everyFieldIsSession: binding.capabilityReport?.everyFieldIsSession ?? false,
+            windowIsDocument: binding.capabilityReport?.windowIsDocument ?? false,
             enclosing: binding.enclosing,
             window: binding.window
         )

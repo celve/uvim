@@ -5,11 +5,16 @@ let offBySeed = CapabilityReport.Entry(status: .unavailable, source: .seeded)
 let offByUser = CapabilityReport.Entry(status: .unavailable, source: .user)
 let onByDefault = CapabilityReport.Entry(status: .available, source: .probed)
 let onByUser = CapabilityReport.Entry(status: .available, source: .user)
+func reported(_ session: CapabilityReport.Entry?) -> CapabilityReport {
+    CapabilityReport(entries: session.map { [.fieldIsSession: $0] } ?? [:])
+}
 func field(
     _ element: Int, in page: Int? = nil, _ session: CapabilityReport.Entry = onByDefault, role: String = "AXTextArea", pid: Int32 = 1,
     window: Int? = nil
 ) -> Focus {
-    Focus(element: element, pid: pid, site: role, session: session, enclosing: page, window: window)
+    let report = reported(session)
+    return Focus(element: element, pid: pid, site: role, everyFieldIsSession: report.everyFieldIsSession,
+                 windowIsDocument: report.windowIsDocument, enclosing: page, window: window)
 }
 
 // End-to-end: `v` at 1 in a block, then focus takes the rule's own edge into its page or another block (LIN-1855).
@@ -97,9 +102,12 @@ func testFocusTransitions() {
     precondition(edge(field(1, in: 100, offBySeed, window: 7), field(2, in: 200, offBySeed, window: 7)) == .sameDocument)
     precondition(edge(field(1, in: 100, offBySeed, window: 7), field(2, offBySeed, window: 7)) == .sameDocument)
     precondition(edge(field(1, in: 100, offBySeed, window: 7), field(2, in: 100, offBySeed, window: 8)) == .sameDocument)
-    precondition(FocusTransition.windowIsDocument(offBySeed) && FocusTransition.windowIsDocument(offByUser))
-    precondition(!FocusTransition.windowIsDocument(offByPage) && !FocusTransition.windowIsDocument(onByUser)
-        && !FocusTransition.windowIsDocument(onByDefault) && !FocusTransition.windowIsDocument(nil))
+    precondition(reported(offBySeed).windowIsDocument && reported(offByUser).windowIsDocument)
+    precondition(!reported(offByPage).windowIsDocument && !reported(onByUser).windowIsDocument
+        && !reported(onByDefault).windowIsDocument && !reported(nil).windowIsDocument)
+    precondition(reported(onByUser).everyFieldIsSession && [onByDefault, offByUser, offBySeed, offByPage, nil].allSatisfy {
+        !reported($0).everyFieldIsSession
+    })
     let forcedApp = Focus(element: 0, pid: 1, site: "", forcedWindow: 7)
     precondition(edge(forcedApp, forcedApp) == .sameElement)
     precondition(edge(forcedApp, Focus(element: 0, pid: 1, site: "", forcedWindow: 8)) == .newSession)

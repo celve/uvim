@@ -71,7 +71,7 @@ func previousEdge(_ old: Focus?, _ new: Focus?) -> FocusTransition {
             : .newSession
     }
     if old.element == new.element { return .sameElement }
-    guard old.session?.status == .unavailable, new.session?.status == .unavailable, old.pid == new.pid, old.site == new.site,
+    guard old.windowIsDocument, new.windowIsDocument, old.pid == new.pid, old.site == new.site,
           let oldWindow = old.window, let newWindow = new.window, oldWindow == newWindow else { return .newSession }
     return .sameDocument
 }
@@ -81,11 +81,11 @@ func randomFocus(enclosing: Bool) -> Focus? {
     if coin(6) == 0 { return Focus(element: 0, pid: pid, site: "", forcedWindow: UInt32(coin(2))) }
     let page: Int? = enclosing && coin(2) == 0 ? 100 + Int(coin(2)) : nil
     // `main` denied `fieldIsSession` by a seed or the user only; the page's answer is new.
-    let session = [onByDefault, onByUser, offBySeed, offByUser, offByPage][Int(coin(enclosing ? 5 : 4))]
-    let window: Int? = FocusTransition.windowIsDocument(session) && coin(4) != 0 ? 7 + Int(coin(2)) : nil
+    let report = reported([onByDefault, onByUser, offBySeed, offByUser, offByPage][Int(coin(enclosing ? 5 : 4))])
+    let window: Int? = report.windowIsDocument && coin(4) != 0 ? 7 + Int(coin(2)) : nil
     return Focus(
         element: coin(3) == 0 ? 100 + Int(coin(2)) : Int(coin(4)), pid: pid, site: ["AXTextArea", "AXTextField"][Int(coin(2))],
-        session: session, enclosing: page, window: window
+        everyFieldIsSession: report.everyFieldIsSession, windowIsDocument: report.windowIsDocument, enclosing: page, window: window
     )
 }
 

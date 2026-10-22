@@ -81,36 +81,33 @@ public extension FocusTransition {
         public var site: Site
         /// A forced binding's window number, its only identity: its element stands in for the whole app.
         public var forcedWindow: UInt32?
-        /// How `fieldIsSession` resolved for the field.
-        public var session: CapabilityReport.Entry?
+        /// The user's On for `fieldIsSession`, which keeps every field a session of its own.
+        public var everyFieldIsSession: Bool
+        /// A seed or the user denied `fieldIsSession`, which speaks of every field in the window.
+        public var windowIsDocument: Bool
         /// The outermost editable field around the element, where the page names another one: a block editor's page.
         public var enclosing: Element?
         /// The element's window, read only where `windowIsDocument`.
         public var window: Element?
 
         public init(
-            element: Element, pid: Int32, site: Site, forcedWindow: UInt32? = nil, session: CapabilityReport.Entry? = nil,
-            enclosing: Element? = nil, window: Element? = nil
+            element: Element, pid: Int32, site: Site, forcedWindow: UInt32? = nil, everyFieldIsSession: Bool = false,
+            windowIsDocument: Bool = false, enclosing: Element? = nil, window: Element? = nil
         ) {
             self.element = element
             self.pid = pid
             self.site = site
             self.forcedWindow = forcedWindow
-            self.session = session
+            self.everyFieldIsSession = everyFieldIsSession
+            self.windowIsDocument = windowIsDocument
             self.enclosing = enclosing
             self.window = window
         }
 
         /// The outermost editable field of the element's document, itself included; nil where the user's On keeps every field a session.
         var document: Element? {
-            session == CapabilityReport.Entry(status: .available, source: .user) ? nil : enclosing ?? element
+            everyFieldIsSession ? nil : enclosing ?? element
         }
-    }
-
-    /// A seed or the user denying `fieldIsSession` speaks of every field in the window; a field's enclosing one speaks of its page alone.
-    static func windowIsDocument(_ session: CapabilityReport.Entry?) -> Bool {
-        guard let session, session.status == .unavailable else { return false }
-        return session.source != .probed
     }
 
     /// Which edge focus traversed: identity is the document, never the element, and anything unknown is a new session.
@@ -121,7 +118,7 @@ public extension FocusTransition {
         }
         if old.element == new.element { return .sameElement }
         if let document = old.document, document == new.document { return .sameDocument }
-        guard windowIsDocument(old.session), windowIsDocument(new.session), old.pid == new.pid, old.site == new.site,
+        guard old.windowIsDocument, new.windowIsDocument, old.pid == new.pid, old.site == new.site,
               let window = old.window, window == new.window else { return .newSession }
         return .sameDocument
     }
