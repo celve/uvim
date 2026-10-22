@@ -290,10 +290,21 @@ public final class Controller {
                 return true
             }
             // No command plans on the line above lines an undo put back while their landing cannot finish.
+            let resumed = pendingUndo != nil
             guard landPendingUndo(on: binding, seq: commandSeq, destination: &destination) else {
                 NSSound.beep()
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "undo-landing")
                 return true
+            }
+            // The landing's keys can carry the caret into another block of a block editor, as a command's chord can.
+            if resumed, !binding.isForced {
+                guard let focused = tracker.focusedField(),
+                      let moved = CFEqual(focused, binding.element) ? binding : tracker.retarget(to: focused, from: binding) else {
+                    NSSound.beep()
+                    drop(completed, commandSeq, "undo-landing-left")
+                    return true
+                }
+                binding = moved
             }
             run(completed, on: binding, seq: commandSeq, destination: destination)
             // Publish even on mid-plan aborts: a .setMode commit may have
