@@ -86,16 +86,22 @@ func testGeneratedText() {
     // Polls whose reads stay put while the field turns: a put landing as long as the placeholder, a box emptying under its caret.
     let putCheck = Expectation(landing: nil, length: 12)
     let emptyingCheck = Expectation(selection: 0..<0, length: 0)
-    for (check, met, generated, scans) in [(putCheck, true, true, [true, false, false]), (emptyingCheck, false, false, [false, true, true])] {
+    func passing(_ check: Expectation, length: Int, selection: Range<Int>? = 0..<0, answered: Bool = true, generated: Bool,
+                 scan: () -> Bool) -> Bool {
+        check.passes(selection: selection, length: length, selectedText: nil, side: nil, answered: answered, generated: generated,
+                     showsOnlyGeneratedText: scan)
+    }
+    for (check, generated, scans) in [(putCheck, true, [true, false, false]), (emptyingCheck, false, [false, true, true])] {
         var scanned = scans.makeIterator()
-        let verdicts = scans.map { _ in GeneratedText.judged(met, check, answered: true, generated: generated) { scanned.next()! } }
+        let verdicts = scans.map { _ in passing(check, length: 12, generated: generated) { scanned.next()! } }
         precondition(verdicts == [false, true, true], "\(check.traceFields)")
     }
     var scanned = false
-    precondition(GeneratedText.judged(true, putCheck, answered: true, generated: false) { scanned = true; return true } && !scanned)
-    precondition(!GeneratedText.judged(false, putCheck, answered: true, generated: true) { scanned = true; return true } && !scanned)
-    precondition(!GeneratedText.judged(false, emptyingCheck, answered: false, generated: true) { scanned = true; return true } && !scanned)
-    precondition(GeneratedText.judged(true, emptyingCheck, answered: true, generated: true) { scanned = true; return false } && !scanned)
+    precondition(passing(putCheck, length: 12, generated: false) { scanned = true; return true } && !scanned)
+    precondition(!passing(putCheck, length: 0, generated: true) { scanned = true; return true } && !scanned)
+    precondition(!passing(emptyingCheck, length: 12, selection: nil, answered: false, generated: true) { scanned = true; return true }
+                 && !scanned)
+    precondition(passing(emptyingCheck, length: 0, generated: true) { scanned = true; return false } && !scanned)
 
     for placeholderCaret in [0, 11, 12] {
         var empty = chatBox(reads: placeholderCaret)
