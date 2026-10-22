@@ -296,15 +296,11 @@ public final class Controller {
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "undo-landing")
                 return true
             }
-            // The landing's keys can carry the caret into another block of a block editor, as a command's chord can.
-            if resumed, !binding.isForced {
-                guard let focused = tracker.focusedField(),
-                      let moved = CFEqual(focused, binding.element) ? binding : tracker.retarget(to: focused, from: binding) else {
-                    NSSound.beep()
-                    drop(completed, commandSeq, "undo-landing-left")
-                    return true
-                }
-                binding = moved
+            // The landing's keys can carry the caret into another field, as a block editor's ⌘↓ does, so the command it held is refused.
+            if resumed, !binding.isForced, !(tracker.focusedField().map { CFEqual($0, binding.element) } ?? false) {
+                NSSound.beep()
+                drop(completed, commandSeq, "undo-landing-left")
+                return true
             }
             run(completed, on: binding, seq: commandSeq, destination: destination)
             // Publish even on mid-plan aborts: a .setMode commit may have
