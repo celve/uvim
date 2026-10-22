@@ -186,8 +186,7 @@ public final class Executor {
                 selection = marked.range
                 side = expectation.edge == nil ? nil : Snapshotter.paragraphSide(of: marked, upper: true)
                 // The caret Linear draws at a code span's edge is lines of its own, which no expected length counts.
-                if !expectation.converged(selection: selection, length: length, selectedText: text, side: side),
-                   let expected = expectation.length, let observed = length, (1...2).contains(observed - expected) {
+                if let expected = expectation.length, let observed = length, (1...2).contains(observed - expected) {
                     checkedLength = observed - Snapshotter.drawnLength(at: marked)
                 }
             }
