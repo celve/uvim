@@ -19,7 +19,7 @@ packages:
 settings:
   base:
     # `make publish` tags a release v<MARKETING_VERSION>, so bump it before publishing.
-    MARKETING_VERSION: "1.1.1"
+    MARKETING_VERSION: "1.1.2"
     # `make release` passes the commit count instead: Sparkle orders updates by CFBundleVersion.
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
