@@ -180,22 +180,18 @@ public extension PhysicalPlanner {
     /// The most keys one landing plan after `u` presses, as an app can take seconds to handle a long run of them (LIN-2104).
     static let undoKeys = 50
 
-    /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
-    /// `lines` are those lines, told from equal ones by `near`, the selection the undo left, where a landing moved the caret since;
-    /// `ending` holds them where they end the text, for `undoFallback`.
+    /// The logical planner's landing after `u` on the `lines` put back since `before`, told from equal ones by `near`, with `ending`
+    /// those lines where they end the text, for `undoFallback`; nil for any other undo.
     static func undoLanding(
         before: String, snapshot: FieldSnapshot, near: Range<Int>? = nil
     ) -> (plan: PhysicalPlan, ending: Range<Int>?, lines: Range<Int>)? {
         guard let model = Context(snapshot: snapshot).model,
               let (lines, ending) = model.restoredLines(from: before, selection: near ?? snapshot.selection) else { return nil }
-        var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
-        // Lines that end the text are reached from its end, as no key need cross the break above them, which Lark pulls a caret back over.
-        if ending {
-            let up = model.newlineCount(in: lines.lowerBound..<model.length)
-            moves = [.moveCaret(.motion(.fileEnd, count: 1))]
-                + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
-        }
-        let landing = planning(LogicalPlan(steps: moves + [.renderCursor]), snapshot: snapshot)
+        let logical = LogicalPlanner.undoLanding(
+            firstNonBlank: model.firstNonBlank(inLineOf: lines.lowerBound),
+            linesBelow: ending ? model.newlineCount(in: lines.lowerBound..<model.length) : nil
+        )
+        let landing = planning(logical, snapshot: snapshot)
         return landing.rejection == nil ? (landing.plan, ending ? lines : nil, lines) : nil
     }
 

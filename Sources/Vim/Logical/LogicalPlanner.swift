@@ -35,6 +35,15 @@ public enum LogicalPlanner {
         }
         return appendingCursorRender(planned, state: state)
     }
+
+    /// After `u`, Vim's cursor on the first non-blank of the first line the undo put back, at `firstNonBlank`.
+    static func undoLanding(firstNonBlank: Int, linesBelow: Int?) -> LogicalPlan {
+        guard let up = linesBelow else { return LogicalPlan(.moveCaret(.offset(firstNonBlank)), .renderCursor) }
+        // Lines that end the text are reached from its end, as no key need cross the break above them, which Lark pulls a caret back over.
+        let moves: [LogicalStep] = [.moveCaret(.motion(.fileEnd, count: 1))]
+            + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
+        return LogicalPlan(steps: moves + [.renderCursor])
+    }
 }
 
 // MARK: - Cursor rendering
