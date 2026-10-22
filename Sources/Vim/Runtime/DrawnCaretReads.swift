@@ -54,7 +54,7 @@ extension Snapshotter {
         var reading = reading
         if waitsForDrawnCaret(reading.snapshot, in: element) { reading = again(reading) }
         let deadline = Date().addingTimeInterval(0.4)
-        while Date() < deadline, lingers(reading.snapshot, in: element) {
+        while Date() < deadline, !AX.pastDeadline, lingers(reading.snapshot, in: element) {
             Thread.sleep(forTimeInterval: 0.02)
             reading = again(reading)
         }
@@ -69,7 +69,7 @@ extension Snapshotter {
               !marked.isCollapsed || atCodeEnd(marked) else { return false }
         let length = AX.attributes([kAXNumberOfCharactersAttribute], of: element).int(0)
         let deadline = Date().addingTimeInterval(0.2)
-        while Date() < deadline, AX.attributes([kAXNumberOfCharactersAttribute], of: element).int(0) == length {
+        while Date() < deadline, !AX.pastDeadline, AX.attributes([kAXNumberOfCharactersAttribute], of: element).int(0) == length {
             Thread.sleep(forTimeInterval: 0.01)
         }
         return true

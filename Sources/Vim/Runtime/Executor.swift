@@ -237,7 +237,10 @@ public final class Executor {
                 return false
             }
             let gap = Self.backToBack(chord) ? 0 : Synth.pairGap
-            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap, to: target) { stays() }
+            // `AX.until`'s deadline and keys stop a run too: a long one holds the keyboard and floods the app (LIN-2104).
+            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap, to: target) {
+                stays() && AX.spendKey()
+            }
             pressed += posted
             postedKeys = postedKeys || posted > 0
             return posted == count
@@ -309,8 +312,8 @@ public final class Executor {
             if record(outcome, expectation, at: index, hard: true) {
                 return true
             }
-            // Keys the focus left fail it without saying anything of this field.
-            if stays(fresh: true) { NSSound.beep() }
+            // Keys the focus left, and reads `AX.until`'s deadline refused, fail it without saying anything of this field.
+            if stays(fresh: true), !AX.pastDeadline { NSSound.beep() }
             return false
 
         case .softSettle(let expectation):
@@ -455,7 +458,7 @@ public final class Executor {
                 Snapshotter.showsOnlyGeneratedText(element)
             }
             if met { return outcome(true) }
-            guard Date() < deadline else { return outcome(false) }
+            guard Date() < deadline, !AX.pastDeadline else { return outcome(false) }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).
             Thread.sleep(forTimeInterval: 0.003)
         }

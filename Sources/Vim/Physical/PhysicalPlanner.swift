@@ -177,11 +177,17 @@ public enum PhysicalPlanner {
 // MARK: - Repair and release
 
 public extension PhysicalPlanner {
+    /// The most keys one landing plan after `u` presses, as an app can take seconds to handle a long run of them (LIN-2104).
+    static let undoKeys = 50
+
     /// After `u`, Vim's cursor on the first line the undo put back, against `before`, the text `u` found; nil for any other undo.
-    /// `ending` holds those lines where they end the text, for `undoFallback`.
-    static func undoLanding(before: String, snapshot: FieldSnapshot) -> (plan: PhysicalPlan, ending: Range<Int>?)? {
+    /// `lines` are those lines, told from equal ones by `near`, the selection the undo left, where a landing moved the caret since;
+    /// `ending` holds them where they end the text, for `undoFallback`.
+    static func undoLanding(
+        before: String, snapshot: FieldSnapshot, near: Range<Int>? = nil
+    ) -> (plan: PhysicalPlan, ending: Range<Int>?, lines: Range<Int>)? {
         guard let model = Context(snapshot: snapshot).model,
-              let (lines, ending) = model.restoredLines(from: before, selection: snapshot.selection) else { return nil }
+              let (lines, ending) = model.restoredLines(from: before, selection: near ?? snapshot.selection) else { return nil }
         var moves: [LogicalStep] = [.moveCaret(.offset(model.firstNonBlank(inLineOf: lines.lowerBound)))]
         // Lines that end the text are reached from its end, as no key need cross the break above them, which Lark pulls a caret back over.
         if ending {
@@ -190,7 +196,7 @@ public extension PhysicalPlanner {
                 + (up > 0 ? [.moveCaret(.motion(.line(.up, firstNonBlank: true), count: up))] : [])
         }
         let landing = planning(LogicalPlan(steps: moves + [.renderCursor]), snapshot: snapshot)
-        return landing.rejection == nil ? (landing.plan, ending ? lines : nil) : nil
+        return landing.rejection == nil ? (landing.plan, ending ? lines : nil, lines) : nil
     }
 
     /// After a failed landing, keys onto restored `lines` that end the text from where the cursor stopped above: ↓, → and ⌘↓, or,
@@ -201,18 +207,22 @@ public extension PhysicalPlanner {
         if let selection = snapshot.selection, selection.lowerBound >= lines.lowerBound { return nil }
         guard snapshot.selection != nil || !selecting else { return nil }
         let above = snapshot.selection?.lowerBound ?? lines.lowerBound - 1
-        let down = max(1, model.newlineCount(in: above..<lines.lowerBound))
+        // Ten of a kind at most, so ⌘↓, which reaches lines that end the text from anywhere, stays within a landing's keys (LIN-2104).
+        let down = min(10, max(1, model.newlineCount(in: above..<lines.lowerBound)))
         // ⌘↓ is the chord the blind lane presses for `G` unlearned; the settle, and the selecting stage after it, check what it did.
         // → collapses a selection at its end, where AppKit's ⌘→ took an undo's selection to its first line's end, the line above.
         let keys: [PhysicalStep] = selecting ? [.press(.selectDown, count: down), .press(.right, count: 1)] : [
             .press(.down, count: down),
-            .press(.right, count: max(1, model.graphemes(in: above..<lines.lowerBound))),
+            .press(.right, count: min(10, max(1, model.graphemes(in: above..<lines.lowerBound)))),
             .press(.documentEnd, count: 1),
         ]
         guard snapshot.selection != nil else { return PhysicalPlan(steps: keys) }
         context.selection = model.length..<model.length
+        // Each settle waits for its stage's last key, as ↓ alone can reach the lines with ⌘↓ on its way and the next command then
+        // writes under it; ⇧↓'s selection matches no caret until → collapses it.
         return PhysicalPlan(steps: keys + settle(
-            context, profile: snapshot.capabilities, hard: false, landing: .caretWithin(lines.lowerBound...model.length)
+            context, profile: snapshot.capabilities, hard: false,
+            landing: selecting ? .caretWithin(lines.lowerBound...model.length) : nil
         ))
     }
 

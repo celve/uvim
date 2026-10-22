@@ -7518,13 +7518,14 @@ precondition(PhysicalPlanner.undoLanding(
     before: "one\nthree", snapshot: FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 4..<8, length: 13)
 )?.ending == nil, "a middle line restored")
 let onLines = PhysicalStep.softSettle(Expectation(landing: .caretWithin(8...13), length: 13))
+let atEnd = PhysicalStep.softSettle(Expectation(selection: 13..<13, length: 13))
 let fallen = FieldSnapshot(capabilities: axProfile, text: "one\ntwo\nthree", selection: 7..<13, length: 13)
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: fallen)?.steps == [
-    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1), onLines,
+    .press(.down, count: 1), .press(.right, count: 1), .press(.documentEnd, count: 1), atEnd,
 ])
 let twoAbove = FieldSnapshot(capabilities: keyProfile, text: "one\ntwo\nthree", selection: 3..<3, length: 13)
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove)?.steps == [
-    .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), onLines,
+    .press(.down, count: 2), .press(.right, count: 5), .press(.documentEnd, count: 1), atEnd,
 ])
 precondition(PhysicalPlanner.undoFallback(onto: 8..<13, snapshot: twoAbove, selecting: true)?.steps == [
     .press(.selectDown, count: 2), .press(.right, count: 1), onLines,
@@ -7672,6 +7673,226 @@ for (rich, profile) in [(true, adding([.lineStartKey, .lineEndKey, .documentStar
     }
     unmeasured.type("ddudd")
     precondition(unmeasured.text == "one\ntwo\nthree", "without readLength, rich=\(rich): \(unmeasured.text.debugDescription)")
+}
+// An undo shown only after the wait lands at the next command, before it plans (LIN-2104).
+for (rich, shape) in [(false, Sim.UndoSelection.restored), (false, .throughBreak), (true, .toBreak), (true, .restored)] {
+    for (profile, nextWait) in [axProfile, writeKeys, keyProfile, readProfile].flatMap({ p in [(p, false), (p, true)] }) {
+        func late(_ text: String, _ caret: Int) -> Sim {
+            var sim = Sim(text: text, caret: caret, profile: profile)
+            sim.emulatesKeys = true
+            sim.undoSelection = shape
+            sim.undoesAfterWait = true
+            sim.undoesInNextWait = nextWait
+            if rich {
+                sim.emptyParagraphs = true
+                sim.readModel = .textContent
+                sim.webContent = true
+            }
+            return sim
+        }
+        let context = "\(shape) rich=\(rich) \(profile.has(.writeSelection) ? "writes" : "keys") nextWait=\(nextWait)"
+        let edits = profile.has(.writeSelection) || profile.has(.lineStartKey)
+        for (text, caret, keys, restoredLine, after) in [
+            (lastThree, 10, "ddu", 8, "one\ntwo"), ("one\ntwo\n  three", 15, "ddu", 10, "one\ntwo"),
+            (lastThree, 1, "jddu", 4, "one\nthree"), ("one\ntwo\n", 8, "ddu", 8, "one\ntwo"), ("one\n\nthree", 4, "ddu", 4, "one\nthree"),
+            ("one\n  two\nthree", 6, "ddu", 6, "one\nthree"), ("one\ntwo\nthree\nfour", 14, "dddduu", 14, "one\ntwo\nthree"),
+        ] {
+            var sim = late(text, caret)
+            sim.type(keys)
+            sim.type("^")
+            precondition(sim.caret == restoredLine, "\(keys)^ shown late in \(text.debugDescription), \(context): \(sim.caret)")
+            guard edits else { continue }
+            sim.type("dd")
+            precondition(sim.text == after, "\(keys)^dd shown late in \(text.debugDescription), \(context): \(sim.text.debugDescription)")
+        }
+        guard edits else { continue }
+        var clicked = late(lastThree, 10)
+        clicked.type("ddu")
+        clicked.click(at: 0)
+        clicked.type("dd")
+        precondition(clicked.text == "two\nthree", "ddu shown late, a click, dd, \(context): \(clicked.text.debugDescription)")
+        var nothing = late(lastThree, 4)
+        nothing.type("udd")
+        precondition(nothing.text == "one\nthree", "u with nothing to undo, dd, \(context): \(nothing.text.debugDescription)")
+    }
+}
+let restoredTail = (1...60).map { "l\($0)" }.joined(separator: "\n")
+for profile in [keyProfile, readProfile] {
+    // The fallback reaches lines that end the text from a caret far above them in a few keys, ⌘↓ among them.
+    let far = FieldSnapshot(capabilities: profile, text: restoredTail, selection: 0..<0, length: restoredTail.utf16.count)
+    for selecting in [false, true] {
+        let steps = PhysicalPlanner.undoFallback(onto: 119..<restoredTail.utf16.count, snapshot: far, selecting: selecting)?.steps ?? []
+        let pressed = steps.reduce(0) { if case .press(_, let count) = $1 { return $0 + count }; return $0 }
+        precondition(pressed > 0 && pressed <= 21 && (selecting || steps.contains(.press(.documentEnd, count: 1))), "\(steps)")
+        // Each stage's settle waits for its last key: ⌘↓'s text end, or a caret only → leaves.
+        guard case .softSettle(let last)? = steps.last else { preconditionFailure("\(steps)") }
+        let end = restoredTail.utf16.count
+        precondition(last.landing == (selecting ? .caretWithin(119...end) : .exact(end..<end)), "\(String(describing: last.landing))")
+    }
+    var tail = Sim(text: restoredTail, caret: 3, profile: profile)
+    tail.emulatesKeys = true
+    tail.type("dG")
+    let beforeU = tail.presses
+    tail.type("u")
+    precondition(tail.text == restoredTail && tail.caret >= 3 && tail.presses - beforeU <= PhysicalPlanner.undoKeys + 1,
+                 "dGu over 59 lines: \(tail.caret), \(tail.presses - beforeU) keys")
+    guard profile.has(.lineStartKey) else { continue }
+    tail.type("dd")
+    precondition(tail.text.hasPrefix("l1\n") && tail.text.split(separator: "\n").count == 59, "dGudd over 59 lines: \(tail.text.suffix(20))")
+}
+// A caret left far above the restored lines with ⌘↓ ignored: the fallbacks' ten ↓ at a time go on at the next command.
+for nextWait in [false, true] {
+    var far = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+    far.emulatesKeys = true
+    far.undoSelection = .start
+    far.type("dG")
+    far.ignoredChords = [.documentEnd]
+    far.undoesAfterWait = nextWait
+    far.type("u")
+    far.ignoredChords = []
+    far.type("dd")
+    let gone = (1...60).filter { !far.text.split(separator: "\n").contains("l\($0)"[...]) }
+    precondition(gone.count == 1 && gone[0] >= 40, "dG, u from a caret far above, dd removed \(gone)")
+}
+// A walk to a deep indent's first non-blank runs out of keys on the restored line, which the next command then acts on.
+let indented = "a\n" + String(repeating: " ", count: 70) + "b\nc"
+var indent = Sim(text: indented, caret: 2, profile: readProfile)
+indent.emulatesKeys = true
+indent.type("ddu")
+precondition(indent.text == indented && (2..<72).contains(indent.caret), "dd u under a deep indent: \(indent.caret)")
+indent.type("dd")
+precondition(indent.text == "a\nc", "dd u dd under a deep indent: \(indent.text.debugDescription)")
+// A `G` walked down from far above runs out of keys short of the restored last lines, and the fallback steps onto them.
+var short = Sim(text: restoredTail, caret: 207, profile: readProfile)
+short.emulatesKeys = true
+short.undoSelection = .start
+short.type("dGu")
+short.type("dd")
+let shortGone = (1...60).filter { !short.text.split(separator: "\n").contains("l\($0)"[...]) }
+precondition(shortGone.count == 1 && shortGone[0] >= 55, "dG u from far above, dd removed \(shortGone)")
+// A walk cut short with ↓ ignored leaves the fallbacks their own keys, and their → and ⌘↓ reach the restored lines.
+var cutWalk = Sim(text: restoredTail, caret: 3, profile: readProfile)
+cutWalk.emulatesKeys = true
+cutWalk.undoSelection = .start
+cutWalk.type("dG")
+cutWalk.ignoredChords = [.down]
+let beforeCut = cutWalk.presses
+cutWalk.type("u")
+cutWalk.ignoredChords = []
+precondition(cutWalk.presses - beforeCut <= PhysicalPlanner.undoKeys + 33, "u pressed \(cutWalk.presses - beforeCut) keys")
+cutWalk.type("dd")
+let cutRows = cutWalk.text.split(separator: "\n")
+precondition(cutRows.count == 59 && cutRows.first == "l1", "dG u dd, ↓ ignored during u: \(cutWalk.text.prefix(12).debugDescription)")
+// The deadline cutting `u`'s landing before its second fallback stage, every key ignored meanwhile: the next command still lands.
+var cutShort = Sim(text: "one\ntwo\nthree", caret: 8, profile: keyProfile)
+cutShort.emulatesKeys = true
+cutShort.type("dd")
+(cutShort.ignoredChords, cutShort.plansBeforeDeadline) = ([.documentEnd, .down, .right], 2)
+cutShort.type("u")
+(cutShort.ignoredChords, cutShort.plansBeforeDeadline) = ([], nil)
+cutShort.type("dd")
+precondition(cutShort.text == "one\ntwo", "dd u dd, the deadline cutting u's fallbacks: \(cutShort.text.debugDescription)")
+// Faults kept and the deadline cutting every attempt after two plans: the next attempt resumes at the second fallback, which lands.
+for profile in [keyProfile, readProfile] {
+    var kept = Sim(text: "one\ntwo\nthree", caret: 8, profile: profile)
+    kept.emulatesKeys = true
+    kept.type("dd")
+    (kept.ignoredChords, kept.holdsRightAtLineEnds, kept.plansBeforeDeadline) = ([.down, .documentEnd], true, 2)
+    kept.type("u")
+    let keptBells = kept.bells
+    kept.type("dd")
+    precondition(kept.text == "one\ntwo" && kept.bells == keptBells, "dd u dd, faults kept: \(kept.text.debugDescription)")
+}
+// After a pending miss, a read without the caret decides nothing: that command is refused, and the next one lands.
+var noCaretRead = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+noCaretRead.emulatesKeys = true
+noCaretRead.undoSelection = .start
+noCaretRead.type("dG")
+noCaretRead.ignoredChords = [.documentEnd]
+noCaretRead.type("u")
+(noCaretRead.ignoredChords, noCaretRead.unansweredSelectionsAside) = ([], 1)
+let noCaretReadBells = noCaretRead.bells
+noCaretRead.type("dd")
+precondition(noCaretRead.text == restoredTail && noCaretRead.bells == noCaretReadBells + 1, "dd after an unread caret: \(noCaretRead.text.count)")
+noCaretRead.type("dd")
+let noCaretReadGone = (1...60).filter { !noCaretRead.text.split(separator: "\n").contains("l\($0)"[...]) }
+precondition(noCaretReadGone.count == 1 && noCaretReadGone[0] >= 40, "dd after the unread one removed \(noCaretReadGone)")
+// A restored last line equal to the one above stays the target after the walk's keys moved the caret onto that one.
+for keep in [true, false] {
+    var twin = Sim(text: "a\na", caret: 2, profile: readProfile)
+    (twin.emulatesKeys, twin.undoSelection) = (true, .toBreak)
+    twin.type("dd")
+    (twin.ignoredChords, twin.holdsRightAtLineEnds, twin.plansBeforeDeadline) = ([.down, .documentEnd], true, 1)
+    twin.type("u")
+    if !keep { (twin.ignoredChords, twin.holdsRightAtLineEnds, twin.plansBeforeDeadline) = ([], false, nil) }
+    twin.type("iX")
+    twin.feed("<Esc>")
+    let twinRows = twin.text.split(separator: "\n", omittingEmptySubsequences: false)
+    precondition(twinRows.first == "a" && (keep || twinRows.last?.contains("X") == true), "dd u iX on twin lines: \(twin.text.debugDescription)")
+}
+// A field that ignores every landing key keeps the caret where `u` left it, and the next command runs there, as in #64.
+var ignoring = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+ignoring.emulatesKeys = true
+ignoring.undoSelection = .start
+ignoring.type("dG")
+ignoring.ignoredChords = [.up, .down, .left, .right, .lineStart, .lineEnd, .documentEnd, .selectDown, .paragraphStart, .paragraphEnd]
+ignoring.type("u")
+let rang = ignoring.bells
+ignoring.type("iX")
+precondition(ignoring.text == "X" + restoredTail && ignoring.bells == rang,
+             "\(ignoring.bells - rang) refused after a landing the field ignored: \(ignoring.text.prefix(20).debugDescription)")
+// Lark's field with ↓ and ⌘↓ ignored during `u`: the walk's check fails, and the fallbacks' ⇧↓ and → reach the restored lines.
+let larkLines = (1...30).map { "l\($0)\(zw)" }
+var larkTail = blankSim(larkLines, caret: 4, profile: keyProfile)
+(larkTail.webContent, larkTail.pullsBackFromLineEnds, larkTail.runsAreNewlines) = (true, true, true)
+larkTail.undoSelection = .toBreak
+larkTail.type("dG")
+larkTail.ignoredChords = [.down, .documentEnd]
+larkTail.type("u")
+larkTail.ignoredChords = []
+larkTail.type("iX")
+larkTail.feed("<Esc>")
+let larkRows = larkTail.text.split(separator: "\n", omittingEmptySubsequences: false)
+precondition(larkRows.count == 30 && larkRows[0] == "l1\(zw)" && larkRows.dropFirst().contains { $0.contains("X") },
+             "dG u iX over 29 Lark lines, ↓ and ⌘↓ ignored: \(larkTail.text.prefix(40).debugDescription)")
+var appKey = Sim(text: lastThree, caret: 10, profile: axProfile)
+appKey.undoesAfterWait = true
+appKey.type("ddu")
+appKey.feed("<Esc>")
+appKey.type("dd")
+precondition(appKey.text == "one\nthree", "a key the app gets drops the landing: \(appKey.text.debugDescription)")
+// The focus leaving stops a landing's keys, `u`'s or the next command's, and drops it; the command it held posts nothing.
+for by in [KeyDestination.Departure.app, .click] {
+    func row(_ sim: Sim) -> String { "l\(sim.text.prefix(sim.caret).filter { $0 == "\n" }.count + 1)" }
+    var leftU = Sim(text: restoredTail, caret: 147, profile: readProfile)
+    (leftU.emulatesKeys, leftU.undoSelection) = (true, .start)
+    leftU.type("dG")
+    let beforeLeftU = (leftU.presses, leftU.bells)
+    leftU.focusLeaves = (6, 0, by)
+    leftU.type("u")
+    precondition(leftU.presses - beforeLeftU.0 == 6 && leftU.departure == by && leftU.bells == beforeLeftU.1, "\(by) during u's landing")
+    let leftURow = row(leftU)
+    leftU.type("dd")
+    precondition(leftU.text.split(separator: "\n").count == 59 && !leftU.text.split(separator: "\n").contains(leftURow[...]),
+                 "dd after \(by) during u's landing on \(leftURow): \(leftU.text.suffix(12).debugDescription)")
+    var leftNext = Sim(text: restoredTail, caret: 147, profile: keyProfile)
+    (leftNext.emulatesKeys, leftNext.undoSelection, leftNext.undoesAfterWait) = (true, .start, true)
+    leftNext.type("dGu")
+    let beforeLeftNext = (leftNext.presses, leftNext.bells)
+    leftNext.focusLeaves = (3, 0, by)
+    leftNext.type("dd")
+    precondition(leftNext.presses - beforeLeftNext.0 == 3 && leftNext.departure == by && leftNext.text == restoredTail
+                 && leftNext.bells == beforeLeftNext.1, "\(by) during the next command's landing")
+    let leftNextRow = row(leftNext)
+    leftNext.type("dd")
+    precondition(!leftNext.text.split(separator: "\n").contains(leftNextRow[...]), "the dd after, on \(leftNextRow)")
+    var leftWrites = Sim(text: lastThree, caret: 10, profile: axProfile)
+    leftWrites.undoesAfterWait = true
+    leftWrites.type("ddu")
+    (leftWrites.swallowsLandingSelect, leftWrites.focusLeaves) = (true, (0, 0, by))
+    leftWrites.type("dd")
+    precondition(leftWrites.text == lastThree && leftWrites.departure == by && leftWrites.bells == 0,
+                 "\(by) during the landing before a dd that writes: \(leftWrites.text.debugDescription)")
 }
 
 // MARK: - Input methods (LIN-2053)

@@ -32,6 +32,9 @@ public struct Sim {
 
     /// The same lie about `AXSelectedTextRange` — what a `writeSelection` demotion leaves.
     public var swallowsSelect = false
+    /// The same, for the writes of a landing after `u` alone (LIN-2104).
+    public var swallowsLandingSelect = false
+    private var landing = false
 
     /// Settle and repair reads get no `AXSelectedTextRange`; the snapshot's read still answers.
     public var unreadableSelection = false
@@ -71,8 +74,8 @@ public struct Sim {
     private var inListGap: KeyModel.Stop?
 
     /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
-    /// in Chrome's textarea, up to that break in Chrome's rich text.
-    public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak }
+    /// in Chrome's textarea, up to that break in Chrome's rich text; `start`, a caret at the text's start, no host measured.
+    public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak, start }
     public var undoSelection = UndoSelection.restored
 
     /// Each undo group's text before it and its first edit's offset, newest last, as the host's undo stack holds them.
@@ -88,6 +91,25 @@ public struct Sim {
     /// Chrome's ⌘Z and ⇧⌘Z, as measured: a key sent right behind one runs first, and a read or write waits for it.
     public var undoesLate = false
     private var lateHistory: [Chord] = []
+
+    /// ⌘Z and ⇧⌘Z shown only after the Controller's wait for them ends, at the next key or click (LIN-2104).
+    public var undoesAfterWait = false
+    private var heldHistory: [Chord] = []
+
+    /// With `undoesAfterWait`, shown no sooner than the next command's own wait for them.
+    public var undoesInNextWait = false
+
+    /// How many plans of a landing after `u` run before the Controller's deadline cuts it, as slow live faults showed.
+    public var plansBeforeDeadline: Int?
+
+    /// Snapshots taken aside, as a landing's, whose `AXSelectedTextRange` goes unanswered, one fewer each.
+    public var unansweredSelectionsAside = 0
+
+    /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
+    private var pendingUndo: (before: String, value: String?, clicks: UInt32, route: Int, near: Range<Int>?)?
+
+    /// The presses a landing plan has left, as the Controller's `AX.keys`.
+    private var keysLeft: Int?
 
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
@@ -155,6 +177,9 @@ public struct Sim {
     /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
     public var pullsBackFromLineEnds = false
 
+    /// → from a caret at a line's end does nothing, as the live fault host's `right-at-line-end` (LIN-2104).
+    public var holdsRightAtLineEnds = false
+
     /// Lark's editor: ⌫ at a line's start deletes the line above's closing invisible characters with the `\n`, as its newline.
     public var runsAreNewlines = false
 
@@ -195,6 +220,8 @@ public struct Sim {
     /// Soft settles that missed, which ring nothing and abort nothing, as the executor logs them.
     public private(set) var softMisses = 0
     public private(set) var unsupportedSteps = 0
+    /// Keys pressed, ignored ones included.
+    public private(set) var presses = 0
 
     /// The last command's evidence from its settles.
     public private(set) var attribution = RunAttribution()
@@ -252,6 +279,7 @@ public struct Sim {
     }
 
     public mutating func feed(_ token: String) {
+        if !undoesInNextWait { releaseHeldHistory() }
         let mode: RawMonitor.Mode
         switch state.field.mode {
         case .normal: mode = .normal
@@ -279,6 +307,7 @@ public struct Sim {
         case .pending, .cancelled:
             break
         case .passthrough:
+            pendingUndo = nil
             if mode == .insert, inputMethod { monitor.markInsertLogLossy() }
             if token == "<Esc>" { cancelComposition() }
             applyTyping(token)
@@ -287,6 +316,18 @@ public struct Sim {
                 bells += 1
                 return
             }
+            // The Controller's, read before the landing a `u` left, whose keys go where the command's do.
+            destination = KeyDestination(pid: 0, presses: buttonEvents, active: true)
+            departure = nil
+            appActive = true
+            defer { destination = nil }
+            let resumed = pendingUndo != nil
+            guard landPendingUndo() else {
+                bells += 1
+                return
+            }
+            // The Controller's: a landing the focus left refuses the command it held.
+            if resumed, departs() { return }
             run(completed)
         }
     }
@@ -358,6 +399,7 @@ public struct Sim {
 
     /// A click in the bound field: the caret goes to `offset`, two button events are counted, and `Controller.pointerActed` runs.
     public mutating func click(at offset: Int) {
+        releaseHeldHistory()
         let caret = TextModel(text).clamp(offset)
         selection = caret..<caret
         atChipStart = false
@@ -374,10 +416,6 @@ public struct Sim {
 
 private extension Sim {
     mutating func run(_ completed: RawMonitor.Completed) {
-        destination = KeyDestination(pid: 0, presses: buttonEvents, active: true)
-        departure = nil
-        appActive = true
-        defer { destination = nil }
         let command = completed.command
         let logical = LogicalPlanner.plan(command, state: state)
         var anchor: Int?
@@ -448,15 +486,81 @@ private extension Sim {
         }
 
         recordChange(for: command, from: before, mutated: physical.mutatesText)
-        // A late ⌘Z has landed by now, as the Controller waits for it to.
-        if logical.steps.contains(.history(.undo)), let text = snapshot.text,
-           let landing = PhysicalPlanner.undoLanding(before: text, snapshot: snapshotAside()),
-           !executeAside(landing.plan), let lines = landing.ending {
-            for selecting in [false, true] {
-                guard let next = PhysicalPlanner.undoFallback(onto: lines, snapshot: snapshotAside(), selecting: selecting) else { break }
-                executeAside(next)
-            }
+        // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
+        if logical.steps.contains(.history(.undo)), let text = snapshot.text {
+            let clicks = buttonEvents
+            let landed = landRestoredLines(after: text, changed: shownValue != value)
+            if !landed.finished { pendingUndo = (text, value, clicks, landed.route, landed.near) }
         }
+    }
+
+    /// The Controller's twin, its deadline counted in plans.
+    mutating func landRestoredLines(
+        after before: String, changed: Bool, resumed: (route: Int, near: Range<Int>?)? = nil
+    ) -> (finished: Bool, route: Int, near: Range<Int>?) {
+        func answered(_ field: FieldSnapshot) -> Bool {
+            field.text != nil && (field.selection != nil || !field.capabilities.has(.readCaret))
+        }
+        let after = snapshotAside()
+        let near = resumed?.near ?? after.selection
+        let found = answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after, near: near) : nil
+        func distance(_ field: FieldSnapshot) -> Int? {
+            guard let found, let at = field.selection?.lowerBound else { return nil }
+            if at < found.lines.lowerBound { return found.lines.lowerBound - at }
+            return found.ending == nil ? max(0, at - found.lines.upperBound + 1) : 0
+        }
+        var finished = found == nil ? answered(after) && changed : resumed != nil && distance(after) == 0
+        var (field, route, routes) = (after, resumed?.route ?? 0, found?.ending == nil ? 1 : 3)
+        var plansLeft = plansBeforeDeadline ?? .max
+        while let found, !finished, route < routes, plansLeft > 0 {
+            guard let plan = route == 0 ? found.plan
+                    : PhysicalPlanner.undoFallback(onto: found.lines, snapshot: field, selecting: route == 2) else {
+                route += 1
+                continue
+            }
+            plansLeft -= 1
+            let ran = executeAside(plan, keys: PhysicalPlanner.undoKeys)
+            if departure != nil {
+                finished = true
+                break
+            }
+            if route == 0, ran || field.selection == nil {
+                finished = true
+                break
+            }
+            let now = snapshotAside()
+            guard answered(now), let from = distance(field), let to = distance(now) else { break }
+            field = now
+            if to == 0 { finished = true } else if to < from { break } else { route += 1 }
+        }
+        if found != nil, route >= routes { finished = true }
+        return (finished, route, found == nil ? resumed?.near : near)
+    }
+
+    /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since; false where it still
+    /// cannot finish, so the command is refused.
+    mutating func landPendingUndo() -> Bool {
+        guard let pending = pendingUndo else { return true }
+        guard pending.clicks == buttonEvents else {
+            pendingUndo = nil
+            return true
+        }
+        // The Controller waits here for a field still showing what `u` found.
+        if shownValue == pending.value { releaseHeldHistory() }
+        let landed = landRestoredLines(after: pending.before, changed: true, resumed: (pending.route, pending.near))
+        if landed.finished {
+            pendingUndo = nil
+        } else {
+            pendingUndo?.route = landed.route
+            pendingUndo?.near = landed.near
+        }
+        return landed.finished
+    }
+
+    /// An undo held past the Controller's wait shows now.
+    mutating func releaseHeldHistory() {
+        for chord in heldHistory where !ignoredChords.contains(chord) { _ = press(chord) }
+        heldHistory = []
     }
 
     /// The Controller's twin, and it must obey the host the same way; `value` is the `AXValue` the snapshot read.
@@ -572,7 +676,7 @@ private extension Sim {
             }
             switch step {
             case .setSelection(let range):
-                guard !swallowsSelect else { break }
+                guard !swallowsSelect, !(landing && swallowsLandingSelect) else { break }
                 let model = TextModel(text)
                 var lower = model.clamp(landing(range.lowerBound))
                 var upper = model.clamp(landing(range.upperBound))
@@ -601,9 +705,15 @@ private extension Sim {
                 var unsupported = false
                 for _ in 0..<count {
                     guard let takes = posts(menu: Self.menuChords.contains(chord)) else { return stop(steps, at: index) }
+                    // The executor's run stops where a landing's keys run out, as at the focus leaving.
+                    guard keysLeft != 0 else { return stop(steps, at: index) }
+                    keysLeft = keysLeft.map { $0 - 1 }
+                    presses += 1
                     postedKeys = true
                     guard takes, !unsupported, !ignoredChords.contains(chord) else { continue }
-                    if undoesLate, [.undo, .redo].contains(chord) {
+                    if undoesAfterWait, [.undo, .redo].contains(chord) {
+                        heldHistory.append(chord)
+                    } else if undoesLate, [.undo, .redo].contains(chord) {
                         lateHistory.append(chord)
                     } else if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
                                 || !press(reboundChords[chord] ?? chord) {
@@ -744,6 +854,10 @@ private extension Sim {
                 return true
             }
         }
+        if holdsRightAtLineEnds, chord == .right, selection.isEmpty,
+           TextModel(text).lineBreak(of: selection.lowerBound) == selection.lowerBound {
+            return true
+        }
         if chord == .deleteBack, runsAreNewlines, selection.isEmpty, selection.lowerBound > 0 {
             let model = TextModel(text)
             if model.lineStart(of: selection.lowerBound) == selection.lowerBound {
@@ -849,6 +963,10 @@ private extension Sim {
         let learned = learner
         defer { learner = learned }
         var (reads, observed) = read()
+        if unansweredSelectionsAside > 0 {
+            unansweredSelectionsAside -= 1
+            reads.field.plain = nil
+        }
         var memo = foundEmptyParagraphs
         var unreachable = foundUnreachable
         return FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
@@ -866,6 +984,14 @@ private extension Sim {
         let aborted = execute(plan.steps)
         attribution = evidence
         return aborted == nil
+    }
+
+    /// `executeAside` pressing at most `keys` keys, false where they ran out.
+    @discardableResult
+    mutating func executeAside(_ plan: PhysicalPlan, keys: Int) -> Bool {
+        (keysLeft, landing) = (keys, true)
+        defer { (keysLeft, landing) = (nil, false) }
+        return executeAside(plan)
     }
 
     /// The executor's check before each key: nil where the run stops there, else whether the field takes the key.
@@ -903,7 +1029,7 @@ private extension Sim {
         return departure != nil
     }
 
-    /// A run the focus left ends where the executor's does, with no evidence from that step.
+    /// A run the focus left, or whose landing keys ran out, ends where the executor's does, with no evidence from that step.
     mutating func stop(_ steps: [PhysicalStep], at index: Int) -> Int {
         drainResidency(of: steps, after: index)
         return index
@@ -946,8 +1072,9 @@ private extension Sim {
         case .restored: put.count
         case .throughBreak: toBreak.map { $0 + 1 } ?? put.count
         case .toBreak: toBreak ?? put.count
+        case .start: 0
         }
-        selection = group.at..<group.at + length
+        selection = undoSelection == .start ? 0..<0 : group.at..<group.at + length
         return true
     }
 
