@@ -7886,6 +7886,13 @@ for by in [KeyDestination.Departure.app, .click] {
     let leftNextRow = row(leftNext)
     leftNext.type("dd")
     precondition(!leftNext.text.split(separator: "\n").contains(leftNextRow[...]), "the dd after, on \(leftNextRow)")
+    var leftWrites = Sim(text: lastThree, caret: 10, profile: axProfile)
+    leftWrites.undoesAfterWait = true
+    leftWrites.type("ddu")
+    (leftWrites.swallowsLandingSelect, leftWrites.focusLeaves) = (true, (0, 0, by))
+    leftWrites.type("dd")
+    precondition(leftWrites.text == lastThree && leftWrites.departure == by && leftWrites.bells == 0,
+                 "\(by) during the landing before a dd that writes: \(leftWrites.text.debugDescription)")
 }
 
 // MARK: - Input methods (LIN-2053)

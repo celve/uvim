@@ -32,6 +32,9 @@ public struct Sim {
 
     /// The same lie about `AXSelectedTextRange` — what a `writeSelection` demotion leaves.
     public var swallowsSelect = false
+    /// The same, for the writes of a landing after `u` alone (LIN-2104).
+    public var swallowsLandingSelect = false
+    private var landing = false
 
     /// Settle and repair reads get no `AXSelectedTextRange`; the snapshot's read still answers.
     public var unreadableSelection = false
@@ -318,10 +321,13 @@ public struct Sim {
             departure = nil
             appActive = true
             defer { destination = nil }
+            let resumed = pendingUndo != nil
             guard landPendingUndo() else {
                 bells += 1
                 return
             }
+            // The Controller's: a landing the focus left refuses the command it held.
+            if resumed, departs() { return }
             run(completed)
         }
     }
@@ -670,7 +676,7 @@ private extension Sim {
             }
             switch step {
             case .setSelection(let range):
-                guard !swallowsSelect else { break }
+                guard !swallowsSelect, !(landing && swallowsLandingSelect) else { break }
                 let model = TextModel(text)
                 var lower = model.clamp(landing(range.lowerBound))
                 var upper = model.clamp(landing(range.upperBound))
@@ -983,8 +989,8 @@ private extension Sim {
     /// `executeAside` pressing at most `keys` keys, false where they ran out.
     @discardableResult
     mutating func executeAside(_ plan: PhysicalPlan, keys: Int) -> Bool {
-        keysLeft = keys
-        defer { keysLeft = nil }
+        (keysLeft, landing) = (keys, true)
+        defer { (keysLeft, landing) = (nil, false) }
         return executeAside(plan)
     }
 
