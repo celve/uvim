@@ -101,12 +101,11 @@ public struct Sim {
 
     /// How many plans of a landing after `u` run before the Controller's deadline cuts it, as slow live faults showed.
     public var plansBeforeDeadline: Int?
+    /// The plans the current landing attempt has left.
+    private var plansLeft: Int?
 
     /// Snapshots taken aside, as a landing's, whose `AXSelectedTextRange` goes unanswered, one fewer each.
     public var unansweredSelectionsAside = 0
-
-    /// What `u` found where its landing did not finish, which the next command lands from first, as the Controller's.
-    private var pendingUndo: (before: String, value: String?, clicks: UInt32, route: Int, near: Range<Int>?)?
 
     /// The presses a landing plan has left, as the Controller's `AX.keys`.
     private var keysLeft: Int?
@@ -230,13 +229,13 @@ public struct Sim {
     private var captures: [CaptureSlot: String] = [:]
 
     /// The field's button events so far, which the Controller reads from the window server.
-    private var buttonEvents: UInt32 = 0
+    private(set) var buttonEvents: UInt32 = 0
 
     /// The focus is the selection's lower bound.
     private var backward = false
 
-    /// The command that opened the current Insert session, recorded at its Esc.
-    private var openChange: (source: String, count: Int?, register: Register?, mutated: Bool)?
+    /// The open change for `.` and the landing pending after `u`.
+    var loop = CommandLoop<Sim>()
 
     /// The last snapshot's, to convert the drawn cursor at unbind.
     private var fieldBreaks: ParagraphBreaks?
@@ -307,7 +306,7 @@ public struct Sim {
         case .pending, .cancelled:
             break
         case .passthrough:
-            pendingUndo = nil
+            loop.pendingUndo = nil
             if mode == .insert, inputMethod { monitor.markInsertLogLossy() }
             if token == "<Esc>" { cancelComposition() }
             applyTyping(token)
@@ -321,13 +320,7 @@ public struct Sim {
             departure = nil
             appActive = true
             defer { destination = nil }
-            let resumed = pendingUndo != nil
-            guard landPendingUndo() else {
-                bells += 1
-                return
-            }
-            // The Controller's: a landing the focus left refuses the command it held.
-            if resumed, departs() { return }
+            guard CommandLoop.landsPending(completed, host: &self) else { return }
             run(completed)
         }
     }
@@ -393,7 +386,7 @@ public struct Sim {
         state.field = state.field.carried(across: transition)
         if transition.clearsChangeInFlight {
             monitor.reset()
-            openChange = nil
+            loop.openChange = nil
         }
     }
 
@@ -475,86 +468,21 @@ private extension Sim {
             }
             // The monitor drained the payload it will never offer again.
             if let payload = completed.insertPayload, !state.field.mode.isInserting {
-                closeInsertSession(payload, lossless: completed.insertPayloadIsLossless)
+                CommandLoop.closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &self)
             }
-            recordChange(for: command, from: before, mutated: physical.mutatesText, aborted: true)
+            CommandLoop.recordChange(for: command, from: before, mutated: physical.mutatesText, aborted: true, host: &self)
             return
         }
 
         if let payload = completed.insertPayload {
-            closeInsertSession(payload, lossless: completed.insertPayloadIsLossless)
+            CommandLoop.closeInsertSession(payload, lossless: completed.insertPayloadIsLossless, host: &self)
         }
 
-        recordChange(for: command, from: before, mutated: physical.mutatesText)
+        CommandLoop.recordChange(for: command, from: before, mutated: physical.mutatesText, host: &self)
         // A late ⌘Z has landed by now, as the Controller waits for it to, unless it shows only after that wait.
         if logical.steps.contains(.history(.undo)), let text = snapshot.text {
-            let clicks = buttonEvents
-            let landed = landRestoredLines(after: text, changed: shownValue != value)
-            if !landed.finished { pendingUndo = (text, value, clicks, landed.route, landed.near) }
+            CommandLoop.landUndo(from: text, value: value, host: &self)
         }
-    }
-
-    /// The Controller's twin, its deadline counted in plans.
-    mutating func landRestoredLines(
-        after before: String, changed: Bool, resumed: (route: Int, near: Range<Int>?)? = nil
-    ) -> (finished: Bool, route: Int, near: Range<Int>?) {
-        func answered(_ field: FieldSnapshot) -> Bool {
-            field.text != nil && (field.selection != nil || !field.capabilities.has(.readCaret))
-        }
-        let after = snapshotAside()
-        let near = resumed?.near ?? after.selection
-        let found = answered(after) ? PhysicalPlanner.undoLanding(before: before, snapshot: after, near: near) : nil
-        func distance(_ field: FieldSnapshot) -> Int? {
-            guard let found, let at = field.selection?.lowerBound else { return nil }
-            if at < found.lines.lowerBound { return found.lines.lowerBound - at }
-            return found.ending == nil ? max(0, at - found.lines.upperBound + 1) : 0
-        }
-        var finished = found == nil ? answered(after) && changed : resumed != nil && distance(after) == 0
-        var (field, route, routes) = (after, resumed?.route ?? 0, found?.ending == nil ? 1 : 3)
-        var plansLeft = plansBeforeDeadline ?? .max
-        while let found, !finished, route < routes, plansLeft > 0 {
-            guard let plan = route == 0 ? found.plan
-                    : PhysicalPlanner.undoFallback(onto: found.lines, snapshot: field, selecting: route == 2) else {
-                route += 1
-                continue
-            }
-            plansLeft -= 1
-            let ran = executeAside(plan, keys: PhysicalPlanner.undoKeys)
-            if departure != nil {
-                finished = true
-                break
-            }
-            if route == 0, ran || field.selection == nil {
-                finished = true
-                break
-            }
-            let now = snapshotAside()
-            guard answered(now), let from = distance(field), let to = distance(now) else { break }
-            field = now
-            if to == 0 { finished = true } else if to < from { break } else { route += 1 }
-        }
-        if found != nil, route >= routes { finished = true }
-        return (finished, route, found == nil ? resumed?.near : near)
-    }
-
-    /// The landing a `u` left to this command, before it plans, dropped where a click moved the caret since; false where it still
-    /// cannot finish, so the command is refused.
-    mutating func landPendingUndo() -> Bool {
-        guard let pending = pendingUndo else { return true }
-        guard pending.clicks == buttonEvents else {
-            pendingUndo = nil
-            return true
-        }
-        // The Controller waits here for a field still showing what `u` found.
-        if shownValue == pending.value { releaseHeldHistory() }
-        let landed = landRestoredLines(after: pending.before, changed: true, resumed: (pending.route, pending.near))
-        if landed.finished {
-            pendingUndo = nil
-        } else {
-            pendingUndo?.route = landed.route
-            pendingUndo?.near = landed.near
-        }
-        return landed.finished
     }
 
     /// An undo held past the Controller's wait shows now.
@@ -589,55 +517,6 @@ private extension Sim {
         paragraphs && (markers || emptyParagraphs) ? selection.isEmpty : readSelection.isEmpty
     }
 
-    /// Fold a just-ended Insert session into the dot memories.
-    mutating func closeInsertSession(_ payload: String, lossless: Bool) {
-        if !payload.isEmpty {
-            state = VimReducer.reduce(state, .setLastInsert(payload))
-        }
-        guard let change = openChange else { return }
-        openChange = nil
-        guard lossless else {
-            state = VimReducer.reduce(state, .setLastChange(.unreplayable))
-            return
-        }
-        // An empty session is still a change if its entry mutated (`ciw`, `o`).
-        guard change.mutated || !payload.isEmpty else { return }
-        state = VimReducer.reduce(state, .setLastChange(VimState.ChangeMemory(
-            body: change.source,
-            count: change.count,
-            register: change.register,
-            insert: payload
-        )))
-    }
-
-    /// Records a mutating command as `lastChange`, or opens a body if it entered Insert.
-    mutating func recordChange(
-        for command: RawCommand, from before: VimState.Mode, mutated: Bool, aborted: Bool = false
-    ) {
-        if case .repeat = command.intent { return }   // `.` must not overwrite what it replays
-        // An aborted plan mutated nothing, whatever its steps intended.
-        let changed = mutated && !aborted
-        if case .visual = before {
-            // Visual keys name a selection `.` cannot rebuild.
-            if changed || state.field.mode.isInserting {
-                state = VimReducer.reduce(state, .setLastChange(.unreplayable))
-            }
-            return
-        }
-        if state.field.mode.isInserting {
-            if openChange == nil {
-                openChange = (command.source, command.count, command.register, changed)
-            }
-            return
-        }
-        guard changed else { return }
-        state = VimReducer.reduce(state, .setLastChange(VimState.ChangeMemory(
-            body: command.source,
-            count: command.count,
-            register: command.register
-        )))
-    }
-
     /// Insert-mode passthrough typing lands in the fake field the way the
     /// real app would apply it.
     mutating func applyTyping(_ token: String) {
@@ -656,6 +535,85 @@ private extension Sim {
         if scalar.value < 0x20, token != "\n", token != "\r", token != "\t" { return }
         applyReplace(token == "\r" ? "\n" : token)
     }
+}
+
+// MARK: - The loop's host
+
+extension Sim: CommandHost {
+    typealias Witness = Void
+    typealias RunRecord = Void
+
+    mutating func commit(_ effect: VimEffect) {
+        state = VimReducer.reduce(state, effect)
+    }
+
+    mutating func refuse(_ reason: CommandLoop<Sim>.Refusal) {
+        bells += 1
+    }
+
+    // MARK: The landing after `u`
+
+    mutating func leftDuringLanding(_ completed: RawMonitor.Completed) -> Bool {
+        departs()
+    }
+
+    /// The landing's deadline counted in plans.
+    mutating func attemptLanding<T>(_ body: (inout Sim) -> T) -> T {
+        plansLeft = plansBeforeDeadline ?? .max
+        defer { plansLeft = nil }
+        return body(&self)
+    }
+
+    var witness: Void { () }
+
+    func isField(of witness: Void) -> Bool { true }
+
+    /// A late ⌘Z has landed by now, unless it shows only after the Controller's wait.
+    mutating func awaitUndo(from value: String?) -> (shown: String?, waited: (polls: Int, milliseconds: Int)?) {
+        (shownValue, nil)
+    }
+
+    /// The Controller waits here for a field still showing what `u` found.
+    mutating func awaitResumed(_ pending: CommandLoop<Sim>.PendingUndo) -> String? {
+        if shownValue == pending.value { releaseHeldHistory() }
+        return shownValue
+    }
+
+    /// Keys reach the fake field as they are pressed.
+    mutating func caretHolds() -> Bool { true }
+
+    /// The field as it reads now, for a repair or a landing: unlike a run's snapshot it teaches nothing and keeps no discovery.
+    mutating func snapshotAside() -> FieldSnapshot {
+        let learned = learner
+        defer { learner = learned }
+        var (reads, observed) = read()
+        if unansweredSelectionsAside > 0 {
+            unansweredSelectionsAside -= 1
+            reads.field.plain = nil
+        }
+        var memo = foundEmptyParagraphs
+        var unreachable = foundUnreachable
+        return FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
+            FieldSnapshot.build(
+                reads, capabilities: profile, answer: observed.after, anchor: nil, cursor: state.field.cursor, memo: memo,
+                unreachable: unreachable
+            )
+        }.snapshot
+    }
+
+    var pastDeadline: Bool { (plansLeft ?? 1) <= 0 }
+
+    /// The deadline the Sim counts cuts plans, never a read.
+    var readsRefused: Bool { false }
+
+    mutating func runLanding(_ plan: PhysicalPlan, paragraphs: Bool) -> (ran: Bool, departure: KeyDestination.Departure?) {
+        plansLeft = plansLeft.map { $0 - 1 }
+        return (executeAside(plan, keys: PhysicalPlanner.undoKeys), departure)
+    }
+
+    var lastRun: Void { () }
+
+    func traceLanding(_ trace: CommandLoop<Sim>.LandingTrace) {}
 }
 
 // MARK: - Physical step interpreter
@@ -956,25 +914,6 @@ private extension Sim {
             if span.upperBound > start { pieces.append(start..<span.upperBound) }
             return pieces
         }
-    }
-
-    /// The field as it reads now, for a repair: unlike a run's snapshot it teaches nothing and keeps no discovery.
-    mutating func snapshotAside() -> FieldSnapshot {
-        let learned = learner
-        defer { learner = learned }
-        var (reads, observed) = read()
-        if unansweredSelectionsAside > 0 {
-            unansweredSelectionsAside -= 1
-            reads.field.plain = nil
-        }
-        var memo = foundEmptyParagraphs
-        var unreachable = foundUnreachable
-        return FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
-            FieldSnapshot.build(
-                reads, capabilities: profile, answer: observed.after, anchor: nil, cursor: state.field.cursor, memo: memo,
-                unreachable: unreachable
-            )
-        }.snapshot
     }
 
     /// Runs a repair or release, keeping the command's evidence, which the Controller harvests before them; false when a step failed.
