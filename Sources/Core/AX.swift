@@ -21,7 +21,6 @@ public enum AX {
     }
 
     private static var deadline: Date?
-    private static var keys: Int?
 
     /// Runs `body` on the main thread with every read, write and key press past `deadline` failing at once, as an unanswered read
     /// does, so work that holds the keyboard ends then, but for one call already waiting on the app (LIN-2104).
@@ -34,22 +33,6 @@ public enum AX {
 
     /// Whether `until`'s deadline has passed, for a wait that polls.
     public static var pastDeadline: Bool { deadline.map { Date() >= $0 } ?? false }
-
-    /// Runs `body` pressing at most `count` keys inside `until`, so one plan queues no more keys than an app takes at once.
-    public static func keys<T>(_ count: Int, _ body: () -> T) -> T {
-        guard deadline != nil else { return body() }
-        let outer = keys
-        keys = count
-        defer { keys = outer }
-        return body()
-    }
-
-    /// Takes one press from `until` and `keys`; false where the deadline has passed or no key is left.
-    public static func spendKey() -> Bool {
-        guard !pastDeadline, keys != 0 else { return false }
-        keys = keys.map { $0 - 1 }
-        return true
-    }
 
     /// The focused UI element, resolved overlay-aware: if a non-activating
     /// accessory panel (Raycast/Spotlight) is frontmost and differs from the

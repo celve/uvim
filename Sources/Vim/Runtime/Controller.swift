@@ -722,9 +722,9 @@ extension Controller {
         var readsRefused: Bool { AX.pastDeadline }
 
         func runLanding(_ plan: PhysicalPlan, paragraphs: Bool) -> (ran: Bool, departure: KeyDestination.Departure?) {
-            let ran = AX.keys(PhysicalPlanner.undoKeys) {
-                controller.executor.execute(plan, on: binding.element, state: &controller.state, paragraphs: paragraphs)
-            }
+            let ran = controller.executor.execute(
+                plan, on: binding.element, state: &controller.state, paragraphs: paragraphs, keys: PhysicalPlanner.undoKeys
+            )
             return (ran, controller.executor.lastRun.departure)
         }
 

@@ -2,10 +2,9 @@ import AppKit
 import ApplicationServices
 import Core
 
-/// The real `PhysicalStep` interpreter — `Sim.execute`'s impure twin, and
-/// the **sole caller of `VimReducer`**: state changes happen only when
-/// execution reaches a commit step the run did not abort past (or when the
-/// controller routes a runtime-authored effect through `commit(_:state:)`).
+/// The runtime's side of `StepRunner`, which walks a plan for it as for the Sim: AX writes, posted keys and timed polls carry the
+/// steps out. The runtime's **sole caller of `VimReducer`**: state changes happen only when the run reaches a commit step it did
+/// not abort past (or when the controller routes a runtime-authored effect through `commit(_:state:)`).
 ///
 /// Runs synchronously on the main run loop: AX writes are fast, settle polls
 /// are bounded, and blocking the tap callback is precisely what serializes
@@ -14,6 +13,7 @@ import Core
 public final class Executor {
     public init() {}
 
+    /// The last run's, which a runtime-authored effect resolves against.
     private var captures: [CaptureSlot: String] = [:]
 
     /// Copy it right after `execute()`: hygiene plans reuse this executor and reset it.
@@ -60,309 +60,46 @@ public final class Executor {
     /// nil posts them to the front app, unchecked.
     var destination: KeyDestination?
 
-    /// This run posted a key, so its commits and its end check where the focus is.
-    private var postedKeys = false
-
     /// When the bound app's activity was last read: a read costs about 3 ms under a flood of keys, so keys in between share one.
     private var activeReadAt: UInt64 = 0
     private static let activeReadGap: UInt64 = 50_000_000
-
-    /// From the write a following settle verifies; cleared where attribution is.
-    private var lastWriteError: Int32?
-
-    /// The selection the last settle read, which says whether a native key did anything.
-    private var lastObserved: Range<Int>?
-    /// The length the last settle read, which says whether a text write did anything.
-    private var lastLength: Int?
-    /// Carets this run's settles kept, for `.between` landings.
-    private var kept: [Int: Int] = [:]
-
-    /// This run's last register paste, which only the settle straight after it can confirm.
-    private var pastedAt: Int?
-
-    /// That paste was in Chromium's rich text, where a settle after it that predicts nothing waits for it to land.
-    private var pasteWaits = false
-
-    /// The caret the paste began at, when it read as one.
-    private var pastedFrom: (range: Range<Int>, side: ParagraphBreaks.Side?)?
-
-    /// Settles straight after a ⇧← → that keeps a caret outside a code span, whose target showed before those two keys.
-    private var afterNormalizing: Set<Int> = []
-
-    /// The field selects in text content (Chromium rich text).
-    private var paragraphs = false
-
-    /// Keys pressed since the last settle.
-    private var pressed = 0
-
-    /// The field may show only generated text: the snapshot read it so, or a settle expected it empty (LIN-1930).
-    private var generated = false
 
     /// An `AXError` worth reporting: `.success` is not one.
     private static func rejection(_ error: AXError) -> Int32? {
         error == .success ? nil : error.rawValue
     }
 
-    /// Returns whether it converged, so the two call sites read as they did before.
-    @discardableResult
-    private func record(
-        _ outcome: SettleOutcome, _ expectation: Expectation, at index: Int, hard: Bool
-    ) -> Bool {
-        guard !outcome.converged else { return true }
-        lastRun.settleFailures.append(SettleFailure(
-            hard: hard,
-            index: index,
-            expectation: expectation,
-            observedSelection: outcome.observedSelection,
-            observedLength: outcome.observedLength,
-            observedSelectedText: outcome.observedSelectedText,
-            answered: outcome.answered,
-            polls: outcome.polls,
-            milliseconds: outcome.milliseconds,
-            writeError: lastWriteError
-        ))
-        return false
-    }
-
-    /// Pastes land up to 250 ms late: a settle after one that predicts nothing waits for the caret to stay off its start.
-    private func awaitPaste(_ expectation: Expectation, at index: Int, on element: AXUIElement) {
-        guard pastedAt == index - 1, pasteWaits, expectation.landing == nil, expectation.length == nil,
-              expectation.selectedText == nil else { return }
-        let deadline = Date().addingTimeInterval(0.25)
-        var moved = 0
-        while Date() < deadline {
-            // A caret Linear draws beside code reads as a selection, or elsewhere, for a moment, which is no landing.
-            if let from = pastedFrom, let marked = Snapshotter.markedSelection(of: element), marked.isCollapsed,
-               marked.range != from.range || Snapshotter.paragraphSide(of: marked, upper: true) != from.side {
-                moved += 1
-                if moved == 2 { return }
-            } else {
-                moved = 0
-            }
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-    }
-
-    /// Only a caret landing straight after the paste proves the target read it: a length can match before it lands.
-    private func confirmPaste(_ outcome: SettleOutcome, _ expectation: Expectation, at index: Int) {
-        guard pastedAt == index - 1, outcome.converged, expectation.landing != nil else { return }
-        PasteboardLoan.shared.landed()
-    }
-
-    /// Runs the plan in order, sparing residency when a step fails; returns whether every step ran.
+    /// Runs the plan in order, sparing residency when a step fails, pressing at most `keys` keys where it is given; returns
+    /// whether every step ran.
     @discardableResult
     public func execute(
-        _ plan: PhysicalPlan, on element: AXUIElement, state: inout VimState, paragraphs: Bool = false, generated: Bool = false
+        _ plan: PhysicalPlan, on element: AXUIElement, state: inout VimState, paragraphs: Bool = false, generated: Bool = false,
+        keys: Int? = nil
     ) -> Bool {
-        captures = [:]
-        pastedAt = nil
-        pasteWaits = false
-        pastedFrom = nil
-        lastRun = RunEvidence()
-        lastWriteError = nil
-        lastObserved = nil
-        lastLength = nil
-        self.paragraphs = paragraphs
-        self.generated = generated
-        pressed = 0
-        postedKeys = false
-        kept = [:]
-        let outside: [PhysicalStep] = [.press(.selectLeft, count: 1), .press(.right, count: 1)]
-        afterNormalizing = Set(plan.steps.indices.filter { $0 >= 2 && Array(plan.steps[$0 - 2..<$0]) == outside })
-        for (index, next) in plan.steps.enumerated() {
-            var step = next
-            if case .settle(let expectation) = next { step = .settle(expectation.resolving(kept)) }
-            let passed = perform(step, at: index, on: element, state: &state)
-            if passed, case .settle(let expectation) = step, let slot = expectation.keeps, let caret = lastObserved?.lowerBound {
-                kept[slot] = caret
-            }
-            let failure = passed ? nil : lastRun.settleFailures.last
-            if passed || lastRun.departure == nil {
-                lastRun.attribution.record(
-                    step, passed: passed, selection: lastObserved, length: lastLength,
-                    selectedText: failure?.observedSelectedText, writeError: failure?.writeError
-                )
-            }
-            switch step {
-            case .setSelection, .replaceSelection:
-                break
-            default:
-                // The settle consumes the error; any other step ends its reach.
-                lastWriteError = nil
-            }
-            guard passed else {
-                lastRun.abortedAt = index
-                // A second pass, not a `continue`: `perform` would re-post a blind keypress.
-                for survivor in plan.steps[(index + 1)...] {
-                    if case .commit(let effect) = survivor, effect.survivesAbort {
-                        commit(effect, state: &state)
-                    }
-                }
-                return false
-            }
+        var host = Host(executor: self, element: element, state: state, paragraphs: paragraphs, steps: plan.steps)
+        let run = StepRunner.run(plan.steps, generated: generated, keys: keys, host: &host)
+        state = host.state
+        captures = run.captures
+        var evidence = RunEvidence()
+        evidence.attribution = run.attribution
+        evidence.abortedAt = run.abortedAt
+        evidence.departure = run.departure
+        evidence.settleFailures = run.misses.map { miss in
+            SettleFailure(
+                hard: miss.failed, index: miss.index, expectation: miss.expectation,
+                observedSelection: miss.read.observedSelection, observedLength: miss.read.observedLength,
+                observedSelectedText: miss.read.observedSelectedText, answered: miss.read.answered, polls: miss.read.polls,
+                milliseconds: miss.read.milliseconds, writeError: miss.writeError
+            )
         }
-        // Keys after the last commit did what they did only if the focus stayed.
-        guard landed() else {
-            lastRun.abortedAt = max(0, plan.steps.count - 1)
-            return false
-        }
-        return true
+        lastRun = evidence
+        return run.abortedAt == nil
     }
 
     /// Runtime-authored effects (insert payloads, dot bodies) enter through
     /// the executor too, so the reducer keeps exactly one caller.
     public func commit(_ effect: VimEffect, state: inout VimState) {
         state = VimReducer.reduce(state, effect, captures: captures)
-    }
-
-    // MARK: - Steps
-
-    private func perform(
-        _ step: PhysicalStep, at index: Int, on element: AXUIElement, state: inout VimState
-    ) -> Bool {
-        switch step {
-        case .setSelection(let range):
-            lastWriteError = Self.rejection(
-                AX.setSelectedRange(CFRange(location: range.lowerBound, length: range.count), on: element)
-            )
-            return true
-
-        case .replaceSelection(let replacement):
-            lastWriteError = Self.rejection(AX.setSelectedText(replacement, on: element))
-            return true
-
-        case .press(let chord, let count):
-            guard let code = keyCode(for: chord.key) else {
-                NSSound.beep()
-                return false
-            }
-            let gap = Self.backToBack(chord) ? 0 : Synth.pairGap
-            // `AX.until`'s deadline and keys stop a run too: a long one holds the keyboard and floods the app (LIN-2104).
-            let posted = Synth.key(code, flags(for: chord.modifiers), times: count, gap: gap, to: target) {
-                stays() && AX.spendKey()
-            }
-            pressed += posted
-            postedKeys = postedKeys || posted > 0
-            return posted == count
-
-        case .typeText(let text):
-            guard stays() else { return false }
-            postedKeys = true
-            Synth.type(text, to: target)
-            return true
-
-        case .clipboardCut:
-            guard stays() else { return false }
-            postedKeys = true
-            // The pasteboard IS the register (clipboard=unnamed): post the
-            // cut and move on — nothing read back, silence on failure.
-            Synth.key(7, .maskCommand, to: target)   // kVK_ANSI_X
-            return true
-
-        case .clipboardCopy:
-            guard stays() else { return false }
-            postedKeys = true
-            Synth.key(8, .maskCommand, to: target)   // kVK_ANSI_C
-            return true
-
-        case .clipboardInsert(let content):
-            guard stays() else { return false }
-            if let content {
-                // No sleep before ⌘V: the app reads the pasteboard only as it handles the ⌘V, queued after the write.
-                PasteboardLoan.shared.put(content)
-                pastedAt = index
-                pasteWaits = paragraphs
-                pastedFrom = paragraphs ? Snapshotter.markedSelection(of: element).flatMap {
-                    $0.isCollapsed ? ($0.range, Snapshotter.paragraphSide(of: $0, upper: true)) : nil
-                } : nil
-            } else {
-                // Registers +/* and pasteboard markers paste what the user has there, not a register still on loan.
-                PasteboardLoan.shared.restore()
-            }
-            // The loan and the reads above take long enough for the focus to move.
-            guard stays() else {
-                if content != nil { PasteboardLoan.shared.restore() }
-                return false
-            }
-            postedKeys = true
-            Synth.commandV(to: target)
-            return true
-
-        case .captureSelectedText(let slot):
-            guard let text = AX.selectedText(of: element) else {
-                NSSound.beep()
-                return false
-            }
-            captures[slot] = text
-            return true
-
-        case .settle(let expectation):
-            awaitPaste(expectation, at: index, on: element)
-            var outcome = Self.settle(expectation, on: element, paragraphs: paragraphs, presses: pressed, generated: generated)
-            pressed = 0
-            if outcome.converged, afterNormalizing.contains(index) {
-                // Read again once the ⇧← → are in, so the next command never reads the selection between them.
-                Thread.sleep(forTimeInterval: 0.015)
-                outcome = Self.settle(expectation, on: element, paragraphs: paragraphs, generated: generated)
-            }
-            generated = !outcome.converged || expectation.metByEmptyField
-            lastObserved = outcome.observedSelection
-            lastLength = outcome.observedLength
-            confirmPaste(outcome, expectation, at: index)
-            if record(outcome, expectation, at: index, hard: true) {
-                return true
-            }
-            // Keys the focus left, and reads `AX.until`'s deadline refused, fail it without saying anything of this field.
-            if stays(fresh: true), !AX.pastDeadline { NSSound.beep() }
-            return false
-
-        case .softSettle(let expectation):
-            // The same poll, so a later AX read sees the blind action land; a timeout proceeds silently unless ⌫ was ignored.
-            awaitPaste(expectation, at: index, on: element)
-            let outcome = Self.settle(expectation, on: element, paragraphs: paragraphs, presses: pressed, generated: generated)
-            pressed = 0
-            generated = !outcome.converged || expectation.metByEmptyField
-            let ignored = !outcome.converged
-                && expectation.ignored(selection: outcome.observedSelection, length: outcome.observedLength)
-            lastObserved = outcome.observedSelection
-            lastLength = outcome.observedLength
-            confirmPaste(outcome, expectation, at: index)
-            _ = record(outcome, expectation, at: index, hard: ignored)
-            if ignored, stays(fresh: true) { NSSound.beep() }
-            return !ignored
-
-        case .commit(let effect):
-            // Keys the focus left did only part of what this records, and only an effect that survives an abort then applies.
-            guard landed() else {
-                if effect.survivesAbort { commit(effect, state: &state) }
-                return false
-            }
-            commit(effect, state: &state)
-            return true
-
-        case .bell:
-            NSSound.beep()
-            return true
-        }
-    }
-
-    private var target: pid_t? { destination?.pid }
-
-    /// Whether the focus is still where the command was verified, read before every key; once not, the run says why.
-    private func stays(fresh: Bool = false) -> Bool {
-        if lastRun.departure == nil, var held = destination {
-            let now = DispatchTime.now().uptimeNanoseconds
-            let readsActive = fresh || now &- activeReadAt >= Self.activeReadGap
-            if readsActive { activeReadAt = now }
-            lastRun.departure = KeyDestinationReads.departure(of: &held, readsActive: readsActive)
-            destination = held
-        }
-        return lastRun.departure == nil
-    }
-
-    /// Whether the keys this run posted, if any, met the field with the focus still there.
-    private func landed() -> Bool {
-        postedKeys ? stays(fresh: true) : lastRun.departure == nil
     }
 
     /// The observed values ride every exit, so a timeout costs no extra round trip.
@@ -466,7 +203,7 @@ public final class Executor {
 
     // MARK: - Chord lowering (symbolic → hardware)
 
-    private func keyCode(for key: Key) -> CGKeyCode? {
+    static func keyCode(for key: Key) -> CGKeyCode? {
         switch key {
         case .arrowLeft: return 123
         case .arrowRight: return 124
@@ -498,7 +235,7 @@ public final class Executor {
         }
     }
 
-    private func flags(for modifiers: Modifiers) -> CGEventFlags {
+    static func flags(for modifiers: Modifiers) -> CGEventFlags {
         var flags: CGEventFlags = []
         if modifiers.contains(.shift) { flags.insert(.maskShift) }
         if modifiers.contains(.option) { flags.insert(.maskAlternate) }
@@ -506,4 +243,185 @@ public final class Executor {
         if modifiers.contains(.control) { flags.insert(.maskControl) }
         return flags
     }
+}
+
+// MARK: - The runner's host
+
+extension Executor {
+    /// One run's host for `StepRunner`: every AX write and read, posted key and wait of the runtime's.
+    @MainActor struct Host: @MainActor StepHost {
+        unowned let executor: Executor
+        let element: AXUIElement
+        /// The field selects in text content (Chromium rich text).
+        let paragraphs: Bool
+        var state: VimState
+        /// Settles straight after a ⇧← → that keeps a caret outside a code span, whose target showed before those two keys.
+        private let afterNormalizing: Set<Int>
+
+        /// Keys pressed since the last settle.
+        private var pressed = 0
+        /// The press under way, lowered.
+        private var key: (code: CGKeyCode, flags: CGEventFlags, gap: TimeInterval)?
+
+        /// This run's last register paste, which only the settle straight after it can confirm.
+        private var pastedAt: Int?
+        /// That paste was in Chromium's rich text, where a settle after it that predicts nothing waits for it to land.
+        private var pasteWaits = false
+        /// The caret the paste began at, when it read as one.
+        private var pastedFrom: (range: Range<Int>, side: ParagraphBreaks.Side?)?
+
+        init(executor: Executor, element: AXUIElement, state: VimState, paragraphs: Bool, steps: [PhysicalStep]) {
+            self.executor = executor
+            self.element = element
+            self.state = state
+            self.paragraphs = paragraphs
+            let outside: [PhysicalStep] = [.press(.selectLeft, count: 1), .press(.right, count: 1)]
+            afterNormalizing = Set(steps.indices.filter {
+                guard $0 >= 2, case .settle = steps[$0] else { return false }
+                return Array(steps[$0 - 2..<$0]) == outside
+            })
+        }
+
+        private var target: pid_t? { executor.destination?.pid }
+
+        func setSelection(_ range: Range<Int>) -> Int32? {
+            Executor.rejection(AX.setSelectedRange(CFRange(location: range.lowerBound, length: range.count), on: element))
+        }
+
+        func replaceSelection(_ replacement: String) -> Int32? {
+            Executor.rejection(AX.setSelectedText(replacement, on: element))
+        }
+
+        mutating func beginPress(_ chord: Chord) -> Bool {
+            guard let code = Executor.keyCode(for: chord.key) else { return false }
+            key = (code, Executor.flags(for: chord.modifiers), Executor.backToBack(chord) ? 0 : Synth.pairGap)
+            return true
+        }
+
+        mutating func sendKey(_ chord: Chord) {
+            guard let key else { return }
+            Synth.key(key.code, key.flags, gap: key.gap, to: target)
+            pressed += 1
+        }
+
+        func endPress(_ chord: Chord) {}
+
+        func typeText(_ text: String) {
+            Synth.type(text, to: target)
+        }
+
+        func cut() {
+            // The pasteboard IS the register (clipboard=unnamed): post the
+            // cut and move on — nothing read back, silence on failure.
+            Synth.key(7, .maskCommand, to: target)   // kVK_ANSI_X
+        }
+
+        func copy() {
+            Synth.key(8, .maskCommand, to: target)   // kVK_ANSI_C
+        }
+
+        mutating func paste(_ content: String?, at index: Int) -> KeyDestination.Departure? {
+            if let content {
+                // No sleep before ⌘V: the app reads the pasteboard only as it handles the ⌘V, queued after the write.
+                PasteboardLoan.shared.put(content)
+                pastedAt = index
+                pasteWaits = paragraphs
+                pastedFrom = paragraphs ? Snapshotter.markedSelection(of: element).flatMap {
+                    $0.isCollapsed ? ($0.range, Snapshotter.paragraphSide(of: $0, upper: true)) : nil
+                } : nil
+            } else {
+                // Registers +/* and pasteboard markers paste what the user has there, not a register still on loan.
+                PasteboardLoan.shared.restore()
+            }
+            // The loan and the reads above take long enough for the focus to move.
+            if let left = departure(fresh: false) {
+                if content != nil { PasteboardLoan.shared.restore() }
+                return left
+            }
+            Synth.commandV(to: target)
+            return nil
+        }
+
+        func selectedText() -> String? {
+            AX.selectedText(of: element)
+        }
+
+        mutating func settle(_ expectation: Expectation, at index: Int, generated: Bool) -> SettleOutcome {
+            awaitPaste(expectation, at: index)
+            var outcome = Executor.settle(
+                expectation, on: element, paragraphs: paragraphs, presses: pressed, generated: generated
+            )
+            pressed = 0
+            if outcome.converged, afterNormalizing.contains(index) {
+                // Read again once the ⇧← → are in, so the next command never reads the selection between them.
+                Thread.sleep(forTimeInterval: 0.015)
+                outcome = Executor.settle(expectation, on: element, paragraphs: paragraphs, generated: generated)
+            }
+            confirmPaste(outcome, expectation, at: index)
+            return outcome
+        }
+
+        /// Where the focus is, read before every key: the button presses each time, the app's activity when `fresh` or 50 ms on.
+        func departure(fresh: Bool) -> KeyDestination.Departure? {
+            guard var held = executor.destination else { return nil }
+            let now = DispatchTime.now().uptimeNanoseconds
+            let readsActive = fresh || now &- executor.activeReadAt >= Executor.activeReadGap
+            if readsActive { executor.activeReadAt = now }
+            let left = KeyDestinationReads.departure(of: &held, readsActive: readsActive)
+            executor.destination = held
+            return left
+        }
+
+        func departure(beforeKeyOf step: PhysicalStep) -> KeyDestination.Departure? {
+            departure(fresh: false)
+        }
+
+        /// `AX.until`'s deadline stops keys too: a long run holds the keyboard and floods the app (LIN-2104).
+        var keysPastDeadline: Bool { AX.pastDeadline }
+
+        mutating func commit(_ effect: VimEffect, captures: [CaptureSlot: String]) {
+            state = VimReducer.reduce(state, effect, captures: captures)
+        }
+
+        func bell() {
+            NSSound.beep()
+        }
+
+        /// Reads `AX.until`'s deadline refused fail a settle without saying anything of this field.
+        func refused(_ expectation: Expectation, _ read: SettleOutcome, soft: Bool) {
+            if soft || !AX.pastDeadline { NSSound.beep() }
+        }
+
+        /// Pastes land up to 250 ms late: a settle after one that predicts nothing waits for the caret to stay off its start.
+        private func awaitPaste(_ expectation: Expectation, at index: Int) {
+            guard pastedAt == index - 1, pasteWaits, expectation.landing == nil, expectation.length == nil,
+                  expectation.selectedText == nil else { return }
+            let deadline = Date().addingTimeInterval(0.25)
+            var moved = 0
+            while Date() < deadline {
+                // A caret Linear draws beside code reads as a selection, or elsewhere, for a moment, which is no landing.
+                if let from = pastedFrom, let marked = Snapshotter.markedSelection(of: element), marked.isCollapsed,
+                   marked.range != from.range || Snapshotter.paragraphSide(of: marked, upper: true) != from.side {
+                    moved += 1
+                    if moved == 2 { return }
+                } else {
+                    moved = 0
+                }
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
+
+        /// Only a caret landing straight after the paste proves the target read it: a length can match before it lands.
+        private func confirmPaste(_ outcome: SettleOutcome, _ expectation: Expectation, at index: Int) {
+            guard pastedAt == index - 1, outcome.converged, expectation.landing != nil else { return }
+            PasteboardLoan.shared.landed()
+        }
+    }
+}
+
+extension Executor.SettleOutcome: SettleRead {
+    var passed: Bool { converged }
+    var selection: Range<Int>? { observedSelection }
+    var length: Int? { observedLength }
+    var selectedText: String? { observedSelectedText }
 }

@@ -1,10 +1,10 @@
 /// A simulated field: an in-memory text field that the `CommandLoop` runs commands against, as it does a real field through the
 /// Controller.
 ///
-/// The Sim feeds tokens through the monitor and hands each command to the loop, interprets the physical steps by string surgery,
-/// verifies settles against itself, and hands commits to the reducer. That closes the loop entirely in pure code: end-to-end
-/// goldens of the form `(text, caret, keystrokes) → (text′, caret′, state′)` run under `make test`, and later the flight recorder
-/// can replay through the same machine.
+/// The Sim feeds tokens through the monitor and hands each command to the loop, carries out the physical steps `StepRunner`
+/// walks by string surgery, verifies settles against itself, and hands commits to the reducer. That closes the loop entirely in
+/// pure code: end-to-end goldens of the form `(text, caret, keystrokes) → (text′, caret′, state′)` run under `make test`, and
+/// later the flight recorder can replay through the same machine.
 ///
 /// It executes lane-A/B AX and clipboard steps exactly — including the
 /// modeled pasteboard, written by `clipboardCut`/`clipboardCopy` and read
@@ -103,9 +103,6 @@ public struct Sim {
 
     /// Snapshots taken aside, as a landing's, whose `AXSelectedTextRange` goes unanswered, one fewer each.
     public var unansweredSelectionsAside = 0
-
-    /// The presses a landing plan has left, as the Controller's `AX.keys`.
-    private var keysLeft: Int?
 
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
@@ -208,6 +205,12 @@ public struct Sim {
     /// What the executor's read of the field's app says.
     private var appActive = true
 
+    /// The field takes the key the check before it let go: after the focus left, keys reach another field or no menu.
+    private var takesKey = true
+
+    /// A key of the press under way the Sim cannot emulate, which makes the rest of its keys no-ops.
+    private var pressUnsupported = false
+
     /// Keys the failed settles blamed, in order.
     public private(set) var blamed: [Capability] = []
 
@@ -223,7 +226,6 @@ public struct Sim {
     public private(set) var attribution = RunAttribution()
 
     private var monitor = RawMonitor()
-    private var captures: [CaptureSlot: String] = [:]
 
     /// The field's button events so far, which the Controller reads from the window server.
     private(set) var buttonEvents: UInt32 = 0
@@ -324,8 +326,7 @@ public struct Sim {
     /// unsupported), but their clipboard steps still deserve pure coverage.
     @discardableResult
     public mutating func perform(_ steps: [PhysicalStep]) -> Bool {
-        captures = [:]
-        return execute(steps) == nil
+        execute(steps) == nil
     }
 
     /// `Controller.rebind`'s pure twin: focus moved, and the transition says
@@ -491,7 +492,6 @@ extension Sim: CommandHost {
     }
 
     mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?) {
-        captures = [:]
         let abortedAt = execute(plan.steps, generated: generated)
         abortedStep = abortedAt.map { plan.steps[$0] }
         return (abortedAt == nil, abortedAt)
@@ -587,6 +587,8 @@ extension Sim: CommandHost {
 
     mutating func runLanding(_ plan: PhysicalPlan, paragraphs: Bool) -> (ran: Bool, departure: KeyDestination.Departure?) {
         plansLeft = plansLeft.map { $0 - 1 }
+        landing = true
+        defer { landing = false }
         return (executeAside(plan, keys: PhysicalPlanner.undoKeys), departure)
     }
 
@@ -595,144 +597,150 @@ extension Sim: CommandHost {
     func traceLanding(_ trace: CommandLoop<Sim>.LandingTrace) {}
 }
 
-// MARK: - Physical step interpreter
+// MARK: - The step runner's host
 
-private extension Sim {
-    /// The index of the step that ended the run, nil when every step ran; `generated` as the executor's.
-    mutating func execute(_ steps: [PhysicalStep], generated: Bool = false) -> Int? {
-        var kept: [Int: Int] = [:]
-        var postedKeys = false
-        var generated = generated
-        attribution = RunAttribution()
-        defer { landLateHistory() }
-        for (index, step) in steps.enumerated() {
-            if case .settle = step {} else { attribution.record(step) }
-            switch step {
-            case .press, .commit: break
-            default: landLateHistory()
-            }
-            switch step {
-            case .setSelection(let range):
-                guard !swallowsSelect, !(landing && swallowsLandingSelect) else { break }
-                let model = TextModel(text)
-                var lower = model.clamp(landing(range.lowerBound))
-                var upper = model.clamp(landing(range.upperBound))
-                // Written at a chip's start, a selection's end moves past the chip, and a caret stops the next arrow.
-                let atoms = chromium.atoms
-                if !range.isEmpty, atoms.contains(lower) { lower += 1 }
-                if !range.isEmpty, atoms.contains(upper) { upper += 1 }
-                selection = pulledBack(min(lower, upper)..<max(lower, upper))
-                atChipStart = selection.isEmpty && atoms.contains(lower)
-                // Measured, a caret written at a code span's start lands outside it, one at its end inside.
-                codeInside = selection.isEmpty && isCodeEdge(lower, start: false) && !isCodeEdge(lower, start: true)
-                atWrittenCodeEnd = codeInside
-                inListGap = nil
-                backward = false
-                coalescing = false
+extension Sim: StepHost {
+    /// A settle's read of the fake field, which answers what its expectation does not ask about too.
+    struct Read: SettleRead {
+        let passed: Bool
+        let selection: Range<Int>?
+        let length: Int?
+        let selectedText: String?
+    }
 
-            case .replaceSelection(let replacement):
-                if !swallowsReplace { applyReplace(replacement) }
+    // Each read or write first lands the ⌘Z Chrome runs late, as a key or a commit does not.
 
-            case .typeText(let typed):
-                guard let takes = posts(menu: false) else { return stop(steps, at: index) }
-                postedKeys = true
-                if takes { applyReplace(typed) }
-
-            case .press(let chord, let count):
-                var unsupported = false
-                for _ in 0..<count {
-                    guard let takes = posts(menu: Self.menuChords.contains(chord)) else { return stop(steps, at: index) }
-                    // The executor's run stops where a landing's keys run out, as at the focus leaving.
-                    guard keysLeft != 0 else { return stop(steps, at: index) }
-                    keysLeft = keysLeft.map { $0 - 1 }
-                    presses += 1
-                    postedKeys = true
-                    guard takes, !unsupported, !ignoredChords.contains(chord) else { continue }
-                    if undoesAfterWait, [.undo, .redo].contains(chord) {
-                        heldHistory.append(chord)
-                    } else if undoesLate, [.undo, .redo].contains(chord) {
-                        lateHistory.append(chord)
-                    } else if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
-                                || !press(reboundChords[chord] ?? chord) {
-                        unsupportedSteps += 1
-                        unsupported = true
-                    }
-                }
-                if !undoesLate || ![.undo, .redo].contains(chord) { landLateHistory() }
-
-            case .clipboardCut:
-                guard let takes = posts(menu: true) else { return stop(steps, at: index) }
-                postedKeys = true
-                if takes {
-                    pasteboard = TextModel(text).substring(selection)
-                    applyReplace("")
-                }
-
-            case .clipboardCopy:
-                guard let takes = posts(menu: true) else { return stop(steps, at: index) }
-                postedKeys = true
-                if takes { pasteboard = TextModel(text).substring(selection) }
-
-            case .clipboardInsert(let content):
-                guard let takes = posts(menu: true) else { return stop(steps, at: index) }
-                postedKeys = true
-                if takes { applyReplace(content ?? pasteboard ?? "") }
-
-            case .captureSelectedText(let slot):
-                captures[slot] = readSelectedText
-
-            case .settle(let planned):
-                let expectation = planned.resolving(kept)
-                let (passed, observed, length) = settles(expectation, generated: generated)
-                generated = !passed || expectation.metByEmptyField
-                if !passed, departs() { return stop(steps, at: index) }
-                attribution.record(.settle(expectation), passed: passed, selection: observed, length: length,
-                                   selectedText: readSelectedText)
-                if !passed {
-                    settleFailures += 1
-                    if let key = expectation.blamed(observed: observed) { blamed.append(key) }
-                    drainResidency(of: steps, after: index)
-                    return index   // the rest dies, like the real executor
-                }
-                if let slot = expectation.keeps, let caret = observed?.lowerBound { kept[slot] = caret }
-
-            case .softSettle(let expectation):
-                // A miss proceeds, as the blind step before it may be an unsupported no-op here, but an ignored ⌫ fails.
-                let (passed, observed, length) = settles(expectation, generated: generated)
-                let read = Self.asRead(expectation, observed, length)
-                if !passed, expectation.ignored(selection: read.selection, length: read.length) {
-                    if departs() { return stop(steps, at: index) }
-                    settleFailures += 1
-                    drainResidency(of: steps, after: index)
-                    return index
-                }
-                if !passed { softMisses += 1 }
-                generated = !passed || expectation.metByEmptyField
-
-            case .commit(let effect):
-                // The executor's check before a commit: keys the focus left did only part of what this records.
-                if destination != nil, postedKeys, departs() {
-                    if effect.survivesAbort { state = VimReducer.reduce(state, effect, captures: captures) }
-                    return stop(steps, at: index)
-                }
-                state = VimReducer.reduce(state, effect, captures: captures)
-
-            case .bell:
-                bells += 1
-            }
-        }
-        // The executor's check after the last step, for keys after the last commit.
-        if destination != nil, postedKeys, departs() {
-            return max(0, steps.count - 1)
-        }
+    mutating func setSelection(_ range: Range<Int>) -> Int32? {
+        landLateHistory()
+        guard !swallowsSelect, !(landing && swallowsLandingSelect) else { return nil }
+        let model = TextModel(text)
+        var lower = model.clamp(landing(range.lowerBound))
+        var upper = model.clamp(landing(range.upperBound))
+        // Written at a chip's start, a selection's end moves past the chip, and a caret stops the next arrow.
+        let atoms = chromium.atoms
+        if !range.isEmpty, atoms.contains(lower) { lower += 1 }
+        if !range.isEmpty, atoms.contains(upper) { upper += 1 }
+        selection = pulledBack(min(lower, upper)..<max(lower, upper))
+        atChipStart = selection.isEmpty && atoms.contains(lower)
+        // Measured, a caret written at a code span's start lands outside it, one at its end inside.
+        codeInside = selection.isEmpty && isCodeEdge(lower, start: false) && !isCodeEdge(lower, start: true)
+        atWrittenCodeEnd = codeInside
+        inListGap = nil
+        backward = false
+        coalescing = false
         return nil
     }
 
-    /// A settle's read as the executor's: an attribute its expectation does not ask for is not read.
-    static func asRead(
-        _ expectation: Expectation, _ selection: Range<Int>?, _ length: Int
-    ) -> (selection: Range<Int>?, length: Int?) {
-        (expectation.landing == nil ? nil : selection, expectation.length == nil ? nil : length)
+    mutating func replaceSelection(_ replacement: String) -> Int32? {
+        landLateHistory()
+        if !swallowsReplace { applyReplace(replacement) }
+        return nil
+    }
+
+    mutating func beginPress(_ chord: Chord) -> Bool {
+        pressUnsupported = false
+        return true
+    }
+
+    mutating func sendKey(_ chord: Chord) {
+        presses += 1
+        guard takesKey, !pressUnsupported, !ignoredChords.contains(chord) else { return }
+        if undoesAfterWait, [.undo, .redo].contains(chord) {
+            heldHistory.append(chord)
+        } else if undoesLate, [.undo, .redo].contains(chord) {
+            lateHistory.append(chord)
+        } else if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
+                    || !press(reboundChords[chord] ?? chord) {
+            unsupportedSteps += 1
+            pressUnsupported = true
+        }
+    }
+
+    mutating func endPress(_ chord: Chord) {
+        if !undoesLate || ![.undo, .redo].contains(chord) { landLateHistory() }
+    }
+
+    mutating func typeText(_ typed: String) {
+        landLateHistory()
+        if takesKey { applyReplace(typed) }
+    }
+
+    mutating func cut() {
+        landLateHistory()
+        guard takesKey else { return }
+        pasteboard = TextModel(text).substring(selection)
+        applyReplace("")
+    }
+
+    mutating func copy() {
+        landLateHistory()
+        if takesKey { pasteboard = TextModel(text).substring(selection) }
+    }
+
+    mutating func paste(_ content: String?, at index: Int) -> KeyDestination.Departure? {
+        landLateHistory()
+        if takesKey { applyReplace(content ?? pasteboard ?? "") }
+        return nil
+    }
+
+    mutating func selectedText() -> String? {
+        landLateHistory()
+        return readSelectedText
+    }
+
+    mutating func settle(_ expectation: Expectation, at index: Int, generated: Bool) -> Read {
+        landLateHistory()
+        let (passed, observed, length) = settles(expectation, generated: generated)
+        return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText)
+    }
+
+    mutating func departure(fresh: Bool) -> KeyDestination.Departure? {
+        departs() ? departure : nil
+    }
+
+    /// The executor's check before a key, which counts that key towards `focusLeaves` and decides where it lands.
+    mutating func departure(beforeKeyOf step: PhysicalStep) -> KeyDestination.Departure? {
+        let menu: Bool
+        switch step {
+        case .press(let chord, _): menu = Self.menuChords.contains(chord)
+        case .typeText: menu = false
+        default: menu = true
+        }
+        guard let takes = posts(menu: menu) else { return departure }
+        takesKey = takes
+        return nil
+    }
+
+    /// The deadline the Sim counts cuts plans, never a key.
+    var keysPastDeadline: Bool { false }
+
+    mutating func commit(_ effect: VimEffect, captures: [CaptureSlot: String]) {
+        state = VimReducer.reduce(state, effect, captures: captures)
+    }
+
+    mutating func bell() {
+        landLateHistory()
+        bells += 1
+    }
+
+    /// The executor beeps here; the Sim counts the failure from the run.
+    func refused(_ expectation: Expectation, _ read: Read, soft: Bool) {}
+}
+
+// MARK: - Running a plan in the fake field
+
+private extension Sim {
+    /// The index of the step that ended the run, nil when every step ran; `generated` as the executor's.
+    mutating func execute(_ steps: [PhysicalStep], generated: Bool = false, keys: Int? = nil) -> Int? {
+        defer { landLateHistory() }
+        let run = StepRunner.run(steps, generated: generated, keys: keys, host: &self)
+        attribution = run.attribution
+        softMisses += run.misses.filter { !$0.failed }.count
+        if run.departure == nil, let miss = run.misses.last, miss.failed {
+            settleFailures += 1
+            if !miss.soft, let key = miss.expectation.blamed(observed: miss.read.selection) { blamed.append(key) }
+        }
+        return run.abortedAt
     }
 
     /// In `reads`' coordinates a boundary offset lands at the next paragraph's start.
@@ -895,21 +903,14 @@ private extension Sim {
         }
     }
 
-    /// Runs a cleanup, landing or release plan, keeping the command's evidence for its lesson; false when a step failed.
+    /// Runs a cleanup, landing or release plan, pressing at most `keys` keys where it is given and keeping the command's evidence
+    /// for its lesson; false when a step failed.
     @discardableResult
-    mutating func executeAside(_ plan: PhysicalPlan) -> Bool {
+    mutating func executeAside(_ plan: PhysicalPlan, keys: Int? = nil) -> Bool {
         let evidence = attribution
-        let aborted = execute(plan.steps)
+        let aborted = execute(plan.steps, keys: keys)
         attribution = evidence
         return aborted == nil
-    }
-
-    /// `executeAside` pressing at most `keys` keys, false where they ran out.
-    @discardableResult
-    mutating func executeAside(_ plan: PhysicalPlan, keys: Int) -> Bool {
-        (keysLeft, landing) = (keys, true)
-        defer { (keysLeft, landing) = (nil, false) }
-        return executeAside(plan)
     }
 
     /// The executor's check before each key: nil where the run stops there, else whether the field takes the key.
@@ -945,21 +946,6 @@ private extension Sim {
             destination = held
         }
         return departure != nil
-    }
-
-    /// A run the focus left, or whose landing keys ran out, ends where the executor's does, with no evidence from that step.
-    mutating func stop(_ steps: [PhysicalStep], at index: Int) -> Int {
-        drainResidency(of: steps, after: index)
-        return index
-    }
-
-    /// The twin of the real executor's surviving-commit scan.
-    mutating func drainResidency(of steps: [PhysicalStep], after index: Int) {
-        for survivor in steps[(index + 1)...] {
-            if case .commit(let effect) = survivor, effect.survivesAbort {
-                state = VimReducer.reduce(state, effect, captures: captures)
-            }
-        }
     }
 
     mutating func noteEdit(at offset: Int, typing: Bool) {
