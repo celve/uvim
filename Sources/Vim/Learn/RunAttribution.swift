@@ -10,7 +10,7 @@ public struct RunAttribution: Equatable, Sendable {
     private var settled: Read?
     /// `settled` as it stood at the text write just recorded.
     private var beforeWrite: Read?
-    /// The next step's plan index: the Executor and the Sim record every step, in order.
+    /// The next step's plan index: `StepRunner` records every step, in order.
     private var index = 0
 
     /// The selection and length a settle read, where its expectation asked for both: the Sim answers either way.
