@@ -177,7 +177,7 @@ appcast=(--download-url-prefix "https://github.com/$repo/releases/download/$tag/
     --embed-release-notes --full-release-notes-url "https://github.com/$repo/releases"
     --link "https://github.com/$repo" -o "$dir/appcast.xml" "$dir")
 [ -z "${SPARKLE_KEY_FILE:-}" ] || appcast=(--ed-key-file "$SPARKLE_KEY_FILE" "${appcast[@]}")
-"$bin/generate_appcast" "${appcast[@]}"
+python3 "$(dirname "$0")/generate-appcast.py" "$bin/generate_appcast" "${appcast[@]}"
 # generate_appcast only warns when the key is not SUPublicEDKey's, and leaves the item unsigned.
 grep -q 'sparkle:edSignature=' "$dir/appcast.xml" ||
     die "the update is unsigned: this signing key is not the one SUPublicEDKey names"

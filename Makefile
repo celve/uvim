@@ -21,7 +21,7 @@ ifneq ($(and $(SIGN),$(filter dist publish,$(MAKECMDGOALS))),)
 $(error SIGN is for local builds: installs keep their grants only under project.yml's identity)
 endif
 
-.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs test-tap
+.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs test-tap test-appcast
 
 all: build
 
@@ -66,6 +66,9 @@ test-tap:
 	@mkdir -p $(DERIVED)
 	@swiftc -o $(DERIVED)/tap-test Sources/Core/TapStanding.swift Tests/TapStandingTests/main.swift
 	@$(DERIVED)/tap-test
+
+test-appcast:
+	python3 scripts/tests/test_generate_appcast.py -v
 
 gen:
 	xcodegen generate

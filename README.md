@@ -643,6 +643,21 @@ again, so Sparkle signs the archive that ships. `make dist` and `make publish` b
 
 The first release skips the checks against the latest release.
 
+Appcast generation runs through `scripts/generate-appcast.py` (Python 3). It preserves existing
+Sparkle extracts and removes only the new extraction and partial extraction for the staged ZIP,
+including on failure or interruption. Source ZIPs, appcasts and logs stay in place. Generators
+using this wrapper serialize across checkouts through a lock in Sparkle's native user cache;
+the next invocation recovers abandoned ownership after a killed caller, once its children exit.
+Direct release-test and update-probe callers should use
+`python3 scripts/generate-appcast.py PATH/TO/generate_appcast [OPTIONS...] ARCHIVES_DIR` too.
+Stage exactly one ZIP and leave it unchanged while generation runs. A pre-existing partial
+extraction refuses the run rather than overwriting someone else's data. Sparkle's cache location
+comes from Foundation, independently of shell `TMPDIR`; cleaning it costs extraction and bundle
+validation again on the next run. A raw generator invocation does not share the wrapper's lock.
+Run `make test-appcast` for isolated process tests, or
+`python3 scripts/tests/native_appcast.py SPARKLE_BIN NEW_WORK_DIR` for real generation with retained
+fixtures and logs (writes to the native cache and requires macOS, Xcode tools and Sparkle 2.10.0).
+
 The cask is written last, after the release exists, so Homebrew never names a zip that is not there
 yet. If that write fails, `make publish` says so and exits 1 with the release already made: commit
 `dist/uvim.rb` to the tap as `Casks/uvim.rb` by hand.

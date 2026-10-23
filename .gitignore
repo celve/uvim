@@ -27,3 +27,6 @@ Package.resolved
 
 # macOS
 .DS_Store
+
+# Python script imports
+__pycache__/
