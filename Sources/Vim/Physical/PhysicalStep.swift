@@ -317,7 +317,7 @@ public struct Expectation: Equatable, Sendable {
         return true
     }
 
-    /// The settle verdict the executor and the Sim share; `side` is the upper end's, which only a marker read gives.
+    /// Whether one read meets this; `side` is the upper end's, which only a marker read gives.
     public func converged(
         selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String?,
         side: ParagraphBreaks.Side?
@@ -330,6 +330,16 @@ public struct Expectation: Equatable, Sendable {
     /// Met by a field showing only its page's generated text, which holds none wherever its caret reads (LIN-1930).
     public var metByEmptyField: Bool {
         length == 0 && converged(selection: 0..<0, length: 0, selectedText: "", side: nil)
+    }
+
+    /// The settle verdict the executor and the Sim share: `converged`, but a field showing only generated text holds none (LIN-1930).
+    public func passes(
+        selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String?,
+        side: ParagraphBreaks.Side?, answered: Bool, generated: Bool, showsOnlyGeneratedText: () -> Bool
+    ) -> Bool {
+        let met = converged(selection: observed, length: observedLength, selectedText: observedText, side: side)
+        let looks = met ? generated && !metByEmptyField : answered && metByEmptyField
+        return looks && showsOnlyGeneratedText() ? metByEmptyField : met
     }
 
     /// Whether a soft settle after a ⌫ reads the selection it `deletes`, at `lengthBefore` where both are known.

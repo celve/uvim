@@ -178,23 +178,25 @@ public final class Executor {
                     milliseconds: Int(Date().timeIntervalSince(start) * 1000)
                 )
             }
-            var met = expectation.converged(selection: selection, length: length, selectedText: text, side: nil)
+            var side: ParagraphBreaks.Side?
+            var checkedLength = length
             // Only the markers place a caret between elements or tell a boundary's sides apart.
-            if !met, paragraphs, selectionSlot != nil, let marked = Snapshotter.markedSelection(of: element) {
+            if !expectation.converged(selection: selection, length: length, selectedText: text, side: nil), paragraphs,
+               selectionSlot != nil, let marked = Snapshotter.markedSelection(of: element) {
                 selection = marked.range
-                let side = expectation.edge == nil ? nil : Snapshotter.paragraphSide(of: marked, upper: true)
-                met = expectation.converged(selection: selection, length: length, selectedText: text, side: side)
+                side = expectation.edge == nil ? nil : Snapshotter.paragraphSide(of: marked, upper: true)
                 // The caret Linear draws at a code span's edge is lines of its own, which no expected length counts.
-                if !met, let expected = expectation.length, let observed = length, (1...2).contains(observed - expected) {
-                    met = expectation.converged(selection: selection, length: observed - Snapshotter.drawnLength(at: marked),
-                                                selectedText: text, side: side)
+                if let expected = expectation.length, let observed = length, (1...2).contains(observed - expected) {
+                    checkedLength = observed - Snapshotter.drawnLength(at: marked)
                 }
             }
             // A field showing only text its page generates, as an empty editor shows its placeholder, holds none (LIN-1930).
-            met = GeneratedText.judged(met, expectation, answered: answered, generated: generated) {
-                Snapshotter.showsOnlyGeneratedText(element)
+            if expectation.passes(
+                selection: selection, length: checkedLength, selectedText: text, side: side, answered: answered,
+                generated: generated, showsOnlyGeneratedText: { Snapshotter.showsOnlyGeneratedText(element) }
+            ) {
+                return outcome(true)
             }
-            if met { return outcome(true) }
             guard Date() < deadline, !AX.pastDeadline else { return outcome(false) }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).
             Thread.sleep(forTimeInterval: 0.003)

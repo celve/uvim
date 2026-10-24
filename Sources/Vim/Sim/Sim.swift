@@ -754,11 +754,11 @@ private extension Sim {
     func settles(_ expectation: Expectation, generated: Bool) -> (passed: Bool, selection: Range<Int>?, length: Int) {
         // A non-answer satisfies nothing, exactly as `Expectation.matches` has it.
         let observed = unreadableSelection ? nil : readSelection
-        let met = expectation.converged(
-            selection: observed, length: fieldLength - drawnLength, selectedText: readSelectedText, side: upperSide
-        )
         let answered = observed != nil || expectation.landing == nil
-        let passed = GeneratedText.judged(met, expectation, answered: answered, generated: generated) { showsPlaceholder }
+        let passed = expectation.passes(
+            selection: observed, length: fieldLength - drawnLength, selectedText: readSelectedText, side: upperSide,
+            answered: answered, generated: generated
+        ) { showsPlaceholder }
         return (passed, observed, fieldLength)
     }
 

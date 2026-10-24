@@ -190,6 +190,19 @@ public struct CapabilityReport: Equatable, Sendable {
     }
 }
 
+public extension CapabilityReport {
+    /// The user's On for `fieldIsSession`, which keeps every field a session of its own.
+    var everyFieldIsSession: Bool {
+        entries[.fieldIsSession] == Entry(status: .available, source: .user)
+    }
+
+    /// A seed or the user denying `fieldIsSession` speaks of every field in the window; a field's enclosing one speaks of its page alone.
+    var windowIsDocument: Bool {
+        guard let session = entries[.fieldIsSession], session.status == .unavailable else { return false }
+        return session.source != .probed
+    }
+}
+
 // MARK: - Recorder
 
 extension Capability {

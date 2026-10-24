@@ -441,9 +441,12 @@ uvim/
 │   ├── Vim/                    # Vim framework (→ Core) — modal editing:
 │   │   ├── Key,Model,Raw,      #   pure engine (no AppKit/AX; `make test` compiles this):
 │   │   │   Logical,Physical,   #   the keystroke gate, vocabulary, parsing + key
-│   │   │   State,Text,Sim,     #   assembly, planners, state + reducer, text math,
-│   │   │   Learn,Field         #   simulated host, the learner's beliefs, the field's
-│   │   │                       #   reads, snapshot and capabilities
+│   │   │   State,Text,Loop,    #   assembly, planners, state + reducer, text math, the
+│   │   │   Sim,Learn,Field,    #   command loop and step runner the runtime and the Sim
+│   │   │   Utils               #   share, simulated host, the learner's beliefs, the
+│   │   │                       #   field's reads, snapshot and capabilities, and what no
+│   │   │                       #   folder fits: an input method's pending letters, where
+│   │   │                       #   a command's keys go, the field typing reaches
 │   │   └── Runtime/            #   tap routing, AX execution, Controller, Diag, PasteboardLoan,
 │   │                           #   Beliefs (the beliefs file)
 │   └── App/                    # uvim app — composition root: UvimApp (the menu-bar
