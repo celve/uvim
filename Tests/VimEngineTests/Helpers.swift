@@ -227,15 +227,15 @@ func fakeTree(_ spec: String, linear: Bool = true) -> [FakeNode] {
         let node = nodes[path]!
         let children = (0...).prefix { nodes[path + [$0]] != nil }.map { build(path + [$0]) }
         let built = FakeNode(roles[node.code]!.0, roles[node.code]!.1, node.start, node.end, children)
-        if linear, "BQ".contains(node.code) { built.classes = [UnreachableLines.blockClass] }
-        if linear, node.code == "N" { built.classes = [UnreachableLines.controlsClass] }
-        if linear, node.code == "X" { built.classes = [UnreachableLines.tableClass] }
-        if linear, node.code == "Z" { built.classes = [UnreachableLines.sectionClass, UnreachableLines.blockClass] }
+        if linear, "BQ".contains(node.code) { built.classes = [Linear.blockClass] }
+        if linear, node.code == "N" { built.classes = [Linear.controlsClass] }
+        if linear, node.code == "X" { built.classes = [Linear.tableClass] }
+        if linear, node.code == "Z" { built.classes = [Linear.sectionClass, Linear.blockClass] }
         if linear, path.count == 1, let kind = ["G": "text-node", "E": "text-node", "L": "list-node", "H": "heading-node"][node.code] {
             built.classes = [kind]
         }
         // A list inside a quote or a section carries Linear's class as a root list does.
-        if linear, path.count > 1, node.code == "L" { built.classes = [UnreachableLines.listClass] }
+        if linear, path.count > 1, node.code == "L" { built.classes = [Linear.listClass] }
         if node.code == "Q" { built.quoteLevel = 1 }
         if let level = node.level { built.quoteLevel = level }
         return built

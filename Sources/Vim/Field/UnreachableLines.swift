@@ -137,9 +137,9 @@ public enum UnreachableLines {
     /// A stop of `kind` before the line starting at the plain offset `at`.
     public struct Stop: Equatable, Sendable {
         public let at: Int
-        public let kind: ParagraphBreaks.Hidden.Kind
+        public let kind: Linear.Stop
 
-        public init(at: Int, kind: ParagraphBreaks.Hidden.Kind) {
+        public init(at: Int, kind: Linear.Stop) {
             self.at = at
             self.kind = kind
         }
@@ -222,25 +222,6 @@ public enum UnreachableLines {
 
     /// The most AX reads one discovery may spend; a larger field keeps its markers and chips as lines.
     public static let readBudget = 1024
-
-    /// ProseMirror's class on its editor; its gap cursor, Linear's stop, is a plugin another editor may not have.
-    public static let editorClass = "ProseMirror"
-
-    /// Linear's own DOM class on a list, which no other editor's list carries.
-    public static let listClass = "list-node"
-
-    /// Linear's own DOM class on a code block, a quote and a collapsible section, which no other editor's quote carries.
-    public static let blockClass = "block-node"
-
-    /// Linear's classes on a table's root and on a collapsible section (LIN-1780).
-    public static let tableClass = "tableContainer"
-    public static let sectionClass = "collapsible-section"
-
-    /// Linear's classes on its root blocks; a rule's `AXSplitter` has none, so only a root with one shows a rule is Linear's.
-    public static let rootClasses: Set<String> = [listClass, blockClass, tableClass, sectionClass, "text-node", "heading-node"]
-
-    /// Linear's class on the group that holds a code block's language label and buttons, before its code.
-    public static let controlsClass = "node-controls"
 
     /// Lines shaped like a marker or starting with one and a space, lines starting as Linear's chips do, and drawn carets'.
     public static func candidates(
@@ -402,18 +383,16 @@ public enum UnreachableLines {
         for join in found.joins {
             guard let line = starts.first(where: { breaks.fieldOffset($0) >= join }), line > 0 else { continue }
             let start = line - shift[line]
-            // Chromium's own lists, whose marker starts the line, have no stop: Linear's ProseMirror makes it.
-            guard !hidden.contains(where: { $0.at == start && $0.kind == .prefix }) else { continue }
-            // Leaves at the block's own start are a to-do's checkbox, whether or not `AXValue` gives them lines.
-            let kind: ParagraphBreaks.Hidden.Kind = leafStarts[join, default: 0] > 0 ? .boxedGap : .gap
-            hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: kind),
+            let prefixed = hidden.contains { $0.at == start && $0.kind == .prefix }
+            guard let kind = Linear.joinStop(leaves: leafStarts[join, default: 0], prefixed: prefixed) else { continue }
+            hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: .stop(kind)),
                           at: hidden.lastIndex { $0.at <= start }.map { $0 + 1 } ?? 0)
         }
         // The other stops in their order, after the joins and markers at the same line (LIN-1780).
         for stop in found.stops {
             guard let line = starts.first(where: { breaks.fieldOffset($0) >= stop.at }), line > 0 else { continue }
             let start = line - shift[line]
-            hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: stop.kind),
+            hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: .stop(stop.kind)),
                           at: hidden.lastIndex { $0.at <= start }.map { $0 + 1 } ?? 0)
         }
         // Every line a table holds is a cell's, its last row's first the table's way in from below.

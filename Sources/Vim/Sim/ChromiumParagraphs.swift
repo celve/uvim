@@ -14,14 +14,14 @@ public extension Sim {
         /// Rules right before the line, each a text-less block of its own (LIN-1780).
         public var ruled: Int
         /// The stops before the line other than `stop`'s, top first, as discovery reads them beside rules, tables and sections.
-        public var before: [ParagraphBreaks.Hidden.Kind]
+        public var before: [Linear.Stop]
         /// The line is a table cell's, and starts the table's last row.
         public var cell: Bool
         public var lastRow: Bool
 
         public init(
             marker: String? = nil, leaves: Int = 0, checkbox: Bool = false, inline: Bool = false, stop: Bool = false,
-            controls: Bool = false, ruled: Int = 0, before: [ParagraphBreaks.Hidden.Kind] = [], cell: Bool = false,
+            controls: Bool = false, ruled: Int = 0, before: [Linear.Stop] = [], cell: Bool = false,
             lastRow: Bool = false
         ) {
             self.marker = marker
@@ -96,7 +96,7 @@ struct ChromiumParagraphs {
     /// The other stops and the tables as discovery reads them, and each line's stops, table lines and last rows in Sim offsets.
     let stops: [UnreachableLines.Stop]
     let tables: [UnreachableLines.Table]
-    let keyStops: [Int: [ParagraphBreaks.Hidden.Kind]]
+    let keyStops: [Int: [Linear.Stop]]
     let cells: Set<Int>
     let lastRows: Set<Int>
     /// The caret Linear draws at a code span's edge, and the paragraph whose end it ends with a `<br>`.
@@ -137,7 +137,7 @@ struct ChromiumParagraphs {
         var controls: [Range<Int>] = []
         var stops: [UnreachableLines.Stop] = []
         var tables: [UnreachableLines.Table] = []
-        var keyStops: [Int: [ParagraphBreaks.Hidden.Kind]] = [:]
+        var keyStops: [Int: [Linear.Stop]] = [:]
         var cells: Set<Int> = []
         var lastRows: Set<Int> = []
         var table: (start: Int, lastRow: Int?)?
@@ -163,7 +163,7 @@ struct ChromiumParagraphs {
                 gaps.insert(start)
             }
             stops += line.before.map { UnreachableLines.Stop(at: plain, kind: $0) }
-            let own: [ParagraphBreaks.Hidden.Kind] = line.stop ? [line.leaves > 0 ? .boxedGap : .gap] : []
+            let own = line.stop ? [Linear.joinStop(leaves: line.leaves)] : []
             if !(own + line.before).isEmpty { keyStops[start] = own + line.before }
             // A run of cell lines is a table, which ends where the line after it starts.
             if line.cell {

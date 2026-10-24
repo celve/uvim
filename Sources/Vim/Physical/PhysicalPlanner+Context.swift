@@ -130,7 +130,7 @@ extension PhysicalPlanner {
         var gaps: Set<Int> { breaks?.gaps ?? [] }
 
         /// Each line's stops, top first: beside Linear's blocks and rules (LIN-1780).
-        var stops: [Int: [ParagraphBreaks.Hidden.Kind]] { breaks?.stops ?? [:] }
+        var stops: [Int: [Linear.Stop]] { breaks?.stops ?? [:] }
 
         /// Table lines, and the first lines of tables' last rows.
         var cells: Set<Int> { breaks?.cells ?? [] }
