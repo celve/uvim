@@ -40,7 +40,7 @@ public struct ParagraphBreaks: Equatable, Sendable {
 
         public var isMarker: Bool { isStructure && !text.isEmpty }
 
-        public var isGap: Bool { kind == .stop(.gap) || kind == .stop(.boxedGap) }
+        public var isGap: Bool { stop?.isGap ?? false }
 
         /// A stop or a table line, which holds no field text.
         public var isBlock: Bool { isStop || kind == .cell || kind == .lastRow }

@@ -163,7 +163,7 @@ struct ChromiumParagraphs {
                 gaps.insert(start)
             }
             stops += line.before.map { UnreachableLines.Stop(at: plain, kind: $0) }
-            let own: [Linear.Stop] = line.stop ? [line.leaves > 0 ? .boxedGap : .gap] : []
+            let own = line.stop ? [Linear.joinStop(leaves: line.leaves)] : []
             if !(own + line.before).isEmpty { keyStops[start] = own + line.before }
             // A run of cell lines is a table, which ends where the line after it starts.
             if line.cell {

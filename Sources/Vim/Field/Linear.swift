@@ -33,6 +33,9 @@ public enum Linear {
         case ruleGap
         /// The stop between a table and a rule after it, which only ← and ↑ visit.
         case backGap
+
+        /// A stop → ↓ and ↑ all visit between two blocks, which `KeyModel`'s gaps stand for.
+        public var isGap: Bool { self == .gap || self == .boxedGap }
     }
 
     /// A block as its own classes tell it.
@@ -55,6 +58,16 @@ public enum Linear {
         case _ where previous.closedEnd && next.closedStart: previous == .table || next == .table ? .boxedGap : .gap
         default: nil
         }
+    }
+
+    /// A join's stop, none where Chromium's own list marker starts the line, as only Linear's ProseMirror makes one.
+    static func joinStop(leaves: Int, prefixed: Bool) -> Stop? {
+        prefixed ? nil : joinStop(leaves: leaves)
+    }
+
+    /// Boxed where text-less leaves start the block, as a to-do's checkbox does, whether or not `AXValue` gives them lines.
+    static func joinStop(leaves: Int) -> Stop {
+        leaves > 0 ? .boxedGap : .gap
     }
 
     /// What its own blocks add: joins as the lists', code blocks' controls, other stops and tables (LIN-1726, LIN-1780).

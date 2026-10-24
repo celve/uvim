@@ -383,10 +383,8 @@ public enum UnreachableLines {
         for join in found.joins {
             guard let line = starts.first(where: { breaks.fieldOffset($0) >= join }), line > 0 else { continue }
             let start = line - shift[line]
-            // Chromium's own lists, whose marker starts the line, have no stop: Linear's ProseMirror makes it.
-            guard !hidden.contains(where: { $0.at == start && $0.kind == .prefix }) else { continue }
-            // Leaves at the block's own start are a to-do's checkbox, whether or not `AXValue` gives them lines.
-            let kind: Linear.Stop = leafStarts[join, default: 0] > 0 ? .boxedGap : .gap
+            let prefixed = hidden.contains { $0.at == start && $0.kind == .prefix }
+            guard let kind = Linear.joinStop(leaves: leafStarts[join, default: 0], prefixed: prefixed) else { continue }
             hidden.insert(ParagraphBreaks.Hidden(at: start, text: "", kind: .stop(kind)),
                           at: hidden.lastIndex { $0.at <= start }.map { $0 + 1 } ?? 0)
         }
