@@ -17,8 +17,8 @@
 ///
 /// Its faults are the only way a golden reaches the abort path at all.
 public struct Sim {
-    public private(set) var text: String
-    public private(set) var selection: Range<Int>
+    public internal(set) var text: String
+    public internal(set) var selection: Range<Int>
     public private(set) var state: VimState
     /// The modeled system pasteboard — the blind lanes' register.
     public private(set) var pasteboard: String?
@@ -56,19 +56,19 @@ public struct Sim {
     public var findsUnreachable = true
 
     /// A caret written at a chip's start, where Linear's next arrow does nothing.
-    private var atChipStart = false
+    var atChipStart = false
 
     /// With `listLines`, Linear's inline code spans: a caret at an edge is inside or outside one, and drawn (LIN-1683).
     public var codeSpans: [Range<Int>] = []
 
     /// A caret at a code span's edge is inside it; a plain arrow from the edge's near side only crosses the edge.
-    private var codeInside = false
+    var codeInside = false
 
     /// A caret written at a code span's end, where Linear's next ← or ⇧← can do nothing.
-    private var atWrittenCodeEnd = false
+    var atWrittenCodeEnd = false
 
     /// The stop between two blocks the caret is at, before the line after it.
-    private var inListGap: KeyModel.Stop?
+    var inListGap: KeyModel.Stop?
 
     /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
     /// in Chrome's textarea, up to that break in Chrome's rich text; `start`, a caret at the text's start, no host measured.
@@ -76,22 +76,22 @@ public struct Sim {
     public var undoSelection = UndoSelection.restored
 
     /// Each undo group's text before it and its first edit's offset, newest last, as the host's undo stack holds them.
-    private var undoGroups: [UndoGroup] = []
-    private typealias UndoGroup = (before: String, at: Int, listLines: [ListLine]?, codeSpans: [Range<Int>])
+    var undoGroups: [UndoGroup] = []
+    typealias UndoGroup = (before: String, at: Int, listLines: [ListLine]?, codeSpans: [Range<Int>])
 
     /// Groups ⌘Z undid, with the text each left, which ⇧⌘Z puts back until a new edit.
-    private var redoGroups: [(group: UndoGroup, after: String, listLines: [ListLine]?, codeSpans: [Range<Int>])] = []
+    var redoGroups: [(group: UndoGroup, after: String, listLines: [ListLine]?, codeSpans: [Range<Int>])] = []
 
     /// Hosts group consecutive typed edits for undo until the caret moves some other way.
-    private var coalescing = false
+    var coalescing = false
 
     /// Chrome's ⌘Z and ⇧⌘Z, as measured: a key sent right behind one runs first, and a read or write waits for it.
     public var undoesLate = false
-    private var lateHistory: [Chord] = []
+    var lateHistory: [Chord] = []
 
     /// ⌘Z and ⇧⌘Z shown only after the Controller's wait for them ends, at the next key or click (LIN-2104).
     public var undoesAfterWait = false
-    private var heldHistory: [Chord] = []
+    var heldHistory: [Chord] = []
 
     /// With `undoesAfterWait`, shown no sooner than the next command's own wait for them.
     public var undoesInNextWait = false
@@ -106,7 +106,7 @@ public struct Sim {
 
     /// Linear draws the caret 20–160 ms after it arrives, so a quick command's snapshot can come first.
     public var drawsLate = false
-    private var snapshotting = false
+    var snapshotting = false
 
     /// Text the page generates while the field is empty, as ChatGPT's box shows "Ask anything" (LIN-1930).
     public var placeholder: String?
@@ -147,7 +147,7 @@ public struct Sim {
     public var readModel: OffsetsAnswer = .value
 
     /// Learns from each command and re-resolves `profile` from its beliefs.
-    public private(set) var learner: Learner?
+    public internal(set) var learner: Learner?
 
     /// Where the last command's run ended early, if it did.
     public private(set) var abortedStep: PhysicalStep?
@@ -197,13 +197,13 @@ public struct Sim {
     public var focusLeaves: (after: Int, unseen: Int, by: KeyDestination.Departure)?
 
     /// Why the last command stopped posting keys, as the executor's run says.
-    public private(set) var departure: KeyDestination.Departure?
+    public internal(set) var departure: KeyDestination.Departure?
 
     /// The running command's, as the Controller hands it to the executor.
-    private var destination: KeyDestination?
+    var destination: KeyDestination?
 
     /// What the executor's read of the field's app says.
-    private var appActive = true
+    var appActive = true
 
     /// The field takes the key the check before it let go: after the focus left, keys reach another field or no menu.
     private var takesKey = true
@@ -212,26 +212,26 @@ public struct Sim {
     private var pressUnsupported = false
 
     /// Keys the failed settles blamed, in order.
-    public private(set) var blamed: [Capability] = []
+    public internal(set) var blamed: [Capability] = []
 
     public private(set) var bells = 0
-    public private(set) var settleFailures = 0
+    public internal(set) var settleFailures = 0
     /// Soft settles that missed, which ring nothing and abort nothing, as the executor logs them.
-    public private(set) var softMisses = 0
+    public internal(set) var softMisses = 0
     public private(set) var unsupportedSteps = 0
     /// Keys pressed, ignored ones included.
     public private(set) var presses = 0
 
     /// The last command's evidence from its settles.
-    public private(set) var attribution = RunAttribution()
+    public internal(set) var attribution = RunAttribution()
 
     private var monitor = RawMonitor()
 
     /// The field's button events so far, which the Controller reads from the window server.
-    private(set) var buttonEvents: UInt32 = 0
+    var buttonEvents: UInt32 = 0
 
     /// The focus is the selection's lower bound.
-    private var backward = false
+    var backward = false
 
     /// The open change for `.` and the landing pending after `u`.
     var loop = CommandLoop<Sim>()
@@ -374,40 +374,6 @@ public struct Sim {
         backward = false
         buttonEvents &+= 2
         if state.field.mode.isInserting { monitor.markInsertLogLossy() }
-    }
-}
-
-// MARK: - The fake field's keys and typing
-
-private extension Sim {
-    /// An undo held past the Controller's wait shows now.
-    mutating func releaseHeldHistory() {
-        for chord in heldHistory where !ignoredChords.contains(chord) { _ = press(chord) }
-        heldHistory = []
-    }
-
-    /// As the Controller reads a caret: through the markers where it reads paragraphs, where selected breaks alone are no caret.
-    func readsCaret(paragraphs: Bool) -> Bool {
-        paragraphs && (markers || emptyParagraphs) ? selection.isEmpty : readSelection.isEmpty
-    }
-
-    /// Insert-mode passthrough typing lands in the fake field the way the
-    /// real app would apply it.
-    mutating func applyTyping(_ token: String) {
-        if token == "<BS>" {
-            if selection.isEmpty {
-                selection = TextModel(text).advance(selection.lowerBound, byGraphemes: -1)..<selection.upperBound
-            }
-            applyReplace("")
-            return
-        }
-        if token == "<CR>" {
-            applyReplace("\n")
-            return
-        }
-        guard token.count == 1, let scalar = token.unicodeScalars.first else { return }
-        if scalar.value < 0x20, token != "\n", token != "\r", token != "\t" { return }
-        applyReplace(token == "\r" ? "\n" : token)
     }
 }
 
@@ -725,834 +691,4 @@ extension Sim: StepHost {
 
     /// The executor beeps here; the Sim counts the failure from the run.
     func refused(_ expectation: Expectation, _ read: Read, soft: Bool) {}
-}
-
-// MARK: - Running a plan in the fake field
-
-private extension Sim {
-    /// The index of the step that ended the run, nil when every step ran; `generated` as the executor's.
-    mutating func execute(_ steps: [PhysicalStep], generated: Bool = false, keys: Int? = nil) -> Int? {
-        defer { landLateHistory() }
-        let run = StepRunner.run(steps, generated: generated, keys: keys, host: &self)
-        attribution = run.attribution
-        softMisses += run.misses.filter { !$0.failed }.count
-        if run.departure == nil, let miss = run.misses.last, miss.failed {
-            settleFailures += 1
-            if !miss.soft, let key = miss.expectation.blamed(observed: miss.read.selection) { blamed.append(key) }
-        }
-        return run.abortedAt
-    }
-
-    /// In `reads`' coordinates a boundary offset lands at the next paragraph's start.
-    func landing(_ offset: Int) -> Int {
-        if emptyParagraphs { return chromium.landing(offset, from: selection.lowerBound) }
-        guard writesInReadOffsets, let reads else { return offset }
-        return (0...text.utf16.count).last { reads($0, text) <= offset } ?? 0
-    }
-
-    /// A settle's verdict and what it read, judged as the executor judges it beside generated text (LIN-1930).
-    func settles(_ expectation: Expectation, generated: Bool) -> (passed: Bool, selection: Range<Int>?, length: Int) {
-        // A non-answer satisfies nothing, exactly as `Expectation.matches` has it.
-        let observed = unreadableSelection ? nil : readSelection
-        let answered = observed != nil || expectation.landing == nil
-        let passed = expectation.passes(
-            selection: observed, length: fieldLength - drawnLength, selectedText: readSelectedText, side: upperSide,
-            answered: answered, generated: generated
-        ) { showsPlaceholder }
-        return (passed, observed, fieldLength)
-    }
-
-    /// The keys lane B counts with, which run whether or not `emulatesKeys` is on.
-    static let countedKeys: Set<Chord> = [.left, .right, .up, .down, .lineStart, .selectRight, .selectLeft, .deleteBack]
-
-    /// ⌘ menu equivalents, which an app the focus has left ignores (LIN-1105).
-    static let menuChords: Set<Chord> = [.selectAll, .undo, .redo]
-
-    /// One key as `KeyModel` has Cocoa's bindings do it, which is how LIN-1533 measured Chromium's arrows; false for
-    /// a key the model does not know.
-    mutating func press(_ chord: Chord) -> Bool {
-        if chord == .undo { return undo() }
-        if chord == .redo { return redo() }
-        if atChipStart, [Key.arrowLeft, .arrowRight].contains(chord.key), !chord.modifiers.contains(.option) {
-            atChipStart = false
-            return true
-        }
-        atChipStart = false
-        // Measured at some ends and not others, so always here: the first ← or ⇧← after a write at a code span's end.
-        defer { atWrittenCodeEnd = false }
-        if atWrittenCodeEnd, [.left, .selectLeft].contains(chord) { return true }
-        // Measured: from inside a code span's start, ⇧⌃E does nothing, and ⇧→ too unless the span starts its line.
-        if [.selectRight, Chord.paragraphEnd.shifted].contains(chord), selection.isEmpty, codeInside,
-           isCodeEdge(selection.lowerBound, start: true),
-           chord != .selectRight || TextModel(text).lineStart(of: selection.lowerBound) != selection.lowerBound {
-            return true
-        }
-        if inListGap == nil, chord.modifiers.isEmpty, selection.isEmpty, [Key.arrowLeft, .arrowRight].contains(chord.key) {
-            let at = selection.lowerBound
-            let (start, end) = (isCodeEdge(at, start: true), isCodeEdge(at, start: false))
-            // From the side of an edge the arrow points across, it steps inside or out and stays put, but ← leaves a paragraph.
-            let crosses = chord.key == .arrowRight
-                ? start && !codeInside || end && codeInside
-                : start && codeInside && TextModel(text).lineStart(of: at) != at || end && !codeInside
-            if crosses {
-                codeInside.toggle()
-                return true
-            }
-        }
-        if holdsRightAtLineEnds, chord == .right, selection.isEmpty,
-           TextModel(text).lineBreak(of: selection.lowerBound) == selection.lowerBound {
-            return true
-        }
-        if chord == .deleteBack, runsAreNewlines, selection.isEmpty, selection.lowerBound > 0 {
-            let model = TextModel(text)
-            if model.lineStart(of: selection.lowerBound) == selection.lowerBound {
-                selection = model.lineEnd(of: model.lineStart(of: selection.lowerBound - 1))..<selection.lowerBound
-            }
-        }
-        let shown = chromium
-        var keys = KeyModel(
-            text: text,
-            anchor: backward ? selection.upperBound : selection.lowerBound,
-            focus: backward ? selection.lowerBound : selection.upperBound,
-            wrap: wrapWidth,
-            atoms: shown.atoms,
-            gaps: shown.gaps,
-            stops: shown.keyStops,
-            cells: shown.cells,
-            lastRows: shown.lastRows,
-            inStop: inListGap
-        )
-        guard keys.press(chord) else { return false }
-        inListGap = keys.inStop
-        if keys.text != text {
-            noteEdit(at: keys.selection.lowerBound, typing: true)
-            let deleted = keys.selection.lowerBound..<(keys.selection.lowerBound + text.utf16.count - keys.text.utf16.count)
-            listLines = listLines.map { ListLine.carried($0, in: text, replacing: deleted, with: "") }
-            codeSpans = Self.carried(codeSpans, replacing: deleted, with: "", into: keys.text)
-        }
-        if keys.text == text, keys.selection != selection { coalescing = false }
-        text = keys.text
-        selection = pulledBack(keys.selection)
-        backward = keys.focus < keys.anchor
-        // Measured: → and ⌥→ arrive outside a start and inside an end, ← the reverse but at a line start, the rest outside.
-        let arrived = selection.isEmpty ? selection.lowerBound : -1
-        switch (chord.key, chord.modifiers) {
-        case (.arrowRight, []), (.arrowRight, [.option]): codeInside = isCodeEdge(arrived, start: false)
-        case (.arrowLeft, []):
-            codeInside = isCodeEdge(arrived, start: true) && TextModel(text).lineStart(of: arrived) != arrived
-        default: codeInside = false
-        }
-        if inListGap != nil { codeInside = false }
-        return true
-    }
-
-    func pulledBack(_ range: Range<Int>) -> Range<Int> {
-        guard pullsBackFromLineEnds else { return range }
-        let model = TextModel(text)
-        func pulled(_ offset: Int) -> Int {
-            guard offset > 0, model.lineBreak(of: offset) == offset else { return offset }
-            let before = model.advance(offset, byGraphemes: -1)
-            return TextModel.isInvisible(Character(model.substring(before..<offset))) ? before : offset
-        }
-        return pulled(range.lowerBound)..<pulled(range.upperBound)
-    }
-
-    func isCodeEdge(_ offset: Int, start: Bool) -> Bool {
-        listLines != nil && codeSpans.contains { (start ? $0.lowerBound : $0.upperBound) == offset }
-    }
-
-    /// `spans` after an edit into `text`, as ProseMirror's marks: inside one it stays in, at an edge out; they join, `\n` splits.
-    static func carried(_ spans: [Range<Int>], replacing range: Range<Int>, with replacement: String, into text: String)
-        -> [Range<Int>] {
-        let count = replacement.utf16.count
-        let delta = count - range.count
-        let kept = spans.compactMap { span -> Range<Int>? in
-            let kept: Range<Int>
-            if range.upperBound <= span.lowerBound {
-                kept = (span.lowerBound + delta)..<(span.upperBound + delta)
-            } else if range.lowerBound >= span.upperBound {
-                kept = span
-            } else if span.lowerBound <= range.lowerBound, range.upperBound <= span.upperBound {
-                kept = span.lowerBound..<(span.upperBound + delta)
-            } else if range.lowerBound <= span.lowerBound, span.upperBound <= range.upperBound {
-                return nil
-            } else if range.lowerBound < span.lowerBound {
-                kept = (range.lowerBound + count)..<(span.upperBound + delta)
-            } else {
-                kept = span.lowerBound..<range.lowerBound
-            }
-            return kept.isEmpty ? nil : kept
-        }.sorted { $0.lowerBound < $1.lowerBound }
-        let joined: [Range<Int>] = kept.reduce(into: []) { joined, span in
-            if let last = joined.last, last.upperBound >= span.lowerBound {
-                joined[joined.count - 1] = last.lowerBound..<max(last.upperBound, span.upperBound)
-            } else {
-                joined.append(span)
-            }
-        }
-        let units = Array(text.utf16)
-        return joined.flatMap { span in
-            var pieces: [Range<Int>] = []
-            var start = span.lowerBound
-            for index in span where index < units.count && units[index] == 10 {
-                if index > start { pieces.append(start..<index) }
-                start = index + 1
-            }
-            if span.upperBound > start { pieces.append(start..<span.upperBound) }
-            return pieces
-        }
-    }
-
-    /// Runs a cleanup, landing or release plan, pressing at most `keys` keys where it is given and keeping the command's evidence
-    /// for its lesson; false when a step failed.
-    @discardableResult
-    mutating func executeAside(_ plan: PhysicalPlan, keys: Int? = nil) -> Bool {
-        let evidence = attribution
-        let aborted = execute(plan.steps, keys: keys)
-        attribution = evidence
-        return aborted == nil
-    }
-
-    /// The executor's check before each key: nil where the run stops there, else whether the field takes the key.
-    mutating func posts(menu: Bool) -> Bool? {
-        guard !departs() else { return nil }
-        guard var leaves = focusLeaves else { return true }
-        if leaves.after > 0 {
-            leaves.after -= 1
-            focusLeaves = leaves
-            return true
-        }
-        guard leaves.unseen > 0 else {
-            seen(leaves.by)
-            return departs() ? nil : true
-        }
-        leaves.unseen -= 1
-        focusLeaves = leaves
-        if leaves.unseen == 0 { seen(leaves.by) }
-        return leaves.by == .app && !menu
-    }
-
-    /// What the executor's reads find once the focus has gone: the click's presses, or the app inactive.
-    mutating func seen(_ move: KeyDestination.Departure) {
-        focusLeaves = nil
-        if move == .click { buttonEvents &+= 2 } else { appActive = false }
-    }
-
-    /// Whether the focus left, by the executor's reads.
-    mutating func departs() -> Bool {
-        guard var held = destination else { return false }
-        if departure == nil {
-            departure = held.departure(presses: buttonEvents, active: appActive)
-            destination = held
-        }
-        return departure != nil
-    }
-
-    mutating func noteEdit(at offset: Int, typing: Bool) {
-        if typing, coalescing, let last = undoGroups.indices.last {
-            undoGroups[last].at = min(undoGroups[last].at, offset)
-        } else {
-            undoGroups.append((before: text, at: offset, listLines: listLines, codeSpans: codeSpans))
-        }
-        redoGroups = []
-        coalescing = typing
-    }
-
-    mutating func landLateHistory() {
-        for chord in lateHistory where !ignoredChords.contains(chord) { _ = press(chord) }
-        lateHistory = []
-    }
-
-    /// ⌘Z: the newest group's text back, selected as `undoSelection` has this host select it.
-    mutating func undo() -> Bool {
-        guard let group = undoGroups.popLast() else { return true }
-        redoGroups.append((group: group, after: text, listLines: listLines, codeSpans: codeSpans))
-        let restored = group.before.utf16.count - text.utf16.count
-        (text, listLines, codeSpans) = (group.before, group.listLines, group.codeSpans)
-        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, nil, false, false)
-        let put = TextModel(text).substring(group.at..<group.at + max(0, restored)).utf16
-        let toBreak = put.firstIndex(of: 10).map { put.distance(from: put.startIndex, to: $0) }
-        let length = switch undoSelection {
-        case .restored: put.count
-        case .throughBreak: toBreak.map { $0 + 1 } ?? put.count
-        case .toBreak: toBreak ?? put.count
-        case .start: 0
-        }
-        selection = undoSelection == .start ? 0..<0 : group.at..<group.at + length
-        return true
-    }
-
-    /// ⇧⌘Z: the newest undone group's edit again, the caret where it began.
-    mutating func redo() -> Bool {
-        guard let undone = redoGroups.popLast() else { return true }
-        undoGroups.append(undone.group)
-        (text, listLines, codeSpans) = (undone.after, undone.listLines, undone.codeSpans)
-        (coalescing, codeInside, atWrittenCodeEnd, inListGap, atChipStart, backward) = (false, false, false, nil, false, false)
-        let at = TextModel(text).clamp(undone.group.at)
-        selection = at..<at
-        return true
-    }
-
-    mutating func applyReplace(_ replacement: String) {
-        noteEdit(at: selection.lowerBound, typing: false)
-        listLines = listLines.map { ListLine.carried($0, in: text, replacing: selection, with: replacement) }
-        let replaced = TextModel(text).replacing(selection, with: replacement)
-        codeSpans = Self.carried(codeSpans, replacing: selection, with: replacement, into: replaced)
-        codeInside = false
-        atWrittenCodeEnd = false
-        inListGap = nil
-        text = replaced
-        let caretAfter = selection.lowerBound + replacement.utf16.count
-        selection = caretAfter..<caretAfter
-        backward = false
-    }
-}
-
-// MARK: - The learner
-
-public extension Sim {
-    /// The Controller's learner for one field.
-    struct Learner: Equatable, Sendable {
-        public var store: BeliefStore
-        public var rung: String
-        public var versions: Versions
-        public var chromium: Bool
-        public var probed: CapabilityProfile
-        public var config: [Capability: ConfigChoice] = [:]
-        public var sampling = OffsetsSampling()
-        public var tally = Tally()
-        public var strikes = Strikes()
-        public internal(set) var resolved: ResolvedBeliefs?
-        /// What each snapshot's reads said.
-        public internal(set) var evidence: [Evidence] = []
-        public internal(set) var lessons: [Learning.Lesson] = []
-
-        public init(
-            store: BeliefStore = BeliefStore(), rung: String = "sim|role:AXTextArea", versions: Versions = Versions(app: "1"),
-            chromium: Bool = false, probed: CapabilityProfile
-        ) {
-            self.store = store
-            self.rung = rung
-            self.versions = versions
-            self.chromium = chromium
-            self.probed = probed
-            // A policy the profile leaves out is seeded off, as `nativeMotions` is everywhere.
-            for policy in Capability.allCases where policy.species == .policy && !probed.has(policy) {
-                config[policy] = ConfigChoice(seededOff: true)
-            }
-        }
-
-        public var model: ReadModel { resolved?.readModel ?? ReadModel(answer: chromium ? .textContent : .value) }
-    }
-}
-
-extension Sim {
-    /// The fake field's reads, which the learner observes here.
-    mutating func read() -> (reads: FieldSnapshot.Reads, observed: Learning.Observation) {
-        let (current, source) = learner.map { $0.model.reading(chromium: $0.chromium, children: hasChildren) }
-            ?? (readModel, .start)
-        let plain = readSelection
-        var sampled = false
-        var reads = FieldSnapshot.Reads(
-            field: FieldReads(text: shownValue, plain: plain, selectedText: readSelectedText), length: fieldLength,
-            webContent: webContent || self.reads != nil || emptyParagraphs, blocks: blocks
-        )
-        reads.roots = roots
-        reads.proseMirror = listLines != nil
-        if showsPlaceholder {
-            // What the Snapshotter makes of a field its scan finds shows only generated text (LIN-1930).
-            reads = FieldSnapshot.Reads(
-                generatedOnly: FieldReads(text: shownValue, plain: plain, selectedText: readSelectedText), length: fieldLength,
-                webContent: reads.webContent, blocks: blocks, markers: (markers || emptyParagraphs) && current != .value
-            )
-        } else if emptyParagraphs {
-            let value = chromium.shown.value
-            let text = chromium.shown.markers + (endsInTextlessLeaf ? "\u{FFFC}" : "")
-            var memo: EmptyParagraphs.Memo?
-            var unreachable: UnreachableLines.Memo?
-            let aligned = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
-                MarkerReads.aligning(value: value, range: plain, text: text, sides: reads.sides)
-            }
-            reads.field = FieldReads(text: value, plain: plain, selectedText: readSelectedText, markers: aligned.reads)
-            reads.marked = plain
-            reads.markerText = aligned.text
-        } else {
-            sampled = current == .value && source.observes && learner?.sampling.samples(text: text, plain: plain) == true
-            if markers && (current != .value || sampled) { reads.field.markers = markerReads }
-        }
-        let field = reads.field
-        var observed = Learning.Observation(before: current, source: source)
-        if var learner {
-            observed = Learning.observe(field, before: current, source: source, newEngine: learner.model.newEngine)
-            if sampled { learner.sampling.sampled(markers: markers, evidence: observed.evidence, text: text, plain: plain) }
-            if let evidence = observed.evidence {
-                learner.tally.count(evidence)
-                learner.evidence.append(evidence)
-            }
-            self.learner = learner
-        }
-        return (reads, observed)
-    }
-
-    /// Answers a step's read from the fake field, as `Snapshotter` does over AX.
-    func take(
-        _ need: FieldSnapshot.Need, into reads: inout FieldSnapshot.Reads, memo: inout EmptyParagraphs.Memo?,
-        unreachable: inout UnreachableLines.Memo?
-    ) {
-        switch need {
-        case .side(let end):
-            reads.sides.updateValue(chromium.side(end == .upper ? selection.upperBound : selection.lowerBound), forKey: end)
-        case .emptyParagraph:
-            reads.inEmptyParagraph = chromium.inEmptyParagraph(selection)
-        case .emptyParagraphs(let value, let markers, let why):
-            let found = findsEmptyParagraphs ? chromium.shown.found : nil
-            memo = EmptyParagraphs.Memo(value: value, markers: markers, blocks: blocks, found: found, origin: .walked(why))
-        case .unreachable(let value, let markers, let candidates, let why):
-            let shown = chromium
-            let found = findsUnreachable ? UnreachableLines.Found(
-                markers: candidates.markers.map(\.lowerBound).filter(Set(shown.listMarkers).contains),
-                chips: shown.chips.filter { chip in
-                    candidates.chips.contains { $0.lowerBound == chip.range.lowerBound && chip.range.upperBound <= $0.upperBound }
-                },
-                carets: shown.drawnCaret.map { candidates.carets.contains($0.offset) ? [$0] : [] } ?? [],
-                joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables
-            ) : nil
-            unreachable = UnreachableLines.Memo(
-                value: value, markers: markers, blocks: blocks, roots: roots, found: found, origin: .walked(why)
-            )
-        }
-    }
-
-    /// `AXValue`.
-    var shownValue: String {
-        if showsPlaceholder, let placeholder { return placeholder }
-        return emptyParagraphs ? chromium.shown.value : text
-    }
-
-    /// `kAXNumberOfCharacters`: `AXValue`'s length.
-    var fieldLength: Int { shownValue.utf16.count }
-
-    /// The child count: a block per paragraph.
-    var blocks: Int { hasChildren ? text.utf16.filter { $0 == 10 }.count + 1 : 0 }
-
-    /// The roots by identity: a line whose block changes kind is a new root, though the text and the count stay.
-    var roots: Int? {
-        listLines.map { lines in
-            var hasher = Hasher()
-            hasher.combine(lines)
-            return hasher.finalize()
-        }
-    }
-
-    var chromium: ChromiumParagraphs {
-        let caret = selection.isEmpty ? selection.lowerBound : nil
-        let drawn = drawsLate && snapshotting ? nil
-            : caret.flatMap { isCodeEdge($0, start: true) || isCodeEdge($0, start: false) ? $0 : nil }
-        return ChromiumParagraphs(text: text, lines: listLines, caret: caret, drawn: drawn)
-    }
-
-    /// What the caret Linear draws adds to `fieldLength`, which a settle leaves out.
-    var drawnLength: Int {
-        let shown = chromium
-        guard shown.drawnCaret != nil else { return 0 }
-        return shown.shown.value.utf16.count
-            - ChromiumParagraphs(text: text, lines: listLines, caret: selection.lowerBound).shown.value.utf16.count
-    }
-
-    /// The upper end's paragraph side from the Sim's own text, in every Chromium mode.
-    var upperSide: ParagraphBreaks.Side? {
-        reads != nil || markers || emptyParagraphs ? ChromiumParagraphs.side(selection.upperBound, in: text) : nil
-    }
-
-    var markerReads: MarkerReads {
-        guard !showsPlaceholder else { return MarkerReads(breaks: ParagraphBreaks(), value: readSelection) }
-        return MarkerReads(
-            breaks: ParagraphBreaks(value: text, fieldText: text.filter { $0 != "\n" }), value: selection,
-            textlessLeaves: endsInTextlessLeaf
-        )
-    }
-
-    mutating func learn(from observed: Learning.Observation) {
-        // The controller's: a run the focus left teaches nothing.
-        guard var learner, departure == nil else { return }
-        if observed.source.observes {
-            for item in attribution.evidence { learner.tally.count(item) }
-        }
-        if let route = attribution.missedRoute {
-            learner.strikes.miss(route, judgedUnder: observed.after, app: learner.versions.app)
-        }
-        let config = learner.config
-        let lesson = Learning.learn(
-            store: &learner.store, strikes: &learner.strikes, rung: learner.rung, versions: learner.versions,
-            model: learner.model, observed: observed, run: attribution.evidence,
-            overridden: { config[$0]?.override != nil }, provenance: Provenance(), tally: learner.tally
-        )
-        learner.lessons.append(lesson)
-        self.learner = learner
-        if lesson.republish { resolveBeliefs() }
-    }
-
-    mutating func resolveBeliefs() {
-        guard var learner else { return }
-        let resolved = learner.store.resolve(
-            rungs: [learner.rung], rung: learner.rung, versions: learner.versions, chromium: learner.chromium,
-            children: hasChildren, userPinsOffsets: learner.config[.readCaret]?.override != nil
-        )
-        learner.resolved = resolved
-        profile = CapabilityResolver.resolve(probed: learner.probed, config: learner.config, beliefs: resolved).profile
-        self.learner = learner
-    }
-}
-
-public extension Sim {
-    /// What Linear draws before a line's text, each a block of its own in `AXValue`: a list marker, then text-less leaves.
-    struct ListLine: Hashable, Sendable {
-        public var marker: String?
-        public var leaves: Int
-        /// The leaves are a to-do's checkbox, which a write at its line's start lands beside by where the caret was.
-        public var checkbox: Bool
-        /// The marker starts its item's line, as Chromium draws its own lists' markers.
-        public var inline: Bool
-        /// The line starts a list, code block or quote right after another, so → ↓ from the line above or ↑ from it stops first.
-        public var stop: Bool
-        /// The marker is a code block's language label, which its block tells from text, not its shape.
-        public var controls: Bool
-        /// Rules right before the line, each a text-less block of its own (LIN-1780).
-        public var ruled: Int
-        /// The stops before the line other than `stop`'s, top first, as discovery reads them beside rules, tables and sections.
-        public var before: [ParagraphBreaks.Hidden.Kind]
-        /// The line is a table cell's, and starts the table's last row.
-        public var cell: Bool
-        public var lastRow: Bool
-
-        public init(
-            marker: String? = nil, leaves: Int = 0, checkbox: Bool = false, inline: Bool = false, stop: Bool = false,
-            controls: Bool = false, ruled: Int = 0, before: [ParagraphBreaks.Hidden.Kind] = [], cell: Bool = false,
-            lastRow: Bool = false
-        ) {
-            self.marker = marker
-            self.leaves = leaves
-            self.checkbox = checkbox
-            self.inline = inline
-            self.stop = stop
-            self.controls = controls
-            self.ruled = ruled
-            self.before = before
-            self.cell = cell || lastRow
-            self.lastRow = lastRow
-        }
-
-        /// `lines` once `range` of `text` is `replacement`: the first keeps its own, but a deleted plain line the next's.
-        static func carried(
-            _ lines: [ListLine], in text: String, replacing range: Range<Int>, with replacement: String
-        ) -> [ListLine] {
-            let units = Array(text.utf16)
-            guard lines.count == units.filter({ $0 == 10 }).count + 1 else { return lines }
-            let first = units[..<range.lowerBound].filter { $0 == 10 }.count
-            let last = units[..<range.upperBound].filter { $0 == 10 }.count
-            var head = lines[first]
-            let wholeLines = replacement.isEmpty && !range.isEmpty && units[range.upperBound - 1] == 10
-                && (range.lowerBound == 0 || units[range.lowerBound - 1] == 10)
-            if wholeLines, head == ListLine() { head = lines[last] }
-            let made = replacement.utf16.filter { $0 == 10 }.count
-            return Array(lines[..<first]) + [head] + Array(repeating: ListLine(), count: made) + Array(lines[(last + 1)...])
-        }
-    }
-}
-
-public extension EmptyParagraphs {
-    /// `AXValue`, the plain marker text and each empty paragraph's `<br>` offset, as Chrome 153 shows `paragraphs`.
-    static func chromium(_ paragraphs: [String]) -> (value: String, markers: String, found: [Int]) {
-        var value = ""
-        var markers = ""
-        var found: [Int] = []
-        for (index, paragraph) in paragraphs.enumerated() {
-            if paragraph.isEmpty {
-                found.append(markers.utf16.count)
-                markers += "\n"
-                value += "\n"
-            } else {
-                if index > 0, !paragraphs[index - 1].isEmpty { value += "\n" }
-                markers += paragraph
-                value += paragraph
-            }
-        }
-        return (value, markers, found)
-    }
-}
-
-/// The Sim's text as Chrome 153 shows it when every `\n` ends a paragraph (LIN-1612); with `lines`, as Linear does.
-struct ChromiumParagraphs {
-    static let chip: UInt16 = 0x2060
-    static let label = Array("\u{2060}\u{00A0}LIN-1 chip".utf16)
-
-    let text: String
-    let paragraphs: [String]
-    let lines: [Sim.ListLine]?
-    /// `AXValue`, the raw marker text and each empty paragraph's `<br>` offset.
-    let shown: (value: String, markers: String, found: [Int])
-    let plainMarkers: String
-    /// Plain starts of the list markers, and the chips.
-    let listMarkers: [Int]
-    let chips: [UnreachableLines.Chip]
-    /// Plain starts of blocks a stop comes before, the Sim offsets of their first lines, and code blocks' labels.
-    let joins: [Int]
-    let gaps: Set<Int>
-    let controls: [Range<Int>]
-    /// The other stops and the tables as discovery reads them, and each line's stops, table lines and last rows in Sim offsets.
-    let stops: [UnreachableLines.Stop]
-    let tables: [UnreachableLines.Table]
-    let keyStops: [Int: [ParagraphBreaks.Hidden.Kind]]
-    let cells: Set<Int>
-    let lastRows: Set<Int>
-    /// The caret Linear draws at a code span's edge, and the paragraph whose end it ends with a `<br>`.
-    let drawnCaret: UnreachableLines.Caret?
-    let drawnAtEnd: Int?
-
-    /// `caret` beside a chip that starts or ends its paragraph brings Linear's image, and `drawn` its drawn caret, each a line.
-    init(text: String, lines: [Sim.ListLine]? = nil, caret: Int? = nil, drawn drawnAt: Int? = nil) {
-        self.text = text
-        paragraphs = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        self.lines = lines
-        guard let lines else {
-            shown = EmptyParagraphs.chromium(paragraphs)
-            plainMarkers = shown.markers
-            listMarkers = []
-            chips = []
-            joins = []
-            gaps = []
-            controls = []
-            stops = []
-            tables = []
-            keyStops = [:]
-            cells = []
-            lastRows = []
-            drawnCaret = nil
-            drawnAtEnd = nil
-            return
-        }
-        var drawnCaret: UnreachableLines.Caret?
-        var drawnAtEnd: Int?
-        var value = ""
-        var raw = ""
-        var found: [Int] = []
-        var markers: [Int] = []
-        var chips: [UnreachableLines.Chip] = []
-        var joins: [Int] = []
-        var gaps: Set<Int> = []
-        var controls: [Range<Int>] = []
-        var stops: [UnreachableLines.Stop] = []
-        var tables: [UnreachableLines.Table] = []
-        var keyStops: [Int: [ParagraphBreaks.Hidden.Kind]] = [:]
-        var cells: Set<Int> = []
-        var lastRows: Set<Int> = []
-        var table: (start: Int, lastRow: Int?)?
-        var plain = 0
-        var start = 0
-        var afterBreak = false
-        // Chromium breaks the line before each block but the first, a `<br>` alone, or one after a `<br>`.
-        func block(_ text: [UInt16], br: Bool = false) {
-            if !value.isEmpty || !raw.isEmpty, !br, !afterBreak { value += "\n" }
-            value += String(decoding: text, as: UTF16.self)
-            afterBreak = br || (text.isEmpty && afterBreak)
-        }
-        for (index, paragraph) in paragraphs.enumerated() {
-            let line = lines.indices.contains(index) ? lines[index] : Sim.ListLine()
-            let units = Array(paragraph.utf16)
-            let prefix = line.inline ? Array((line.marker ?? "").utf16) : []
-            for _ in 0..<line.ruled {
-                block([])
-                raw += "\u{FFFC}"
-            }
-            if line.stop {
-                joins.append(plain)
-                gaps.insert(start)
-            }
-            stops += line.before.map { UnreachableLines.Stop(at: plain, kind: $0) }
-            let own: [ParagraphBreaks.Hidden.Kind] = line.stop ? [line.leaves > 0 ? .boxedGap : .gap] : []
-            if !(own + line.before).isEmpty { keyStops[start] = own + line.before }
-            // A run of cell lines is a table, which ends where the line after it starts.
-            if line.cell {
-                cells.insert(start)
-                if line.lastRow { lastRows.insert(start) }
-                if table == nil { table = (plain, nil) }
-                if line.lastRow { table?.lastRow = plain }
-            } else if let open = table {
-                tables.append(UnreachableLines.Table(range: open.start..<plain, lastRow: open.lastRow))
-                table = nil
-            }
-            if let marker = line.marker {
-                if line.controls { controls.append(plain..<(plain + marker.utf16.count)) } else { markers.append(plain) }
-                if !line.inline {
-                    block(Array(marker.utf16))
-                    raw += marker
-                }
-                plain += marker.utf16.count
-            }
-            for _ in 0..<line.leaves {
-                block([])
-                raw += "\u{FFFC}"
-            }
-            guard !units.isEmpty else {
-                // Chromium keeps the line of its own list's empty item, which holds the marker.
-                if prefix.isEmpty { found.append(plain) } else { block(prefix) }
-                raw += String(decoding: prefix, as: UTF16.self)
-                block([10], br: true)
-                raw += "\n"
-                plain += 1
-                start += 1
-                continue
-            }
-            // Each chip is a line of its own, which spaces after it join, and one ending the paragraph is followed by a `<br>`.
-            var parts: [[UInt16]] = []
-            var pending: [UInt16] = []
-            func flush() {
-                guard !pending.isEmpty else { return }
-                if parts.last == Self.label, pending.allSatisfy({ $0 == 0x20 }) {
-                    parts[parts.count - 1] += pending
-                } else {
-                    parts.append(pending)
-                }
-                pending = []
-            }
-            var partsRaw: [UInt16] = []
-            var paragraphChips: [Range<Int>] = []
-            let paragraphStart = plain
-            // Measured, there is none before a chip right after another chip's `<br>`.
-            let followsBreak = afterBreak
-            let drawn = drawnAt.flatMap { (start...(start + units.count)).contains($0) ? $0 - start : nil }
-            for (offset, unit) in units.enumerated() {
-                if offset == drawn {
-                    flush()
-                    // Measured, one starting a paragraph right after a `<br>` has no line of its own.
-                    if offset > 0 || !followsBreak { parts.append([]) }
-                    partsRaw.append(0xFFFC)
-                    drawnCaret = UnreachableLines.Caret(offset: plain, place: offset == 0 ? .start : .middle)
-                }
-                guard unit == Self.chip else {
-                    pending.append(unit)
-                    partsRaw.append(unit)
-                    plain += 1
-                    continue
-                }
-                flush()
-                if offset == 0, caret == start, !followsBreak {
-                    parts.append([])
-                    partsRaw.append(0xFFFC)
-                }
-                parts.append(Self.label)
-                partsRaw += Self.label
-                paragraphChips.append(plain..<(plain + Self.label.count))
-                plain += Self.label.count
-                if offset == units.count - 1, caret == start + units.count {
-                    parts.append([])
-                    partsRaw.append(0xFFFC)
-                }
-            }
-            flush()
-            if drawn == units.count {
-                parts.append([])
-                partsRaw.append(0xFFFC)
-                drawnCaret = UnreachableLines.Caret(offset: plain, place: .end)
-                drawnAtEnd = index
-            }
-            block(prefix + parts[0])
-            raw += String(decoding: prefix, as: UTF16.self)
-            for part in parts.dropFirst() { value += "\n" + String(decoding: part, as: UTF16.self) }
-            raw += String(decoding: partsRaw, as: UTF16.self)
-            if units.last == Self.chip || drawn == units.count {
-                value += "\n"
-                raw += "\n"
-                plain += 1
-                afterBreak = true
-            } else if parts.count > 1 {
-                afterBreak = false
-            }
-            chips += paragraphChips.map { UnreachableLines.Chip(range: $0, paragraph: paragraphStart..<plain) }
-            start += units.count + 1
-        }
-        shown = (value, raw, found)
-        plainMarkers = FieldReads.withoutAttachments(raw)
-        listMarkers = markers
-        self.chips = chips
-        if let open = table { tables.append(UnreachableLines.Table(range: open.start..<plain, lastRow: open.lastRow)) }
-        self.joins = joins
-        self.gaps = gaps
-        self.controls = controls
-        self.stops = stops
-        self.tables = tables
-        self.keyStops = keyStops
-        self.cells = cells
-        self.lastRows = lastRows
-        self.drawnCaret = drawnCaret
-        self.drawnAtEnd = drawnAtEnd
-    }
-
-    /// The plain offset of each Sim offset; a caret after a chip ending its paragraph reads past the `<br>` after it.
-    func field(_ offset: Int, caret: Bool = true) -> Int {
-        var start = 0
-        var plain = 0
-        for (index, paragraph) in paragraphs.enumerated() {
-            let line = lines.flatMap { $0.indices.contains(index) ? $0[index] : nil } ?? Sim.ListLine()
-            plain += line.marker?.utf16.count ?? 0
-            let units = Array(paragraph.utf16)
-            let chips = lines == nil ? 0 : units.filter { $0 == Self.chip }.count
-            let trailing = lines != nil && units.last == Self.chip || drawnAtEnd == index ? 1 : 0
-            if offset <= start + units.count {
-                let local = offset - start
-                let before = lines == nil ? 0 : units[..<local].filter { $0 == Self.chip }.count
-                let past = caret && local == units.count && drawnAtEnd != index ? trailing : 0
-                return plain + local + before * (Self.label.count - 1) + past
-            }
-            plain += max(units.count + chips * (Self.label.count - 1), 1) + trailing
-            start += units.count + 1
-        }
-        return plain
-    }
-
-    func field(_ range: Range<Int>) -> Range<Int> {
-        guard !range.isEmpty else { return field(range.lowerBound)..<field(range.lowerBound) }
-        let (a, b) = (field(range.lowerBound, caret: false), field(range.upperBound, caret: false))
-        return min(a, b)..<max(a, b)
-    }
-
-    /// Where a write lands: the last caret before `offset`, or at a marker or checkbox, the side `caret` comes from.
-    func landing(_ offset: Int, from caret: Int) -> Int {
-        let last = (0...text.utf16.count).last { field($0, caret: false) <= offset } ?? 0
-        let units = Array(text.utf16)
-        guard let lines else { return last }
-        func prefix(_ start: Int) -> Sim.ListLine {
-            let line = units[..<start].filter { $0 == 10 }.count
-            return lines.indices.contains(line) ? lines[line] : Sim.ListLine()
-        }
-        if last > 0, units[last - 1] == 10, caret > last, prefix(last).checkbox, field(last - 1) == field(last) {
-            return last - 1
-        }
-        guard last < units.count, units[last] == 10 else { return last }
-        let next = prefix(last + 1)
-        let marker = next.marker?.utf16.count ?? 0
-        // Chromium's own list lands a write in its marker after it, whichever way the caret came.
-        return marker > 0 && offset >= field(last + 1) - marker && (caret <= last || next.inline) ? last + 1 : last
-    }
-
-    /// Offsets of the chips, which keys cross in one step.
-    var atoms: Set<Int> {
-        guard lines != nil else { return [] }
-        return Set(text.utf16.enumerated().filter { $0.element == Self.chip }.map(\.offset))
-    }
-
-    /// `Snapshotter.paragraphSide`: a paragraph's start, empty or not, reads as the start.
-    static func side(_ offset: Int, in text: String) -> ParagraphBreaks.Side {
-        offset == 0 || Array(text.utf16)[offset - 1] == 10 ? .start(skipping: 0) : .end
-    }
-
-    func side(_ offset: Int) -> ParagraphBreaks.Side {
-        Self.side(offset, in: text)
-    }
-
-    func inEmptyParagraph(_ selection: Range<Int>) -> Bool {
-        guard selection.isEmpty else { return false }
-        let model = TextModel(text)
-        return model.lineStart(of: selection.lowerBound) == model.lineBreak(of: selection.lowerBound)
-    }
 }
