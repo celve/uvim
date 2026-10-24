@@ -65,7 +65,7 @@ extension PhysicalPlanner {
         // ↓ or ↑ across a line that starts after a block or rule Linear stops beside stops there first.
         let way: KeyModel.Way = toLine > fromLine ? .down : .up
         let stops = context.stops.filter { min(fromLine, toLine) < $0.key && $0.key <= max(fromLine, toLine) }
-            .values.reduce(0) { $0 + $1.filter { KeyModel.visits($0, way) }.count }
+            .values.reduce(0) { $0 + $1.filter { Linear.visits($0, way) }.count }
         presses.append(.press(toLine > fromLine ? .down : .up, count: lines + stops))
         presses.append(.press(.lineStart, count: 1))
         if context.normalizes(toLine) { presses += outside }

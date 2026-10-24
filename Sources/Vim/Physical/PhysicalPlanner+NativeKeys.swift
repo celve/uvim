@@ -16,52 +16,16 @@ extension PhysicalPlanner {
         let cells = context.cells
         let lastRows = context.lastRows
         let shape = context
-        // ⇧→ → crosses a lone stop, which Dia reads right ~150 ms before → → (LIN-1686); a to-do, a table or a rule takes
-        // a → each, and ⌥→ leaves a table line for the next line's start past any stop (LIN-1780).
+        // Linear's stops and tables take keys of their own; any other field's line takes → down, or ← and ⌃A up.
+        let linear = !stops.isEmpty || !cells.isEmpty
         func hops(_ count: Int) -> [[Chord]] {
-            let starts = stops.isEmpty && cells.isEmpty ? [] : lineStarts(after: line, count: count, in: model)
-            return zip([line] + starts, starts).map { from, start -> [Chord] in
-                let crossed = (stops[start] ?? []).filter { KeyModel.visits($0, .right) }
-                // Into a rule a table's last cell leaves by →, after which ⇧→ counts a column right where ⌥→'s does not.
-                if cells.contains(from), !crossed.contains(.rule), profile.has(.wordKeys) { return [.wordRight] }
-                return crossed == [.gap] ? [.selectRight, .right] : Array(repeating: .right, count: crossed.count + 1)
-            } + Array(repeating: [.right], count: count - starts.count)
+            linear ? Linear.hops(from: line, count: count, model: model, stops: stops, cells: cells, profile: profile)
+                : Array(repeating: [.right], count: count)
         }
-        // ← per stop ← meets and ⌃A per line; into a table from the line below it, ↑ to its last row, then ⌃E ⌥→ per cell.
         func upward(_ count: Int) -> (chords: [Chord], endsLeft: Bool) {
-            var chords: [Chord] = []
-            var at = line
-            var left = count
-            var endsLeft = false
-            while left > 0, at > 0 {
-                let above = model.lineStart(of: at - 1)
-                // ← skips a table right above unless a rule between gives it somewhere to stop.
-                let backs = (stops[at] ?? []).filter { KeyModel.visits($0, .left) }.count
-                if cells.contains(above), !cells.contains(at), backs == 0, let row = lastRow(above) {
-                    let rows = model.newlineCount(in: row..<above) + 1
-                    let crossed = (stops[at] ?? []).filter { KeyModel.visits($0, .up) }.count
-                    chords += Array(repeating: .up, count: crossed + 1) + [.paragraphStart]
-                    endsLeft = false
-                    guard left >= rows else {
-                        chords += repeated([.paragraphEnd, profile.has(.wordKeys) ? .wordRight : .right], rows - left)
-                        break
-                    }
-                    (at, left) = (row, left - rows)
-                    continue
-                }
-                chords += Array(repeating: .left, count: backs + 1) + [.paragraphStart]
-                (at, left, endsLeft) = (above, left - 1, true)
-            }
-            return (chords, endsLeft)
-        }
-        // The first line of the last row of the table holding the table line `line`.
-        func lastRow(_ line: Int) -> Int? {
-            var at = line
-            while !lastRows.contains(at) {
-                guard at > 0, cells.contains(model.lineStart(of: at - 1)) else { return nil }
-                at = model.lineStart(of: at - 1)
-            }
-            return at
+            linear ? Linear.upward(from: line, count: count, model: model, stops: stops, cells: cells, lastRows: lastRows,
+                                   profile: profile)
+                : (repeated([.left, .paragraphStart], count), count > 0)
         }
         // The way to the target's line, and for `j`/`k` an optional one to its end; the column is counted from where each lands.
         var way: [KeyGroup]
@@ -159,18 +123,6 @@ extension PhysicalPlanner {
     static func prefixCount(_ chord: Chord, context: Context, profile: CapabilityProfile) -> Int {
         guard context.unmoved, let caret = context.caret else { return 0 }
         return outside(before: chord, at: caret, context: context, profile: profile)?.count ?? 0
-    }
-
-    /// The starts of the `count` lines after `line`'s, as far as the text goes.
-    private static func lineStarts(after line: Int, count: Int, in model: TextModel) -> [Int] {
-        var starts: [Int] = []
-        guard count > 0 else { return starts }
-        var end = model.lineBreak(of: line)
-        while starts.count < count, end < model.length {
-            starts.append(end + 1)
-            if starts.count < count { end = model.lineBreak(of: end + 1) }
-        }
-        return starts
     }
 
     /// Line-shaped selections by native keys, as many as the command counts, since keys past the end do nothing;

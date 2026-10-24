@@ -295,7 +295,7 @@ func testCountedArrows() {
         0/G/0/44 0.0/T/0/44 1/E/44/45 2/L/45/71 2.0/G/45/71 2.0.0/G/45/45 2.0.0.0/I/45/45 2.0.0.1/C/45/45 2.0.1/G/45/71
         2.0.1.0/G/45/71 2.0.1.0.0/T/45/71 3/Q/71/95 3.0/G/71/95 3.0.0/T/71/95 4/G/95/125 4.0/T/95/125
         """))
-    precondition(bareTodo.breaks.hidden == [.init(at: lineStart(of: "Quote after todo", in: bareTodo.text), text: "", kind: .gap)]
+    precondition(bareTodo.breaks.hidden == [.init(at: lineStart(of: "Quote after todo", in: bareTodo.text), text: "", kind: .stop(.gap))]
                  && roundTrips(bareTodo), "with no marker and no leaf's line, the stop is read and kept all the same")
     // evidence/tree-empty-quote-line.jsonl: the same to-do below a quote's empty last line.
     let quotedBareTodo = folded(
@@ -306,21 +306,21 @@ func testCountedArrows() {
         2.0.0.0/I/68/68 2.0.0.1/C/68/68 2.0.1/G/68/92 2.0.1.0/G/68/92 2.0.1.0.0/T/68/92 3/G/92/122 3.0/T/92/122
         """))
     let quotedBareStart = lineStart(of: "Todo after quote", in: quotedBareTodo.text)
-    precondition(quotedBareTodo.breaks.hidden == [.init(at: quotedBareStart, text: "", kind: .boxedGap)] && roundTrips(quotedBareTodo)
+    precondition(quotedBareTodo.breaks.hidden == [.init(at: quotedBareStart, text: "", kind: .stop(.boxedGap))] && roundTrips(quotedBareTodo)
                  && chords(webPhysical("j", text: quotedBareTodo.text, caret: quotedBareStart - 1, profile: keyProfile,
                                        breaks: quotedBareTodo.breaks)) == [.paragraphEnd, .right, .right],
                  "its stop is a to-do's by the leaves at the list's start, though none has a line")
     precondition(!UnreachableLines.candidates(text: "Top\nEnd", breaks: ParagraphBreaks(offsets: [3]), raw: "TopEnd").roots)
 
     let gapBreaks = ParagraphBreaks(offsets: [10], hidden: [
-        .init(at: 11, text: ""), .init(at: 11, text: ""), .init(at: 11, text: "", kind: .boxedGap),
+        .init(at: 11, text: ""), .init(at: 11, text: ""), .init(at: 11, text: "", kind: .stop(.boxedGap)),
     ])
     precondition(chords(webPhysical("j", text: tenTwice, caret: 0, profile: keyProfile, breaks: gapBreaks))
                  == [.paragraphEnd, .right, .right], "a to-do, behind its checkbox's leaves, takes → →")
-    let markedGap = ParagraphBreaks(offsets: [10], hidden: [.init(at: 11, text: "\u{2022}"), .init(at: 11, text: "", kind: .gap)])
+    let markedGap = ParagraphBreaks(offsets: [10], hidden: [.init(at: 11, text: "\u{2022}"), .init(at: 11, text: "", kind: .stop(.gap))])
     precondition(chords(webPhysical("j", text: tenTwice, caret: 0, profile: keyProfile, breaks: markedGap))
                  == [.paragraphEnd, .selectRight, .right], "a marked item is crossed into by ⇧→ →, which Dia reads right sooner")
-    let quoteGap = ParagraphBreaks(offsets: [10], hidden: [.init(at: 11, text: "", kind: .gap)])
+    let quoteGap = ParagraphBreaks(offsets: [10], hidden: [.init(at: 11, text: "", kind: .stop(.gap))])
     precondition(chords(webPhysical("j", text: tenTwice, caret: 0, profile: keyProfile, breaks: quoteGap))
                  == [.paragraphEnd, .selectRight, .right], "and so is a quote, where → → reads one past for ~150 ms (LIN-1726)")
     precondition(webPhysical("j", text: tenTwice, caret: 0, profile: writeKeys, breaks: quoteGap).steps
@@ -329,13 +329,13 @@ func testCountedArrows() {
                  == webPhysical("dd", text: tenTwice, caret: 0, profile: writeKeys, breaks: ParagraphBreaks(offsets: [10])).steps.first,
                  "a stop folds no text, so a write lane plans a quote's first line as any paragraph's")
     let thrice = tenTwice + "\nabcdefghij"
-    let foldedQuote = ParagraphBreaks(offsets: [10, 21], hidden: [.init(at: 11, text: "", kind: .gap), .init(at: 22, text: "\u{2022}")])
+    let foldedQuote = ParagraphBreaks(offsets: [10, 21], hidden: [.init(at: 11, text: "", kind: .stop(.gap)), .init(at: 22, text: "\u{2022}")])
     let foldedPlain = ParagraphBreaks(offsets: [10, 21], hidden: [.init(at: 22, text: "\u{2022}")])
     precondition([("j", 0), ("k", 22), ("dd", 11), ("d$", 11)].allSatisfy { keys, caret in
         webPhysical(keys, text: thrice, caret: caret, profile: writeKeys, breaks: foldedQuote).steps
             == webPhysical(keys, text: thrice, caret: caret, profile: writeKeys, breaks: foldedPlain).steps
     }, "and so it does where the field folds a marker elsewhere")
-    let bareTodoGap = ParagraphBreaks(offsets: [10], hidden: [.init(at: 11, text: "", kind: .boxedGap)])
+    let bareTodoGap = ParagraphBreaks(offsets: [10], hidden: [.init(at: 11, text: "", kind: .stop(.boxedGap))])
     precondition(chords(webPhysical("j", text: tenTwice, caret: 0, profile: keyProfile, breaks: bareTodoGap))
                  == [.paragraphEnd, .right, .right], "a to-do whose checkbox has no line of its own still takes → →")
     precondition(["j", "$", "o", "dd", "J"].allSatisfy { keys in
@@ -343,7 +343,7 @@ func testCountedArrows() {
             == webPhysical(keys, text: tenTwice, caret: 0, profile: writeKeys, breaks: ParagraphBreaks(offsets: [10])).steps
     }, "stops alone leave a field unfolded for the write lane, and an edit's length known")
     let codeGap = ParagraphBreaks(offsets: [10], hidden: [
-        .init(at: 11, text: "CSS"), .init(at: 11, text: ""), .init(at: 11, text: ""), .init(at: 11, text: "", kind: .gap),
+        .init(at: 11, text: "CSS"), .init(at: 11, text: ""), .init(at: 11, text: ""), .init(at: 11, text: "", kind: .stop(.gap)),
     ])
     precondition(chords(webPhysical("j", text: tenTwice, caret: 0, profile: keyProfile, breaks: codeGap))
                  == [.paragraphEnd, .selectRight, .right], "and a code block, behind its label and images")
@@ -400,7 +400,7 @@ func testCountedArrows() {
         "code after todo tango", "Todo after code uniform", "Quote after todo victor", "Bullet after quote xray",
     ].map { lineStart(of: $0, in: blocksModel.text) }), "a stop between any two of list, code block and quote, and nowhere else")
     precondition(roundTrips(blocksModel))
-    precondition(Set(blocksModel.breaks.hidden.filter { $0.kind == .boxedGap }.map(\.at))
+    precondition(Set(blocksModel.breaks.hidden.filter { $0.kind == .stop(.boxedGap) }.map(\.at))
                  == Set(["Todo after quote sierra", "Todo after code uniform"].map { lineStart(of: $0, in: blocksModel.text) }),
                  "only a to-do's stop is boxed")
     precondition(blocksModel.breaks.fieldOffset(lineStart(of: "code after bullet mike", in: blocksModel.text)) == 328)
@@ -441,7 +441,7 @@ func testCountedArrows() {
                  "another editor's text, or a single line, asks nothing")
     precondition(unreachableScanned(twoQuotes, quoteCandidates)?.joins == [3]
                  && unreachableScanned(fakeTree(twoQuotesSpec, linear: false), quoteCandidates)?.joins == [])
-    precondition(folded("one\ntwo", "onetwo", twoQuotes).breaks == ParagraphBreaks(offsets: [3], hidden: [.init(at: 4, text: "", kind: .gap)])
+    precondition(folded("one\ntwo", "onetwo", twoQuotes).breaks == ParagraphBreaks(offsets: [3], hidden: [.init(at: 4, text: "", kind: .stop(.gap))])
                  && UnreachableLines.fold(text: "a\nb", breaks: ParagraphBreaks(offsets: [1]), raw: "ab",
                                           found: .init(markers: [], chips: [], joins: [1])).breaks.gaps == [2],
                  "a stop that was read is kept though nothing folds")
