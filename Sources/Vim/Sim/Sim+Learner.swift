@@ -48,7 +48,8 @@ extension Sim {
             webContent: webContent || self.reads != nil || emptyParagraphs, blocks: blocks
         )
         reads.roots = roots
-        reads.proseMirror = listLines != nil
+        reads.proseMirror = listLines != nil && !quill
+        reads.quill = quill
         if showsPlaceholder {
             // What the Snapshotter makes of a field its scan finds shows only generated text (LIN-1930).
             reads = FieldSnapshot.Reads(

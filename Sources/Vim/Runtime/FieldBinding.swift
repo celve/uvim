@@ -192,7 +192,9 @@ public enum Snapshotter {
             : FieldSnapshot.Reads(
                 field: raw, length: reads.int(2), webContent: reads.string(3) != nil, blocks: blocks, marked: marked?.range
             )
-        snapshotReads.proseMirror = chromium && reads.strings(classes)?.contains(Linear.editorClass) == true
+        let classList = chromium ? reads.strings(classes) ?? [] : []
+        snapshotReads.proseMirror = classList.contains(Linear.editorClass)
+        snapshotReads.quill = classList.contains(UnreachableLines.quillClass)
         // A quote's or open section's children decide stops too, and one changing kind keeps the roots (LIN-1780).
         func witness(_ found: UnreachableLines.Found?) -> Int? {
             roots.flatMap { roots in

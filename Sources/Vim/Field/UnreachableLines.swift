@@ -45,15 +45,19 @@ public enum UnreachableLines {
         public let roots: Bool
         /// A ProseMirror editor's text of more than one line, where Linear's stops show nothing in the text: two quotes side by side.
         public let stops: Bool
+        /// Quill's editor, whose empty item holds its marker's group alone (LIN-2329).
+        public let quill: Bool
 
         public init(
-            markers: [Range<Int>], chips: [Range<Int>], carets: [Int] = [], roots: Bool = false, stops: Bool = false
+            markers: [Range<Int>], chips: [Range<Int>], carets: [Int] = [], roots: Bool = false, stops: Bool = false,
+            quill: Bool = false
         ) {
             self.markers = markers
             self.chips = chips
             self.carets = carets
             self.roots = roots
             self.stops = stops
+            self.quill = quill
         }
 
         public var isEmpty: Bool { markers.isEmpty && chips.isEmpty && carets.isEmpty && !roots && !stops }
@@ -225,7 +229,8 @@ public enum UnreachableLines {
 
     /// Lines shaped like a marker or starting with one and a space, lines starting as Linear's chips do, and drawn carets'.
     public static func candidates(
-        text: String, breaks: ParagraphBreaks, raw: String? = nil, caret: Int? = nil, proseMirror: Bool = false
+        text: String, breaks: ParagraphBreaks, raw: String? = nil, caret: Int? = nil, proseMirror: Bool = false,
+        quill: Bool = false
     ) -> Candidates {
         let leaves = raw.map(leafCounts) ?? [:]
         let generated = Set(breaks.offsets)
@@ -240,7 +245,7 @@ public enum UnreachableLines {
             if line.units.isEmpty, end < length, generated.contains(end), leaves[start, default: 0] > 0 { leafLines = true }
             if isMarkerShaped(line.units) {
                 markers.append(start..<(start + line.units.count))
-            } else if let count = prefixLength(line.units) {
+            } else if let count = prefixLength(line.units, quill: quill) {
                 markers.append(start..<(start + count))
             }
             if line.units.starts(with: [0x2060, 0x00A0]) { chips.append(start..<(start + line.units.count)) }
@@ -252,7 +257,7 @@ public enum UnreachableLines {
         if let caret, leaves[caret] != nil, !carets.contains(caret) { carets.append(caret) }
         return Candidates(
             markers: markers, chips: chips, carets: carets, roots: !markers.isEmpty || leafLines,
-            stops: proseMirror && text.utf16.contains(10)
+            stops: proseMirror && text.utf16.contains(10), quill: quill
         )
     }
 
@@ -267,7 +272,7 @@ public enum UnreachableLines {
     }
 
     /// `raw` is the marker text, whose U+FFFCs place the leaves.
-    public static func fold(text: String, breaks: ParagraphBreaks, raw: String, found: Found) -> Model {
+    public static func fold(text: String, breaks: ParagraphBreaks, raw: String, found: Found, quill: Bool = false) -> Model {
         let generated = Set(breaks.offsets)
         var leaves = leafCounts(raw)
         let leafStarts = leaves
@@ -325,7 +330,7 @@ public enum UnreachableLines {
                 dropped.formUnion(line.start..<(terminated ? end + 1 : end))
                 runs.append((terminated ? end + 1 : end, String(decoding: line.units, as: UTF16.self), .structure))
                 keepsTerminator = !terminated
-            } else if markers.contains(start), let count = prefixLength(line.units) {
+            } else if markers.contains(start), let count = prefixLength(line.units, quill: quill) {
                 dropped.formUnion(line.start..<(line.start + count))
                 runs.append((line.start + count, String(decoding: line.units[..<count], as: UTF16.self), .prefix))
                 textSinceBreak = count < line.units.count
@@ -417,12 +422,15 @@ public enum UnreachableLines {
         return String(decoding: units.dropLast(), as: UTF16.self).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
-    /// The length of a marker and the space after it that start a line, as Chromium draws its own list's markers, or of a
-    /// marker with no space before text, as Quill's `li::before` draws Slack's (LIN-2329).
-    static func prefixLength(_ units: [UInt16]) -> Int? {
+    /// The length of a marker and the space after it that start a line, as Chromium draws its own list's markers; in `quill`,
+    /// also of a marker with no space, as Quill's `li::before` draws Slack's (LIN-2329).
+    static func prefixLength(_ units: [UInt16], quill: Bool = false) -> Int? {
         (2...6).first { $0 <= units.count && units[$0 - 1] == 0x20 && isMarkerShaped(Array(units[..<($0 - 1)])) }
-            ?? (1...5).first { $0 < units.count && !"–-*".utf16.contains(units[0]) && isMarkerShaped(Array(units[..<$0])) }
+            ?? (quill ? (1...5).first { $0 <= units.count && isMarkerShaped(Array(units[..<$0])) } : nil)
     }
+
+    /// Quill's editor, as Slack's message box is: its list markers are generated text with no space after them.
+    public static let quillClass = "ql-editor"
 
     private static func lines(of text: String) -> [(start: Int, units: [UInt16])] {
         let units = Array(text.utf16)
