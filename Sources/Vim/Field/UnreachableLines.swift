@@ -417,9 +417,11 @@ public enum UnreachableLines {
         return String(decoding: units.dropLast(), as: UTF16.self).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
-    /// The length of a marker and the space after it that start a line, as Chromium draws its own list's markers.
+    /// The length of a marker and the space after it that start a line, as Chromium draws its own list's markers, or of a
+    /// marker with no space before text, as Quill's `li::before` draws Slack's (LIN-2329).
     static func prefixLength(_ units: [UInt16]) -> Int? {
         (2...6).first { $0 <= units.count && units[$0 - 1] == 0x20 && isMarkerShaped(Array(units[..<($0 - 1)])) }
+            ?? (1...5).first { $0 < units.count && !"–-*".utf16.contains(units[0]) && isMarkerShaped(Array(units[..<$0])) }
     }
 
     private static func lines(of text: String) -> [(start: Int, units: [UInt16])] {

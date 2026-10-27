@@ -547,6 +547,31 @@ func testUnreachableLines() {
         }
     }
 
+    // Quill's `li::before`, Slack's message box: no space after the marker (LIN-2329).
+    let quillDoc: [(String, String?)] = [
+        ("Top paragraph", nil), ("one", "\u{2022}"), ("two longer", "\u{2022}"), ("Middle paragraph", nil), ("first", "1."),
+        ("second item", "2."), ("nested", "a."), ("Last paragraph.", nil),
+    ]
+    for profile in [keyProfile, writeKeys] {
+        for keys in ["jjjjjjjkkkkkkk", "3j2k4j3j3k", "5ljjjjjjkkkk", "$jjjjjjjkkkkk", "jjjjdd", "jjjjjdd", "jlx", "jjj0x"] {
+            var quill = Sim(text: quillDoc.map(\.0).joined(separator: "\n"), caret: 0, profile: profile)
+            quill.emptyParagraphs = true
+            quill.listLines = quillDoc.map { Sim.ListLine(marker: $0.1, inline: true) }
+            quill.emulatesKeys = true
+            quill.readModel = .textContent
+            var plain = Sim(text: quill.text, caret: 0, profile: profile)
+            plain.emulatesKeys = true
+            for key in keys {
+                quill.type(String(key))
+                plain.type(String(key))
+                precondition(quill.caret == plain.caret && quill.text == plain.text, "Quill \(keys) at \(key)")
+            }
+            precondition(quill.settleFailures == 0 && quill.bells == 0, "Quill \(keys)")
+        }
+    }
+    precondition(UnreachableLines.prefixLength(Array("\u{2022}one".utf16)) == 1 && UnreachableLines.prefixLength(Array("10.ten".utf16)) == 3)
+    precondition(UnreachableLines.prefixLength(Array("-dash".utf16)) == nil && UnreachableLines.prefixLength(Array("\u{2022}".utf16)) == nil)
+
     var linearLogged = linearSim(keyProfile, findsUnreachable: false)
     linearLogged.type("j")
     precondition(linearLogged.settleFailures == 1 && linearLogged.caret == 14, "without discovery, LIN-1645's j into an item")
