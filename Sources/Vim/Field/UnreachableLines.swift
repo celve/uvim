@@ -325,7 +325,7 @@ public enum UnreachableLines {
                     runs.append((end + 1, "", .structure))
                     keepsTerminator = false
                 }
-            } else if controls.contains(start) || markers.contains(start) && isMarkerShaped(line.units) {
+            } else if controls.contains(start) || !quill && markers.contains(start) && isMarkerShaped(line.units) {
                 // An empty item's marker ends in its paragraph's `<br>`, whose line stays.
                 dropped.formUnion(line.start..<(terminated ? end + 1 : end))
                 runs.append((terminated ? end + 1 : end, String(decoding: line.units, as: UTF16.self), .structure))
@@ -422,11 +422,11 @@ public enum UnreachableLines {
         return String(decoding: units.dropLast(), as: UTF16.self).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
-    /// The length of a marker and the space after it that start a line, as Chromium draws its own list's markers; in `quill`,
-    /// also of a marker with no space, as Quill's `li::before` draws Slack's (LIN-2329).
+    /// The length of a marker and the space after it that start a line, as Chromium draws its own list's markers; in `quill`, of
+    /// the marker alone, as Quill's `li::before` draws Slack's, a space after it being the item's own text (LIN-2329).
     static func prefixLength(_ units: [UInt16], quill: Bool = false) -> Int? {
-        (2...6).first { $0 <= units.count && units[$0 - 1] == 0x20 && isMarkerShaped(Array(units[..<($0 - 1)])) }
-            ?? (quill ? (1...5).first { $0 <= units.count && isMarkerShaped(Array(units[..<$0])) } : nil)
+        guard !quill else { return (1...5).first { $0 <= units.count && isMarkerShaped(Array(units[..<$0])) } }
+        return (2...6).first { $0 <= units.count && units[$0 - 1] == 0x20 && isMarkerShaped(Array(units[..<($0 - 1)])) }
     }
 
     /// Quill's editor, as Slack's message box is: its list markers are generated text with no space after them.

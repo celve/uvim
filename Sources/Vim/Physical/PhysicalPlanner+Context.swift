@@ -210,7 +210,7 @@ extension PhysicalPlanner {
             case .exact(let range):
                 let at = field(range)
                 // A caret at the field's start can read before its first marker, the same place as after it (LIN-2329).
-                let startsMarked = range == 0..<0 && breaks?.hidden.first.map { $0.at == 0 && $0.kind == .prefix } == true
+                let startsMarked = range == 0..<0 && breaks?.hidden.first.map { $0.at == 0 && $0.isMarker } == true
                 read = startsMarked ? .caretWithin(0...at.lowerBound) : .exact(at)
                 side = unknown.contains(.edge) ? nil : edge(range.upperBound)
             case .caretAfter(let o, let strict):
