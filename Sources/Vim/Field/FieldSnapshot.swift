@@ -98,6 +98,8 @@ public extension FieldSnapshot {
         public var roots: Int?
         /// The editor is ProseMirror's, whose roots are read for Linear's stops (LIN-1726).
         public var proseMirror = false
+        /// The editor is Quill's, whose list markers have no space after them (LIN-2329).
+        public var quill = false
         /// The marker selection, in plain marker offsets.
         public var marked: Range<Int>?
         /// The raw marker text, U+FFFCs included; nil where `AXValue` has no line.
@@ -200,7 +202,8 @@ public extension FieldSnapshot {
         if answer == .textContent, capabilities.has(.readCaret), let value = field.text, let model = text, let current = breaks,
            let marked = reads.marked, let raw = reads.markerText {
             let candidates = UnreachableLines.candidates(
-                text: model, breaks: current, raw: raw, caret: marked.isEmpty ? marked.lowerBound : nil, proseMirror: reads.proseMirror
+                text: model, breaks: current, raw: raw, caret: marked.isEmpty ? marked.lowerBound : nil, proseMirror: reads.proseMirror,
+                quill: reads.quill
             )
             if !candidates.isEmpty {
                 let carried = knownUnreachable?.carried(
@@ -213,7 +216,7 @@ public extension FieldSnapshot {
                 }
             }
             let found = unreachable?.found ?? UnreachableLines.Found(markers: [], chips: [])
-            let folded = UnreachableLines.fold(text: model, breaks: current, raw: raw, found: found)
+            let folded = UnreachableLines.fold(text: model, breaks: current, raw: raw, found: found, quill: reads.quill)
             if folded.folded > 0 || !folded.breaks.hidden.isEmpty {
                 var read = marked
                 var sides = reads.sides

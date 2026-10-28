@@ -28,7 +28,7 @@ public struct UnreachableScan<Node> {
         var chips: [UnreachableLines.Chip] = []
         var carets: [UnreachableLines.Caret] = []
         for candidate in candidates.markers {
-            guard let hit = descend(to: candidate, in: roots) else { return nil }
+            guard let hit = descend(to: candidate, in: roots, quill: candidates.quill) else { return nil }
             if case .marker = hit { markers.append(candidate.lowerBound) }
         }
         for candidate in candidates.chips {
@@ -60,7 +60,7 @@ public struct UnreachableScan<Node> {
     }
 
     /// Descends through the children holding the candidate's start, found by binary search on their starts.
-    private mutating func descend(to candidate: Range<Int>, in roots: [Node]) -> Hit? {
+    private mutating func descend(to candidate: Range<Int>, in roots: [Node], quill: Bool = false) -> Hit? {
         var siblings = roots
         var path: [Int] = []
         var parent: (node: Node, start: Int)?
@@ -92,10 +92,10 @@ public struct UnreachableScan<Node> {
             }
             if inList, hit.start == candidate.lowerBound, let first = read.children.first {
                 var marked = read.children.count > 1
-                // An empty item of Chromium's own list holds its marker alone.
+                // An empty item of Chromium's own list holds its marker alone, and of Quill's list the marker's group.
                 if !marked {
                     guard let child = self.read(first, at: here + [0]) else { return nil }
-                    marked = child.role == "AXListMarker"
+                    marked = child.role == "AXListMarker" || quill && child.role == "AXGroup"
                 }
                 if marked {
                     guard let end = end(of: first, at: here + [0]) else { return nil }

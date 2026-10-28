@@ -51,6 +51,8 @@ public struct Sim {
 
     /// With `emptyParagraphs`, Linear's editor: blocks each line draws before its text, and each U+2060 a chip.
     public var listLines: [ListLine]?
+    /// The editor is Quill's, whose `listLines` markers have no space after them (LIN-2329).
+    public var quill = false
 
     /// Off, discovery of list markers and chips fails, and they stay lines.
     public var findsUnreachable = true
@@ -118,7 +120,8 @@ public struct Sim {
 
     public var readSelection: Range<Int> {
         if showsPlaceholder { return placeholderCaret..<placeholderCaret }
-        if emptyParagraphs { return chromium.field(selection) }
+        // Quill reads a caret at the field's start before its first marker.
+        if emptyParagraphs { return quill && selection == 0..<0 ? 0..<0 : chromium.field(selection) }
         guard let reads else { return selection }
         let start = reads(selection.lowerBound, text)
         return start..<start + readSelectedText.utf16.count

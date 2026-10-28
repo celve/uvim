@@ -547,6 +547,53 @@ func testUnreachableLines() {
         }
     }
 
+    // Quill's `li::before`, Slack's message box: no space after the marker, and a caret at the start reads before it (LIN-2329).
+    let quillDocs: [[(String, String?)]] = [
+        [("Top paragraph", nil), ("one", "\u{2022}"), ("two longer", "\u{2022}"), ("Middle paragraph", nil), ("first", "1."),
+         ("second item", "2."), ("nested", "a."), ("Last paragraph.", nil)],
+        [("one", "\u{2022}"), ("", "\u{2022}"), ("three", "\u{2022}"), ("four", "1."), ("", "2."), ("six", "a.")],
+        [("", "\u{2022}"), (" one", "\u{2022}"), ("", "\u{2022}"), ("three", "1."), (" four", "2.")],
+        [("", "\u{2022}"), ("", "\u{2022}")],
+    ]
+    for (doc, profile) in quillDocs.flatMap({ doc in [keyProfile, writeKeys].map { (doc, $0) } }) {
+        for keys in ["jjjjjjjkkkkkkk", "3j2k4j3j3k", "5ljjjjjjkkkk", "$jjjjjjjkkkkk", "jjjjdd", "jjjjjdd", "jlx", "jjj0x", "jdd",
+                     "jjdd", "Gkkkkkkk", "ggjdk"] {
+            var quill = Sim(text: doc.map(\.0).joined(separator: "\n"), caret: 0, profile: profile)
+            quill.emptyParagraphs = true
+            quill.quill = true
+            quill.listLines = doc.map { Sim.ListLine(marker: $0.1, inline: true) }
+            quill.emulatesKeys = true
+            quill.readModel = .textContent
+            var plain = Sim(text: quill.text, caret: 0, profile: profile)
+            plain.emulatesKeys = true
+            for key in keys {
+                quill.type(String(key))
+                plain.type(String(key))
+                precondition(quill.caret == plain.caret && quill.text == plain.text, "Quill \(keys) at \(key)")
+            }
+            precondition(quill.settleFailures == 0 && quill.bells == 0, "Quill \(keys) \(doc.map(\.0)) \(quill.settleFailures) \(quill.bells)")
+        }
+    }
+    precondition(UnreachableLines.prefixLength(Array("\u{2022}one".utf16), quill: true) == 1
+                 && UnreachableLines.prefixLength(Array("10.ten".utf16), quill: true) == 3)
+    precondition(UnreachableLines.prefixLength(Array("\u{2022}one".utf16)) == nil, "unspaced markers are Quill's alone")
+    precondition(UnreachableLines.prefixLength(Array("\u{2022} one".utf16), quill: true) == 1, "Quill's space is the item's text")
+
+    // `•one⏎•⏎•three` as Chromium 153 shows Quill 1.3.7's list: an empty item holds its `::before` group alone.
+    let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/T/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/T/6/7 0.2.1/T/7/12", linear: false)
+    let quillBreaks = ParagraphBreaks(offsets: [4])
+    let quillFound = unreachableScanned(quillTree, UnreachableLines.candidates(
+        text: "\u{2022}one\n\u{2022}\n\u{2022}three", breaks: quillBreaks, quill: true))
+    precondition(quillFound?.markers == [0, 4, 6], "the empty item's marker too")
+    precondition(unreachableScanned(quillTree, UnreachableLines.candidates(
+        text: "\u{2022}one\n\u{2022}\n\u{2022}three", breaks: quillBreaks))?.markers == [], "outside Quill, an unspaced marker is none")
+    let spacedTree = fakeTree("0/L/0/9 0.0/G/0/5 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/5 0.1/G/5/9 0.1.0/G/5/6 0.1.0.0/T/5/6 0.1.1/T/6/9", linear: false)
+    let spacedBreaks = ParagraphBreaks(offsets: [5])
+    let spacedFound = unreachableScanned(spacedTree, UnreachableLines.candidates(text: "\u{2022} one\n\u{2022}two", breaks: spacedBreaks, quill: true))
+    precondition(spacedFound?.markers == [0, 5], "an item whose text starts with a space keeps its marker")
+    precondition(UnreachableLines.fold(text: "\u{2022} one\n\u{2022}two", breaks: spacedBreaks, raw: "\u{2022} one\u{2022}two",
+                                       found: spacedFound!, quill: true).text == " one\ntwo")
+
     var linearLogged = linearSim(keyProfile, findsUnreachable: false)
     linearLogged.type("j")
     precondition(linearLogged.settleFailures == 1 && linearLogged.caret == 14, "without discovery, LIN-1645's j into an item")
