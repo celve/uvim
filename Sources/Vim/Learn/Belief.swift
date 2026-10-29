@@ -46,6 +46,8 @@ public struct Belief: Codable, Equatable, Sendable {
     public var answer: String
     /// The verdict holds only while the read model gives this answer.
     public var judgedUnder: OffsetsAnswer?
+    /// The verdict holds only under this `BeliefStore.fieldModel`; nil is 0, from before the stamp.
+    public var fieldModel: Int?
     public var appVersion: String
     public var engineVersion: String?
     public var provenance: Provenance
@@ -54,13 +56,14 @@ public struct Belief: Codable, Equatable, Sendable {
     public var anchor: Bool?
 
     public init(
-        rung: String, question: Question, answer: String, judgedUnder: OffsetsAnswer? = nil,
+        rung: String, question: Question, answer: String, judgedUnder: OffsetsAnswer? = nil, fieldModel: Int? = nil,
         versions: Versions, provenance: Provenance = Provenance(), tally: Tally? = nil, anchor: Bool? = nil
     ) {
         self.rung = rung
         self.question = question
         self.answer = answer
         self.judgedUnder = judgedUnder
+        self.fieldModel = fieldModel
         self.appVersion = versions.app ?? ""
         self.engineVersion = versions.engine
         self.provenance = provenance
@@ -69,6 +72,11 @@ public struct Belief: Codable, Equatable, Sendable {
     }
 
     public var capability: Capability? { question.capability }
+
+    /// False for a verdict from another app version or field model, which judged a field uvim no longer sees.
+    func current(app: String) -> Bool {
+        appVersion == app && (fieldModel ?? 0) == BeliefStore.fieldModel
+    }
 
     public var offsetsAnswer: OffsetsAnswer? {
         question == .offsets ? OffsetsAnswer(rawValue: answer) : nil
@@ -145,6 +153,8 @@ public extension OffsetsAnswer {
 /// One belief per rung and question; a user's edit is learned state too, never config.
 public struct BeliefStore: Codable, Equatable, Sendable {
     public static let currentSchema = 3
+    /// Bump in any change to how uvim models a field's structure: every broken verdict is then tried again once.
+    public static let fieldModel = 1
 
     public var schema = BeliefStore.currentSchema
     public var beliefs: [Belief] = []
@@ -219,7 +229,7 @@ public extension BeliefStore {
         var broken: Set<Capability> = []
         var inForce: [Belief] = []
         var reopened: [Belief] = []
-        for belief in beliefs where rungs.contains(belief.rung) && belief.answer == Belief.broken && belief.appVersion == app {
+        for belief in beliefs where rungs.contains(belief.rung) && belief.answer == Belief.broken && belief.current(app: app) {
             guard let capability = belief.capability else { continue }
             if (belief.judgedUnder ?? .value) == model.answer {
                 broken.insert(capability)
@@ -241,11 +251,11 @@ public extension BeliefStore {
         versions: Versions, provenance: Provenance
     ) -> Bool {
         let app = versions.app ?? ""
-        // An app update reopens every trial at the rung.
-        beliefs.removeAll { $0.rung == rung && $0.question != .offsets && $0.appVersion != app }
+        // An app update or a new field model reopens every trial at the rung.
+        beliefs.removeAll { $0.rung == rung && $0.question != .offsets && !$0.current(app: app) }
         let verdict = Belief(
             rung: rung, question: Question(capability), answer: Belief.broken, judgedUnder: offsets,
-            versions: versions, provenance: provenance
+            fieldModel: BeliefStore.fieldModel, versions: versions, provenance: provenance
         )
         guard let index = beliefs.firstIndex(where: { $0.rung == rung && $0.question == verdict.question }) else {
             beliefs.append(verdict)
@@ -307,6 +317,7 @@ extension Belief {
     var traceFields: String {
         var fields = "q=\(question.rawValue) a=\(answer)"
         if let judgedUnder { fields += " judged=\(judgedUnder.rawValue)" }
+        if let fieldModel { fields += " model=\(fieldModel)" }
         fields += " ver=\(appVersion.isEmpty ? "nil" : appVersion)"
         if let engineVersion { fields += " engine=\(engineVersion)" }
         if let build = provenance.build { fields += " build=\(build.filter { $0 != " " })" }

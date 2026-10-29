@@ -194,7 +194,20 @@ func testBeliefModel() {
 
     let migrated = BeliefStore(demotions: [(learnRung, "1.49.1", "writeSelection"), (learnRung, "1.49.1", "noSuchAtom")])
     precondition(migrated.beliefs.count == 1 && migrated.beliefs[0].judgedUnder == .value && migrated.beliefs[0].provenance.tag == "migrated")
-    precondition(resolving(migrated).broken == [.writeSelection] && resolving(migrated, starting: .textContent).broken.isEmpty)
+    precondition(resolving(migrated).broken.isEmpty && resolving(migrated).reopened.isEmpty, "judged before the field model was stamped")
+
+    var remodelled = BeliefStore()
+    precondition(committing(&remodelled, .lineStartKey) && committing(&remodelled, .insertText, at: "company.thebrowser.dia"))
+    precondition(remodelled.beliefs.allSatisfy { $0.fieldModel == BeliefStore.fieldModel } && broken(remodelled) == [.lineStartKey])
+    for stamp in [nil, 0, BeliefStore.fieldModel + 1] {
+        var stale = remodelled
+        for index in stale.beliefs.indices { stale.beliefs[index].fieldModel = stamp }
+        precondition(resolving(stale).broken.isEmpty && resolving(stale).reopened.isEmpty, "another field model's verdict is no lesson")
+        precondition(committing(&stale, .lineStartKey), "a relearned verdict is not refused as already standing")
+        precondition(stale.beliefs.filter { $0.rung == learnRung } == remodelled.beliefs.filter { $0.rung == learnRung })
+        precondition(stale.beliefs.contains { $0.rung == "company.thebrowser.dia" && $0.fieldModel == stamp }, "other rungs keep theirs")
+        precondition(resolving(stale).broken == [.lineStartKey] && !committing(&stale, .lineStartKey))
+    }
 
     var observed = BeliefStore()
     let moved = lesson(&observed, model: ReadModel(answer: .value), snapshot: (.value, supportsTextContent, .textContent))
@@ -286,7 +299,7 @@ func testBeliefModel() {
     precondition(Question(rawValue: "offsets") == .offsets && Question.offsets.rawValue == "offsets")
     precondition(Question(rawValue: "offset") == .unknown("offset") && Question.unknown("offset").rawValue == "offset")
     var laterBuild = BeliefStore(beliefs: [Belief(rung: learnRung, question: Question(rawValue: "offset"), answer: Belief.broken,
-                                                  versions: learnVersions)])
+                                                  fieldModel: BeliefStore.fieldModel, versions: learnVersions)])
     precondition(committing(&laterBuild, .writeSelection) && laterBuild.beliefs.count == 2 && broken(laterBuild) == [.writeSelection],
                  "a question this build does not know is kept and ignored")
 
@@ -335,11 +348,11 @@ func testBeliefModel() {
         .profile.has(.readCaret))
 
     let judgedBelief = Belief(
-        rung: learnRung, question: .write(.writeSelection), answer: Belief.broken, judgedUnder: .value, versions: Versions(app: "1.49.1"),
-        provenance: Provenance(build: "1.0.0 (812)", learnedAt: "2026-09-24T10:00:00Z", tag: "e3.c7")
+        rung: learnRung, question: .write(.writeSelection), answer: Belief.broken, judgedUnder: .value, fieldModel: 1,
+        versions: Versions(app: "1.49.1"), provenance: Provenance(build: "1.0.0 (812)", learnedAt: "2026-09-24T10:00:00Z", tag: "e3.c7")
     )
     precondition(judgedBelief.traceFields
-        == "q=writeSelection a=broken judged=value ver=1.49.1 build=1.0.0(812) at=2026-09-24T10:00:00Z tag=e3.c7")
+        == "q=writeSelection a=broken judged=value model=1 ver=1.49.1 build=1.0.0(812) at=2026-09-24T10:00:00Z tag=e3.c7")
     var tallied = Tally()
     tallied.count(supportsTextContent)
     tallied.count(.offsets(.neutral, .noBreaks))
@@ -351,7 +364,7 @@ func testBeliefModel() {
     var shown = BeliefStore(beliefs: [judgedBelief])
     _ = shown.record(offsets: .textContent, at: learnRung, versions: Versions(app: "1.49.1"), provenance: Provenance(tag: "e4.c1"), tally: Tally())
     precondition(resolving(shown, versions: Versions(app: "1.49.1")).traceLines == [
-        "belief q=writeSelection a=broken judged=value ver=1.49.1 build=1.0.0(812) at=2026-09-24T10:00:00Z tag=e3.c7 reopened offsets=textContent",
+        "belief q=writeSelection a=broken judged=value model=1 ver=1.49.1 build=1.0.0(812) at=2026-09-24T10:00:00Z tag=e3.c7 reopened offsets=textContent",
         "belief q=offsets a=textContent ver=1.49.1 tag=e4.c1 tally=v0,tc0,misfit0,neutral0 in-force",
     ])
     precondition(supportsTextContent.traceFields == "q=offsets supports=textContent why=plain=textContent seen=snapshot")
