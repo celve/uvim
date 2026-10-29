@@ -100,11 +100,6 @@ public extension ParagraphBreaks {
         case end
         /// The next paragraph's start, past `skipping` characters of a list marker.
         case start(skipping: Int)
-
-        var isStart: Bool {
-            guard case .start = self else { return false }
-            return true
-        }
     }
 
     func fieldOffset(_ valueOffset: Int) -> Int {

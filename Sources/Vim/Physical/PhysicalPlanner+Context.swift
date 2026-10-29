@@ -211,7 +211,7 @@ extension PhysicalPlanner {
             case .exact(let range):
                 read = .exact(field(range))
                 side = unknown.contains(.edge) ? nil : edge(range.upperBound)
-                onBreak = range.isEmpty && unknown.contains(.edge) && edge(range.upperBound) != nil
+                onBreak = range.isEmpty && side == nil && breaks.map { [range.lowerBound - 1, range.lowerBound].contains(where: $0.offsets.contains) } == true
             case .caretAfter(let o, let strict):
                 read = .caretAfter(field(o..<o).lowerBound, strict: strict)
             case .caretBefore(let o, let strict):

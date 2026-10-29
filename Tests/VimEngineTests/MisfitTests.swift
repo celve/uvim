@@ -1,7 +1,7 @@
 // MARK: - Misfits: the field model before the key (LIN-2370)
 
 func testMisfits() {
-    // `•one⏎•two⏎•three` in field offsets, its markers held: `•` at 0..<1 starts the field, at 8..<9 a paragraph after another.
+    // `•one⏎•two⏎•three` in field offsets, its markers held: `•` at 0..<1 starts the field, at 8..<9 follows a generated break.
     let held = [Expectation.Equivalence(run: 0..<1, afterBreak: false), Expectation.Equivalence(run: 8..<9, afterBreak: true)]
     var lineStart = Expectation(landing: .exact(9..<9), length: 16, edge: .paragraphStart)
     lineStart.equivalences = held
@@ -12,72 +12,83 @@ func testMisfits() {
     precondition(!lineStart.converged(selection: 8..<8, length: 15, selectedText: nil, side: start), "an equivalent place, a wrong length")
     precondition(!lineStart.converged(selection: 7..<7, length: 16, selectedText: nil, side: start), "a marker merely nearby")
     precondition(!lineStart.converged(selection: 10..<10, length: 16, selectedText: nil, side: start), "nor past it")
+    var noEdge = Expectation(landing: .exact(9..<9), length: 16)
+    noEdge.equivalences = held
+    precondition(!noEdge.converged(selection: 8..<8, length: 16, selectedText: nil, side: start), "without an edge, a break's two sides stay apart")
     var lineEnd = Expectation(landing: .exact(8..<8), length: 16)
     lineEnd.equivalences = held
     precondition(!lineEnd.converged(selection: 9..<9, length: 16, selectedText: nil, side: start), "the line above's end is not the next one's start")
     var before = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart)
     before.equivalences = held
-    precondition(before.converged(selection: 9..<9, length: 16, selectedText: nil, side: start), "unless the expectation means its start side")
+    precondition(before.converged(selection: 9..<9, length: 16, selectedText: nil, side: start), "unless the edge means its start side")
     var fieldStart = Expectation(landing: .exact(1..<1), length: 16)
     precondition(!fieldStart.matches(selection: 0..<0, length: 16), "only across a run the model holds")
     fieldStart.equivalences = held
-    precondition(fieldStart.matches(selection: 0..<0, length: 16), "the field's start needs no side")
+    precondition(fieldStart.matches(selection: 0..<0, length: 16), "the field's start has no paragraph before it")
     var word = Expectation(landing: .exact(1..<4), length: 16, selectedText: "one")
     word.equivalences = held
     precondition(word.matches(selection: 0..<4, length: 16, selectedText: "one") && !word.matches(selection: 0..<4, length: 16, selectedText: "•one"),
                  "a selection's end across a marker, its text still checked")
-    var third = Expectation(landing: .exact(9..<14), length: 16)
+    var span = Expectation(landing: .exact(1..<9), length: 16)
+    span.equivalences = held
+    precondition(!span.converged(selection: 1..<8, length: 16, selectedText: nil, side: start), "a selection's upper end after a break, with no edge")
+    var spanToStart = Expectation(landing: .exact(1..<9), length: 16, edge: .paragraphStart)
+    spanToStart.equivalences = held
+    precondition(spanToStart.converged(selection: 1..<8, length: 16, selectedText: nil, side: start)
+                 && !spanToStart.converged(selection: 1..<8, length: 16, selectedText: nil, side: .end), "and with one")
+    var third = Expectation(landing: .exact(9..<14), length: 16, edge: .paragraphStart)
     third.equivalences = held
-    precondition(!third.matches(selection: 8..<14, length: 16), "a selection's lower end has no side read")
-    var after = Expectation(landing: .caretAfter(8, strict: true), length: 16)
-    after.equivalences = held
-    precondition(after.matches(selection: 8..<8, length: 16, side: start), "any landing, across a held marker")
+    precondition(!third.converged(selection: 8..<14, length: 16, selectedText: nil, side: nil), "a selection's lower end has no side")
     var strictBefore = Expectation(landing: .caretBefore(10, strict: true), length: 20, blame: .init(capability: .wordKeys, unmoved: [10..<10]))
     strictBefore.equivalences = [Expectation.Equivalence(run: 8..<10, afterBreak: true)]
-    precondition(!strictBefore.converged(selection: 10..<10, length: 20, selectedText: nil, side: nil)
-                 && !strictBefore.converged(selection: 8..<8, length: 20, selectedText: nil, side: start), "the same place is no progress")
-    precondition(strictBefore.converged(selection: 8..<8, length: 20, selectedText: nil, side: .end), "the line above's end is")
+    precondition(!strictBefore.matches(selection: 10..<10, length: 20) && strictBefore.matches(selection: 8..<8, length: 20),
+                 "an unmoved caret is no progress, the line above's end is")
     var strictAfter = Expectation(landing: .caretAfter(0, strict: true), length: 20)
     strictAfter.equivalences = [Expectation.Equivalence(run: 0..<2, afterBreak: false)]
     precondition(!strictAfter.matches(selection: 2..<2, length: 20) && strictAfter.matches(selection: 3..<3, length: 20),
                  "crossing only a marker is no progress")
-    var within = Expectation(landing: .caretWithin(9...12), length: 16)
+    var within = Expectation(landing: .caretWithin(1...3), length: 16)
     within.equivalences = held
-    precondition(within.matches(selection: 8..<8, length: 16, side: start) && !within.matches(selection: 8..<8, length: 16, side: .end))
-    precondition(lineStart.asksSide(at: 3..<3) && !word.asksSide(at: 4..<4) && word.asksSide(at: 8..<8) && !word.asksSide(at: 0..<0),
-                 "a side is read for an edge, or at a held run's lower end after a break")
+    precondition(within.matches(selection: 0..<0, length: 16) && !within.matches(selection: 4..<4, length: 16))
 
     // `•one⏎•two` folded: the first marker starts the field, the second follows a generated break; `j` expects both held.
     let folded = ParagraphBreaks(offsets: [3], hidden: [.init(at: 0, text: "\u{2022}", kind: .prefix), .init(at: 4, text: "\u{2022}", kind: .prefix)])
-    let planned = webPhysical("j", text: "one\ntwo", caret: 1, profile: keyProfile, breaks: folded).steps.compactMap { step -> Expectation? in
-        guard case .settle(let expectation) = step else { return nil }
-        return expectation
+    func settles(_ keys: String, _ breaks: ParagraphBreaks) -> [Expectation] {
+        webPhysical(keys, text: "one\ntwo", caret: 1, profile: keyProfile, breaks: breaks).steps.compactMap { step in
+            guard case .settle(let expectation) = step else { return nil }
+            return expectation
+        }
     }
-    precondition(!planned.isEmpty && planned.allSatisfy {
-        $0.equivalences == [.init(run: 0..<1, afterBreak: false), .init(run: 4..<5, afterBreak: true)]
-    }, "\(planned.map(\.equivalences))")
+    precondition(settles("j", folded).allSatisfy { $0.equivalences == [.init(run: 0..<1, afterBreak: false), .init(run: 4..<5, afterBreak: true)] })
+    // Linear's own-paragraph markers are `.structure` runs: `2.` holds 5..<7, its start also `one`'s end (sol, round 2).
+    let ownLines = ParagraphBreaks(offsets: [3], hidden: [.init(at: 0, text: "1.", kind: .structure), .init(at: 4, text: "2.", kind: .structure)])
+    let ownHeld = settles("j", ownLines).first?.equivalences
+    precondition(ownHeld == [.init(run: 0..<2, afterBreak: false), .init(run: 5..<7, afterBreak: true)], "\(String(describing: ownHeld))")
+    var oneEnd = Expectation(landing: .exact(5..<5), length: 9)
+    oneEnd.equivalences = ownHeld ?? []
+    precondition(!oneEnd.matches(selection: 7..<7, length: 9) && oneEnd.misfit(selection: 7..<7, length: 9, selectedText: nil, side: nil) == nil,
+                 "a held marker, already judged, is no misfit")
 
     // The pre-#81 Slack `k`: ⌃A expected at 8, the start of `•three` as text, lands after the `•` it cannot reach.
     let unmoved = Expectation.Blame(capability: .lineStartKey, unmoved: [9..<9])
-    var k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
-    k.onBreak = true
-    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == 8..<9)
-    precondition(k.misfit(selection: 9..<9, length: 15, selectedText: nil) { start } == nil, "a wrong length is no misfit")
-    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil) { .end } == nil, "nor a wrong side")
-    precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil) { start } == nil, "nor beyond a marker's reach")
-    precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil) { start } == nil, "nor a selection")
-    precondition(k.misfit(selection: nil, length: 16, selectedText: nil) { start } == nil, "nor a non-answer")
+    let k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
+    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == 8..<9)
+    precondition(k.misfit(selection: 9..<9, length: 15, selectedText: nil, side: start) == nil, "a wrong length is no misfit")
+    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: .end) == nil, "nor a wrong side")
+    precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil, side: start) == nil, "nor beyond a marker's reach")
+    precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil, side: start) == nil, "nor a selection")
+    precondition(k.misfit(selection: nil, length: 16, selectedText: nil, side: start) == nil, "nor a non-answer")
     var lineAboveEnd = Expectation(landing: .exact(8..<8), length: 16)
     lineAboveEnd.onBreak = true
-    precondition(lineAboveEnd.misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil, "a caret short of the line above's end")
+    precondition(lineAboveEnd.misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == nil, "a caret short of the line above's end")
+    precondition(Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphEnd).misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == nil)
     let afterNewline = Expectation(landing: .exact(6..<6), length: 13, blame: unmoved)
-    precondition(afterNewline.misfit(selection: 7..<7, length: 13, selectedText: nil) { nil } == 6..<7, "no break, so no side to tell")
-    precondition(Expectation(landing: .caretBefore(9, strict: true), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil,
+    precondition(afterNewline.misfit(selection: 7..<7, length: 13, selectedText: nil, side: nil) == 6..<7, "no break, so no side to tell")
+    precondition(Expectation(landing: .caretBefore(9, strict: true), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == nil,
                  "a relative landing is no misfit")
-    let past = Expectation(landing: .exact(9..<9), length: 16)
-    precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil) { nil } == nil, "a caret before may be the line above's end")
-    precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil) { start } == 8..<9)
-    precondition(Expectation(landing: .exact(1..<1), length: 16).misfit(selection: 0..<0, length: 16, selectedText: nil) { nil } == 0..<1)
+    precondition(Expectation(landing: .exact(9..<9), length: 16).misfit(selection: 8..<8, length: 16, selectedText: nil, side: start) == nil,
+                 "a caret before the prediction may be the line above's end")
+    precondition(Expectation(landing: .exact(1..<1), length: 16).misfit(selection: 0..<0, length: 16, selectedText: nil, side: nil) == 0..<1)
 
     var misfitting = RunAttribution()
     misfitting.record(.settle(k), passed: false, selection: 9..<9, length: 16, misfit: true)

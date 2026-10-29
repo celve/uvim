@@ -56,15 +56,12 @@ extension Sim {
         // A non-answer satisfies nothing, exactly as `Expectation.matches` has it.
         let observed = unreadableSelection ? nil : readSelection
         let answered = observed != nil || expectation.landing == nil
-        let length = fieldLength - drawnLength
-        // The executor reads a side only where the expectation asks for one.
+        let (length, side) = (fieldLength - drawnLength, upperSide)
         let passed = expectation.passes(
-            selection: observed, length: length, selectedText: readSelectedText,
-            side: expectation.asksSide(at: observed) ? upperSide : nil, answered: answered, generated: generated
+            selection: observed, length: length, selectedText: readSelectedText, side: side, answered: answered,
+            generated: generated
         ) { showsPlaceholder }
-        let misfit = passed ? nil : expectation.misfit(selection: observed, length: length, selectedText: readSelectedText) {
-            upperSide
-        }
+        let misfit = passed ? nil : expectation.misfit(selection: observed, length: length, selectedText: readSelectedText, side: side)
         return (passed, observed, fieldLength, misfit)
     }
 
