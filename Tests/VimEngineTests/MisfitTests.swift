@@ -41,8 +41,21 @@ func testMisfits() {
     precondition(!third.converged(selection: 8..<14, length: 16, selectedText: nil, side: nil), "a selection's lower end has no side")
     var strictBefore = Expectation(landing: .caretBefore(10, strict: true), length: 20, blame: .init(capability: .wordKeys, unmoved: [10..<10]))
     strictBefore.equivalences = [Expectation.Equivalence(run: 8..<10, afterBreak: true)]
-    precondition(!strictBefore.matches(selection: 10..<10, length: 20) && strictBefore.matches(selection: 8..<8, length: 20),
-                 "an unmoved caret is no progress, the line above's end is")
+    for side in [nil, start, ParagraphBreaks.Side.end] {
+        precondition(!strictBefore.converged(selection: 10..<10, length: 20, selectedText: nil, side: side)
+                     && !strictBefore.converged(selection: 8..<8, length: 20, selectedText: nil, side: side),
+                     "an unmoved caret is no progress, nor a read that may be its other offset (sol, round 3)")
+    }
+    var farBefore = Expectation(landing: .caretBefore(12, strict: true), length: 20)
+    farBefore.equivalences = strictBefore.equivalences
+    var fromLineEnd = Expectation(landing: .caretAfter(8, strict: true), length: 20)
+    fromLineEnd.equivalences = strictBefore.equivalences
+    var pastLineEnd = Expectation(landing: .caretAfter(7, strict: true), length: 20)
+    pastLineEnd.equivalences = strictBefore.equivalences
+    precondition(farBefore.matches(selection: 8..<8, length: 20) && fromLineEnd.matches(selection: 10..<10, length: 20)
+                 && pastLineEnd.matches(selection: 8..<8, length: 20) && !fromLineEnd.matches(selection: 8..<8, length: 20),
+                 "progress either reading makes")
+
     var strictAfter = Expectation(landing: .caretAfter(0, strict: true), length: 20)
     strictAfter.equivalences = [Expectation.Equivalence(run: 0..<2, afterBreak: false)]
     precondition(!strictAfter.matches(selection: 2..<2, length: 20) && strictAfter.matches(selection: 3..<3, length: 20),
@@ -53,13 +66,21 @@ func testMisfits() {
 
     // `•one⏎•two` folded: the first marker starts the field, the second follows a generated break; `j` expects both held.
     let folded = ParagraphBreaks(offsets: [3], hidden: [.init(at: 0, text: "\u{2022}", kind: .prefix), .init(at: 4, text: "\u{2022}", kind: .prefix)])
-    func settles(_ keys: String, _ breaks: ParagraphBreaks) -> [Expectation] {
-        webPhysical(keys, text: "one\ntwo", caret: 1, profile: keyProfile, breaks: breaks).steps.compactMap { step in
+    func settles(_ keys: String, _ breaks: ParagraphBreaks, caret: Int = 1, profile: CapabilityProfile = keyProfile) -> [Expectation] {
+        webPhysical(keys, text: "one\ntwo", caret: caret, profile: profile, breaks: breaks).steps.compactMap { step in
             guard case .settle(let expectation) = step else { return nil }
             return expectation
         }
     }
     precondition(settles("j", folded).allSatisfy { $0.equivalences == [.init(run: 0..<1, afterBreak: false), .init(run: 4..<5, afterBreak: true)] })
+    // A relative landing's reference leaves the model as the place it is: a line start after its marker, a line end before it.
+    let references = [4, 3].map { caret in
+        settles("b", folded, caret: caret, profile: nativeRead).compactMap { expectation -> Int? in
+            guard case .caretBefore(let at, _)? = expectation.landing else { return nil }
+            return at
+        }
+    }
+    precondition(references == [[5], [4]], "\(references)")
     // Linear's own-paragraph markers are `.structure` runs: `2.` holds 5..<7, its start also `one`'s end (sol, round 2).
     let ownLines = ParagraphBreaks(offsets: [3], hidden: [.init(at: 0, text: "1.", kind: .structure), .init(at: 4, text: "2.", kind: .structure)])
     let ownHeld = settles("j", ownLines).first?.equivalences

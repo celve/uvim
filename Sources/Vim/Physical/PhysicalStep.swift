@@ -357,6 +357,10 @@ public struct Expectation: Equatable, Sendable {
         let lower = place(observed.lowerBound, onStart: observed.isEmpty && start)
         let upper = observed.isEmpty ? lower : place(observed.upperBound, onStart: start)
         func wanted(_ offset: Int) -> Int { place(offset, onStart: start) }
+        // A caret read at a held run's lower end after a break is that paragraph's end or the run's: it passes only as both.
+        func passesAsEither(_ meets: (Int) -> Bool) -> Bool {
+            observed.isEmpty && ([lower] + upperAlias(of: observed.lowerBound)).allSatisfy(meets)
+        }
         switch landing {
         case .exact(let range):
             guard !landing.matches(observed) else { return true }
@@ -364,14 +368,19 @@ public struct Expectation: Equatable, Sendable {
             let wantedLower = range.isEmpty ? wanted(range.lowerBound) : place(range.lowerBound, onStart: false)
             return lower == wantedLower && upper == (range.isEmpty ? wantedLower : wanted(range.upperBound))
         case .caretAfter(let offset, let strict):
-            return observed.isEmpty && (strict ? lower > wanted(offset) : lower >= wanted(offset))
+            return passesAsEither { strict ? $0 > wanted(offset) : $0 >= wanted(offset) }
         case .caretBefore(let offset, let strict):
-            return observed.isEmpty && (strict ? lower < wanted(offset) : lower <= wanted(offset))
+            return passesAsEither { strict ? $0 < wanted(offset) : $0 <= wanted(offset) }
         case .caretWithin(let range):
-            return observed.isEmpty && (wanted(range.lowerBound)...wanted(range.upperBound)).contains(lower)
+            return passesAsEither { (wanted(range.lowerBound)...wanted(range.upperBound)).contains($0) }
         case .between:
             return false
         }
+    }
+
+    /// The run's upper end, where `offset` is an after-break run's lower end and so may be read for it.
+    private func upperAlias(of offset: Int) -> [Int] {
+        equivalences.filter { $0.afterBreak && $0.run.lowerBound == offset }.map(\.run.upperBound)
     }
 
     /// The place `offset` is: a held run's upper end for any caret across it, but its lower end after a break only on its start side.
