@@ -1020,7 +1020,7 @@ stored answer that touched the field, with its provenance and whether it is `in-
 the menu, **Capabilities** opens on what a belief switched off in the field, a demotion or **Read
 caret** while it is `untrusted`, with the day and until when it holds, and on verdicts reopened in
 this field, which read **Trying again here** and are not counted in the badge. **Try Again**, or
-**Forget** for a reopened verdict, removes those beliefs and makes no choice; a verdict two sites
+**Forget** for a reopened verdict, removes those beliefs and makes no choice; a verdict two websites
 taught about one editor reads **Learned … in Quill editors**, and Try Again forgets it in every
 app with that editor. A learned `value` or
 `textContent` only shows under **Read caret**: forgetting it would restart the field at an answer
@@ -1084,9 +1084,9 @@ File** in the menu opens it:
   app's framework version, else at `appVersion`, and not while `anchor` is true. `provenance`
   (uvim's build, when, and by which command) and `tally` (the evidence counted) are for reading; an
   entry needs `provenance`, even as `{}`. `editor` names the editor library of the field a verdict
-  judged: once a field on another site in the same editor agrees on the same verdict, uvim records
-  it at `editor:<editor>` too, where it holds in every app regardless of `appVersion`, until the
-  `fieldModel` changes or you choose Try Again.
+  judged: once a field on another website (another host, not the same one in another app) in the
+  same editor agrees on the same verdict, uvim records it at `editor:<editor>` too, where it holds
+  in every app regardless of `appVersion`, until the `fieldModel` changes or you choose Try Again.
 
 uvim rereads the file whenever it binds a field, so an edit applies when you next focus one. An
 override you write lasts, as one chosen in the menu does, and beats a belief. A belief you write is

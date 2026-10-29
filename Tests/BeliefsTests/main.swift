@@ -265,7 +265,8 @@ precondition(try! Beliefs(url: elsewhere, defaults: linked.defaults).read() == f
 
 let quill = (
     first: Surface(bundleID: "com.example.chat", origin: "chat.example", role: "AXTextArea", editor: "quill", engine: .chromium),
-    second: Surface(bundleID: "com.example.browser", origin: "chat.example", role: "AXTextArea", editor: "quill", engine: .chromium),
+    sameHost: Surface(bundleID: "com.example.browser", origin: "chat.example", role: "AXTextArea", editor: "quill", engine: .chromium),
+    second: Surface(bundleID: "com.example.browser", origin: "mail.example", role: "AXTextArea", editor: "quill", engine: .chromium),
     third: Surface(bundleID: "com.example.notes", origin: "notes.example", role: "AXTextArea", editor: "quill", engine: .chromium)
 )
 func strike(_ file: Beliefs, at surface: Surface) -> Learning.Lesson {
@@ -300,7 +301,8 @@ precondition(CapabilityConfig.resolve(nowLaddered, capability: "readCaret", over
     && CapabilityConfig.resolve(nowLaddered, capability: "wordKeys", overrides: oldContents.overrides).overrideRung == rung)
 
 let editors = fresh()
-precondition(strike(editors, at: quill.first).promoted == nil && strike(editors, at: quill.second).promoted == "editor:quill")
+precondition(strike(editors, at: quill.first).promoted == nil && strike(editors, at: quill.sameHost).promoted == nil)
+precondition(strike(editors, at: quill.second).promoted == "editor:quill")
 let promotedFile = try! Beliefs(url: editors.url, defaults: editors.defaults).load()
 precondition(inForce(promotedFile, at: quill.third).map(\.rung) == ["editor:quill"], "the editor's verdict outlives a restart")
 precondition(text(editors).contains(#""rung" : "editor:quill""#) && text(editors).contains(#""editor" : "quill""#))

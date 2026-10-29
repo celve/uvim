@@ -163,11 +163,11 @@ public struct BeliefStore: Codable, Equatable, Sendable {
 
     public static func isEditorRung(_ rung: String) -> Bool { rung.hasPrefix(editorPrefix) }
 
-    /// A learner rung less its role, so two roles of one site count as one site.
-    static func site(ofRoleRung rung: String) -> String {
-        var parts = rung.split(separator: "|", omittingEmptySubsequences: false)
-        if parts.count > 1, parts.last?.hasPrefix("role:") == true { parts.removeLast() }
-        return parts.joined(separator: "|")
+    /// A web learner rung's app and host, `app|host|role:…`; nil for a native field's, which names no website.
+    static func website(ofRoleRung rung: String) -> (app: Substring, host: Substring)? {
+        let parts = rung.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[2].hasPrefix("role:") else { return nil }
+        return (parts[0], parts[1])
     }
 
     public var schema = BeliefStore.currentSchema
@@ -281,17 +281,19 @@ public extension BeliefStore {
         return true
     }
 
-    /// Records the verdict just committed at `rung` at its editor's rung too, once a verdict from another site in that editor agrees.
+    /// Records the verdict just committed at `rung` at its editor's rung too, once a verdict from another website in that editor agrees.
     mutating func promote(
         broken capability: Capability, from rung: String, editor: String?, judgedUnder offsets: OffsetsAnswer,
         versions: Versions, provenance: Provenance
     ) -> String? {
-        guard let editor, !editor.isEmpty else { return nil }
+        guard let editor, !editor.isEmpty, let here = Self.website(ofRoleRung: rung) else { return nil }
         let question = Question(capability)
-        let site = Self.site(ofRoleRung: rung)
+        // One website in two apps is one page's quirk; another app's verdict is taken at whatever version it judged.
         let agrees = beliefs.contains {
-            $0.question == question && $0.answer == Belief.broken && $0.editor == editor && ($0.judgedUnder ?? .value) == offsets
-                && ($0.fieldModel ?? 0) == Self.fieldModel && !Self.isEditorRung($0.rung) && Self.site(ofRoleRung: $0.rung) != site
+            guard let there = Self.website(ofRoleRung: $0.rung), there.host != here.host else { return false }
+            return $0.question == question && $0.answer == Belief.broken && $0.editor == editor
+                && ($0.judgedUnder ?? .value) == offsets && ($0.fieldModel ?? 0) == Self.fieldModel
+                && (there.app != here.app || $0.appVersion == (versions.app ?? ""))
         }
         guard agrees else { return nil }
         let target = Self.editorPrefix + editor
