@@ -102,7 +102,7 @@ func relearn(_ file: Beliefs, _ capability: Capability) -> Learning.Lesson {
     return lesson
 }
 
-let unstamped = file(belief("lineStartKey", "broken", stamped: false), belief("insertText", "broken", stamped: false))
+let unstamped = file(belief("lineStartKey", "broken", stamped: false, #", "judgedUnder": "value""#), belief("insertText", "broken", stamped: false))
 let older = fresh()
 write(unstamped, to: older)
 let unstampedContents = try! older.load()
