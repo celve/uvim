@@ -102,6 +102,26 @@ func testGeneratedMarkers() {
     precondition(unreachableScanned(column, UnreachableLines.Candidates(markers: [0..<1], chips: []))?.markers == [],
                  "nor is a node Chromium makes itself, which is no text")
 
+    let symbols = folded("+one\n\u{1F600}two\n\u{00B7}three", "+one\u{1F600}two\u{00B7}three", fakeTree("""
+    0/L/0/14 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/9 0.1.0/G/4/6 0.1.0.0/Tg/4/6 0.1.1/T/6/9 0.2/G/9/15
+    0.2.0/G/9/10 0.2.0.0/Tg/9/10 0.2.1/T/10/15
+    """, linear: false), proseMirror: false)
+    precondition(symbols.text == "one\ntwo\nthree" && roundTrips(symbols), "a plus, an emoji and a middle dot: \(symbols.text)")
+    let typedSymbols = folded("+one\n\u{1F600}two", "+one\u{1F600}two",
+                              fakeTree("0/G/0/4 0.0/T/0/4 1/G/4/9 1.0/T/4/9", linear: false), proseMirror: false)
+    precondition(typedSymbols.text == "+one\n\u{1F600}two", "and typed, they stay text")
+
+    // As many Quill items as #81's walk confirmed within its budget, each `::before` group read through to its text.
+    let items = 190
+    let long = fakeTree((0..<items).map { i in
+        "0.\(i)/G/\(i * 5)/\(i * 5 + 5) 0.\(i).0/G/\(i * 5)/\(i * 5 + 1) 0.\(i).0.0/Tg/\(i * 5)/\(i * 5 + 1) 0.\(i).1/T/\(i * 5 + 1)/\(i * 5 + 5)"
+    }.joined(separator: " ") + " 0/L/0/\(items * 5)", linear: false)
+    let longText = Array(repeating: "\u{2022}item", count: items).joined(separator: "\n")
+    let longFound = unreachableScanned(long, UnreachableLines.candidates(
+        text: longText, breaks: ParagraphBreaks(offsets: (1..<items).map { $0 * 6 - 1 })
+    ))
+    precondition(longFound?.markers == (0..<items).map { $0 * 5..<$0 * 5 + 1 }, "\(items) markers within the budget")
+
     let lastEmpty = folded("\u{2022}one\n\u{2022}\n", "\u{2022}one\u{2022}\n", fakeTree(
         "0/L/0/6 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/Tg/4/5", linear: false
     ), proseMirror: false)

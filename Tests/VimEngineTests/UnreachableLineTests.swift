@@ -578,8 +578,11 @@ func testUnreachableLines() {
     }
     precondition(UnreachableLines.markerShape(Array("\u{2022}one".utf16)) == 1 && UnreachableLines.markerShape(Array("10.ten".utf16)) == 3
                  && UnreachableLines.markerShape(Array("\u{25B8} one".utf16)) == 1 && UnreachableLines.markerShape(Array("a)two".utf16)) == 2)
-    precondition(UnreachableLines.markerShape(Array("one".utf16)) == nil && UnreachableLines.markerShape(Array("+1".utf16)) == nil
-                 && UnreachableLines.markerShape(Array("\u{1F600}".utf16)) == nil, "text, an ASCII symbol and an emoji are no shape")
+    precondition(UnreachableLines.markerShape(Array("+1".utf16)) == 1 && UnreachableLines.markerShape(Array("\u{1F600}x".utf16)) == 2
+                 && UnreachableLines.markerShape(Array("\u{00B7}x".utf16)) == 1, "a plus, an emoji, a middle dot")
+    precondition(["one", "(a)", "#1", "\"q\"", "\u{201C}q", "\u{300C}q", "\u{4E00}\u{3001}"].allSatisfy {
+        UnreachableLines.markerShape(Array($0.utf16)) == nil
+    }, "text, ASCII's other punctuation, opening quotes and a CJK numeral are no shape")
 
     // `•one⏎•⏎•three` as Chromium 153 shows Quill 1.3.7's list: an empty item holds its `::before` group alone.
     let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/Tg/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/Tg/6/7 0.2.1/T/7/12", linear: false)

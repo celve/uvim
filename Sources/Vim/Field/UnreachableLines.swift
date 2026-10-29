@@ -218,8 +218,9 @@ public enum UnreachableLines {
         }
     }
 
-    /// The most AX reads one discovery may spend; a larger field keeps its markers and chips as lines.
-    public static let readBudget = 1024
+    /// The most AX reads one discovery may spend, half again what it was before markers' generated text was read (LIN-2372);
+    /// a larger field keeps its markers and chips as lines.
+    public static let readBudget = 1536
 
     /// Lines starting with a marker's shape, lines starting as Linear's chips do, and drawn carets'.
     public static func candidates(
@@ -406,18 +407,23 @@ public enum UnreachableLines {
 
     /// The length of the shortest marker a line could start with, which only the tree confirms and measures.
     static func markerShape(_ units: [UInt16]) -> Int? {
-        (1...5).first { $0 <= units.count && isMarkerShaped(units[..<$0]) }
+        if let scalar = String(decoding: units.prefix(2), as: UTF16.self).unicodeScalars.first, isBullet(scalar) {
+            return scalar.utf16.count
+        }
+        return (2...5).first { $0 <= units.count && isOrdinal(units[..<$0]) }
     }
 
-    /// One bullet, symbol or dash, or up to four letters or digits and a `.` or `)`, as Linear numbers its levels.
-    static func isMarkerShaped(_ units: ArraySlice<UInt16>) -> Bool {
-        if units.count == 1 {
-            guard let unit = units.first, let scalar = Unicode.Scalar(unit) else { return false }
-            if "•‣⁃*-".unicodeScalars.contains(scalar) { return true }
-            // ASCII's symbols start typed text far more often than a list, as `+`, `<` or `|` do.
-            return !scalar.isASCII && [.otherSymbol, .mathSymbol, .dashPunctuation].contains(scalar.properties.generalCategory)
-        }
-        guard (2...5).contains(units.count), let last = units.last, last == 0x2E || last == 0x29 else { return false }
+    /// A symbol, a dash or other punctuation, but of ASCII's only `-`, `*` and `+`: the rest, as `(`, `#` or `"`, start typed
+    /// text and code far more often than a list, and each line checked costs reads.
+    static func isBullet(_ scalar: Unicode.Scalar) -> Bool {
+        if scalar.isASCII { return "-*+".unicodeScalars.contains(scalar) }
+        return [.otherSymbol, .mathSymbol, .currencySymbol, .modifierSymbol, .dashPunctuation, .otherPunctuation]
+            .contains(scalar.properties.generalCategory)
+    }
+
+    /// Up to four letters or digits and a `.` or `)`, as Linear numbers its levels.
+    static func isOrdinal(_ units: ArraySlice<UInt16>) -> Bool {
+        guard let last = units.last, last == 0x2E || last == 0x29 else { return false }
         return String(decoding: units.dropLast(), as: UTF16.self).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
