@@ -403,8 +403,12 @@ public struct Expectation: Equatable, Sendable {
         guard place < caret || caret == 0 && place > 0, abs(caret - place) <= Self.misfitReach else { return nil }
         let across = min(caret, place)..<max(caret, place)
         // A prediction on a break may be the paragraph before's end, unless `edge` says the start.
-        guard edge.map({ $0 == .paragraphStart }) ?? !onBreak, !equivalences.contains(where: { $0.run.overlaps(across) }),
-              converged(selection: predicted, length: observedLength, selectedText: observedText, side: side) else { return nil }
+        guard edge.map({ $0 == .paragraphStart }) ?? !onBreak, !equivalences.contains(where: { $0.run.overlaps(across) }) else {
+            return nil
+        }
+        // Past its marker, an empty item's caret is its paragraph's end too.
+        let read = edge == .paragraphStart && place < caret && side == .end ? .start(skipping: 0) : side
+        guard converged(selection: predicted, length: observedLength, selectedText: observedText, side: read) else { return nil }
         return across
     }
 

@@ -95,7 +95,10 @@ func testMisfits() {
     let k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
     precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == 8..<9)
     precondition(k.misfit(selection: 9..<9, length: 15, selectedText: nil, side: start) == nil, "a wrong length is no misfit")
-    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: .end) == nil, "nor a wrong side")
+    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: .end) == 8..<9, "an empty item's caret ends its paragraph too")
+    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: nil) == nil, "an unread side is no side")
+    precondition(Expectation(landing: .exact(9..<9), length: 16, edge: .paragraphStart).misfit(selection: 8..<8, length: 16, selectedText: nil, side: .end) == nil,
+                 "nor, before the prediction, the line above's end")
     precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil, side: start) == nil, "nor beyond a marker's reach")
     precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil, side: start) == nil, "nor a selection")
     precondition(k.misfit(selection: nil, length: 16, selectedText: nil, side: start) == nil, "nor a non-answer")
