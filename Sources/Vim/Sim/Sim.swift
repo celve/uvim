@@ -664,9 +664,9 @@ extension Sim: StepHost {
         return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText, misfit: misfit)
     }
 
-    mutating func generates(_ run: Range<Int>) -> Bool {
-        landLateHistory()
-        return generatesText(run)
+    /// A read of the tree, not the field, so it lands no late ⌘Z.
+    func generates(_ run: Range<Int>) -> Bool {
+        generatesText(run)
     }
 
     mutating func departure(fresh: Bool) -> KeyDestination.Departure? {
