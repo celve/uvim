@@ -49,17 +49,18 @@ func testMisfits() {
 
     // The pre-#81 Slack `k`: ⌃A expected at 8, the start of `•three` as text, lands after the `•` it cannot reach.
     let unmoved = Expectation.Blame(capability: .lineStartKey, unmoved: [9..<9])
-    let k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
+    var k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
+    k.onBreak = true
     precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == 8..<9)
     precondition(k.misfit(selection: 9..<9, length: 15, selectedText: nil) { start } == nil, "a wrong length is no misfit")
     precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil) { .end } == nil, "nor a wrong side")
     precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil) { start } == nil, "nor beyond a marker's reach")
     precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil) { start } == nil, "nor a selection")
     precondition(k.misfit(selection: nil, length: 16, selectedText: nil) { start } == nil, "nor a non-answer")
-    precondition(Expectation(landing: .exact(8..<8), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil,
-                 "a caret short of the line above's end")
-    var afterNewline = Expectation(landing: .exact(6..<6), length: 13, blame: unmoved)
-    afterNewline.oneSided = true
+    var lineAboveEnd = Expectation(landing: .exact(8..<8), length: 16)
+    lineAboveEnd.onBreak = true
+    precondition(lineAboveEnd.misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil, "a caret short of the line above's end")
+    let afterNewline = Expectation(landing: .exact(6..<6), length: 13, blame: unmoved)
     precondition(afterNewline.misfit(selection: 7..<7, length: 13, selectedText: nil) { nil } == 6..<7, "no break, so no side to tell")
     precondition(Expectation(landing: .caretBefore(9, strict: true), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil,
                  "a relative landing is no misfit")

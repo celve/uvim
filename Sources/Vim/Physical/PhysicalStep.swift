@@ -239,8 +239,8 @@ public struct Expectation: Equatable, Sendable {
     /// Runs of field text the model holds as unreachable, either end of which is the same place (LIN-2370).
     public var equivalences: [Equivalence] = []
 
-    /// The exact landing is on no paragraph break, so it is one place whichever side a read gives.
-    public var oneSided = false
+    /// The exact caret is on a paragraph break, the end of one paragraph and the start of the next, with no `edge` to tell which.
+    public var onBreak = false
 
     /// Field text no caret reaches, such as a list marker the page draws.
     public struct Equivalence: Equatable, Sendable {
@@ -402,7 +402,8 @@ public struct Expectation: Equatable, Sendable {
         let (caret, place) = (observed.lowerBound, predicted.lowerBound)
         // The end before the text may be on a break, the paragraph before's end too, which is another place but on its start side.
         let read = place < caret ? nil : side()
-        guard place < caret ? place == 0 || oneSided || edge == .paragraphStart : caret == 0 || read?.isStart == true else {
+        let meant = edge.map { $0 == .paragraphStart } ?? !onBreak
+        guard place < caret ? place == 0 || meant : caret == 0 || read?.isStart == true else {
             return nil
         }
         let checked = edge == nil ? nil : read ?? side()
@@ -464,7 +465,7 @@ public struct Expectation: Equatable, Sendable {
         resolved.deletes = deletes
         resolved.lengthBefore = lengthBefore
         resolved.equivalences = equivalences
-        resolved.oneSided = oneSided
+        resolved.onBreak = onBreak
         return resolved
     }
 }
