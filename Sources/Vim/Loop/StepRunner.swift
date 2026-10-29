@@ -13,6 +13,8 @@ struct StepRunner<Host: StepHost> {
         let read: Host.Read
         /// What the writes just before it returned.
         let writeError: Int32?
+        /// The generated text it failed across, which the model counted as the field's.
+        let misfit: Range<Int>?
     }
 
     private(set) var attribution = RunAttribution()
@@ -32,6 +34,9 @@ struct StepRunner<Host: StepHost> {
     private var postedKeys = false
     /// From the write a following settle verifies.
     private var writeError: Int32?
+    /// A misfit's tree read, which a run spends once.
+    private var probedMisfit = false
+    private var misfit: Range<Int>?
 
     private init(generated: Bool, keys: Int?) {
         self.generated = generated
@@ -49,12 +54,13 @@ struct StepRunner<Host: StepHost> {
         for (index, planned) in steps.enumerated() {
             var step = planned
             if case .settle(let expectation) = planned { step = .settle(expectation.resolving(kept)) }
+            misfit = nil
             let (passed, read) = perform(step, at: index, host: &host)
             // A step the focus left judged nothing of this field.
             if passed || departure == nil {
                 attribution.record(
                     step, passed: passed, selection: read?.selection, length: read?.length, selectedText: read?.selectedText,
-                    writeError: passed ? nil : writeError
+                    writeError: passed ? nil : writeError, misfit: misfit != nil
                 )
             }
             switch step {
@@ -165,8 +171,13 @@ struct StepRunner<Host: StepHost> {
         let failed = !soft || expectation.ignored(
             selection: expectation.landing == nil ? nil : read.selection, length: expectation.length == nil ? nil : read.length
         )
+        if failed, !probedMisfit, let across = read.misfit {
+            probedMisfit = true
+            if host.generates(across) { misfit = across }
+        }
         misses.append(Miss(
-            index: index, expectation: expectation, soft: soft, failed: failed, read: read, writeError: writeError
+            index: index, expectation: expectation, soft: soft, failed: failed, read: read, writeError: writeError,
+            misfit: misfit
         ))
         guard failed else { return (true, read) }
         if stays(fresh: true, host: &host) { host.refused(expectation, read, soft: soft) }
@@ -224,6 +235,8 @@ protocol StepHost {
     mutating func bell()
     /// A settle failed the run with the focus still on the field.
     mutating func refused(_ expectation: Expectation, _ read: Read, soft: Bool)
+    /// A fresh read of the field's tree finds text its page generates over all of `run`, in field offsets.
+    mutating func generates(_ run: Range<Int>) -> Bool
 }
 
 /// What a settle read, and whether that met its expectation.
@@ -232,4 +245,6 @@ protocol SettleRead {
     var selection: Range<Int>? { get }
     var length: Int? { get }
     var selectedText: String? { get }
+    /// What `Expectation.misfit` made of the read the verdict failed.
+    var misfit: Range<Int>? { get }
 }

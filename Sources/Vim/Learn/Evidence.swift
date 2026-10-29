@@ -58,6 +58,8 @@ public struct Evidence: Equatable, Sendable {
         case textAgrees = "text-agrees"
         case unaligned
         case readsDisagree = "reads-disagree"
+        /// A settle failed across text the page generates, which the model counted as the field's: its model, not its key.
+        case misfit
     }
 
     public var informative: Bool { outcome != .neutral }

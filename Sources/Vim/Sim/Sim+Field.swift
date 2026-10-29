@@ -37,7 +37,7 @@ extension Sim {
         softMisses += run.misses.filter { !$0.failed }.count
         if run.departure == nil, let miss = run.misses.last, miss.failed {
             settleFailures += 1
-            if !miss.soft, let key = miss.expectation.blamed(observed: miss.read.selection) { blamed.append(key) }
+            if !miss.soft, miss.misfit == nil, let key = miss.expectation.blamed(observed: miss.read.selection) { blamed.append(key) }
         }
         return run.abortedAt
     }
@@ -50,15 +50,28 @@ extension Sim {
     }
 
     /// A settle's verdict and what it read, judged as the executor judges it beside generated text (LIN-1930).
-    func settles(_ expectation: Expectation, generated: Bool) -> (passed: Bool, selection: Range<Int>?, length: Int) {
+    func settles(
+        _ expectation: Expectation, generated: Bool
+    ) -> (passed: Bool, selection: Range<Int>?, length: Int, misfit: Range<Int>?) {
         // A non-answer satisfies nothing, exactly as `Expectation.matches` has it.
         let observed = unreadableSelection ? nil : readSelection
         let answered = observed != nil || expectation.landing == nil
+        let (length, side) = (fieldLength - drawnLength, upperSide)
         let passed = expectation.passes(
-            selection: observed, length: fieldLength - drawnLength, selectedText: readSelectedText, side: upperSide,
-            answered: answered, generated: generated
+            selection: observed, length: length, selectedText: readSelectedText, side: side, answered: answered,
+            generated: generated
         ) { showsPlaceholder }
-        return (passed, observed, fieldLength)
+        let misfit = passed ? nil : expectation.misfit(selection: observed, length: length, selectedText: readSelectedText, side: side)
+        return (passed, observed, fieldLength, misfit)
+    }
+
+    /// Chromium's own list markers and Quill's are the page's; whether Linear's are is unmeasured (LIN-2369), so no.
+    func generatesText(_ run: Range<Int>) -> Bool {
+        guard emptyParagraphs, let lines = listLines else { return false }
+        let drawn = lines.filter { $0.marker != nil && !$0.controls }
+        return zip(chromium.listMarkers, drawn).contains { start, line in
+            (quill || line.inline) && start <= run.lowerBound && run.upperBound <= start + (line.marker?.utf16.count ?? 0)
+        }
     }
 
     /// The keys lane B counts with, which run whether or not `emulatesKeys` is on.

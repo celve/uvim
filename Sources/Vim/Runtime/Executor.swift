@@ -52,6 +52,8 @@ public final class Executor {
         public let milliseconds: Int
         /// Told a refused write apart from one that landed and then read back wrong.
         public let writeError: Int32?
+        /// The generated text it failed across, which the model counted as the field's.
+        public let misfit: Range<Int>?
     }
 
     public private(set) var lastRun = RunEvidence()
@@ -89,7 +91,7 @@ public final class Executor {
                 hard: miss.failed, index: miss.index, expectation: miss.expectation,
                 observedSelection: miss.read.observedSelection, observedLength: miss.read.observedLength,
                 observedSelectedText: miss.read.observedSelectedText, answered: miss.read.answered, polls: miss.read.polls,
-                milliseconds: miss.read.milliseconds, writeError: miss.writeError
+                milliseconds: miss.read.milliseconds, writeError: miss.writeError, misfit: miss.misfit
             )
         }
         lastRun = evidence
@@ -111,6 +113,7 @@ public final class Executor {
         let answered: Bool
         let polls: Int
         let milliseconds: Int
+        var misfit: Range<Int>?
     }
 
     /// Bounded convergence poll against the planner's prediction.
@@ -197,7 +200,11 @@ public final class Executor {
             ) {
                 return outcome(true)
             }
-            guard Date() < deadline, !AX.pastDeadline else { return outcome(false) }
+            guard Date() < deadline, !AX.pastDeadline else {
+                var failed = outcome(false)
+                failed.misfit = expectation.misfit(selection: selection, length: checkedLength, selectedText: text, side: side)
+                return failed
+            }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).
             Thread.sleep(forTimeInterval: 0.003)
         }
@@ -387,6 +394,11 @@ extension Executor {
 
         func bell() {
             NSSound.beep()
+        }
+
+        /// Only Chromium's tree tells the page's generated text from the field's.
+        func generates(_ run: Range<Int>) -> Bool {
+            paragraphs && Snapshotter.generates(run, in: element)
         }
 
         /// Reads `AX.until`'s deadline refused fail a settle without saying anything of this field.

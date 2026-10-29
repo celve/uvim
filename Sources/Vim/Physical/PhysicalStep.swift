@@ -236,6 +236,24 @@ public struct Expectation: Equatable, Sendable {
     /// The length the field had before that ⌫, where a settle there would have read one.
     public var lengthBefore: Int?
 
+    /// Runs of field text the model holds as unreachable, either end of which is the same place (LIN-2370).
+    public var equivalences: [Equivalence] = []
+
+    /// Field text no caret reaches, such as a list marker the page draws.
+    public struct Equivalence: Equatable, Sendable {
+        public let run: Range<Int>
+        /// The run starts a paragraph after another, whose end its lower end also is: that end joins on its start side alone.
+        public let afterBreak: Bool
+
+        public init(run: Range<Int>, afterBreak: Bool) {
+            self.run = run
+            self.afterBreak = afterBreak
+        }
+    }
+
+    /// The longest field text a misfit lies across: a list marker and its space, as `UnreachableLines.prefixLength` reaches.
+    public static let misfitReach = 6
+
     /// Demotes `capability` for `unmoved`, a `leavesCaret` key's selection, a `selects` key's caret, or `offTarget` landings.
     public struct Blame: Equatable, Sendable {
         public let capability: Capability
@@ -304,12 +322,13 @@ public struct Expectation: Equatable, Sendable {
         return range
     }
 
-    /// Arguments are what the field answered; `nil` is a non-answer and satisfies nothing.
+    /// Arguments are what the field answered; `nil` is a non-answer and satisfies nothing. `side` is the upper end's.
     public func matches(
-        selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String? = nil
+        selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String? = nil,
+        side: ParagraphBreaks.Side? = nil
     ) -> Bool {
         if let landing {
-            guard let observed, landing.matches(observed) else { return false }
+            guard let observed, lands(landing, observed, side: side) else { return false }
         }
         if let longest, (observed?.count ?? 0) > longest { return false }
         if let length, observedLength != length { return false }
@@ -322,9 +341,53 @@ public struct Expectation: Equatable, Sendable {
         selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String?,
         side: ParagraphBreaks.Side?
     ) -> Bool {
-        guard matches(selection: observed, length: observedLength, selectedText: observedText) else { return false }
+        guard matches(selection: observed, length: observedLength, selectedText: observedText, side: side) else { return false }
         guard let edge else { return true }
         return side.map { ($0 == .end) == (edge == .paragraphEnd) } ?? false
+    }
+
+    /// `landing` meets `observed`, or a place the model holds as the same.
+    private func lands(_ landing: Landing, _ observed: Range<Int>, side: ParagraphBreaks.Side?) -> Bool {
+        guard !landing.matches(observed) else { return true }
+        guard !equivalences.isEmpty else { return false }
+        if observed.isEmpty {
+            return places(observed.lowerBound, side: side).contains { landing.matches($0..<$0) }
+        }
+        let uppers = places(observed.upperBound, side: side)
+        return places(observed.lowerBound, side: nil).contains { lower in
+            uppers.contains { lower < $0 && landing.matches(lower..<$0) }
+        }
+    }
+
+    /// `offset` and the carets the model holds as the same place, read on `side`.
+    private func places(_ offset: Int, side: ParagraphBreaks.Side?) -> [Int] {
+        var places = [offset]
+        for equivalence in equivalences where (equivalence.run.lowerBound...equivalence.run.upperBound).contains(offset) {
+            let joinsLower = !equivalence.afterBreak || side?.isStart == true
+            guard joinsLower || offset > equivalence.run.lowerBound else { continue }
+            places += (joinsLower ? equivalence.run.lowerBound : equivalence.run.lowerBound + 1)...equivalence.run.upperBound
+        }
+        return places
+    }
+
+    /// The field text between a failed settle's caret and the nearest caret it would pass at, were the model to hold that text
+    /// unreachable: nil unless all else converges there (LIN-2370).
+    public func misfit(
+        selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String?,
+        side: ParagraphBreaks.Side?
+    ) -> Range<Int>? {
+        guard let landing, let observed, observed.isEmpty else { return nil }
+        let caret = observed.lowerBound
+        for reach in 1...Self.misfitReach {
+            for place in [caret + reach, caret - reach] where place >= 0 && landing.matches(place..<place) {
+                // A caret before the text may be the paragraph before's end, another place but on its start side.
+                guard place < caret || caret == 0 || side?.isStart == true else { continue }
+                if converged(selection: place..<place, length: observedLength, selectedText: observedText, side: side) {
+                    return min(caret, place)..<max(caret, place)
+                }
+            }
+        }
+        return nil
     }
 
     /// Met by a field showing only its page's generated text, which holds none wherever its caret reads (LIN-1930).
@@ -358,6 +421,7 @@ public struct Expectation: Equatable, Sendable {
     public func rangeHeld(selection observed: Range<Int>?, length observedLength: Int?) -> Bool {
         var offsetsOnly = Expectation(landing: landing, length: length, edge: edge, blame: blame)
         offsetsOnly.longest = longest
+        offsetsOnly.equivalences = equivalences
         return offsetsOnly.matches(selection: observed, length: observedLength)
     }
 
@@ -379,6 +443,7 @@ public struct Expectation: Equatable, Sendable {
         resolved.checksWrite = checksWrite
         resolved.deletes = deletes
         resolved.lengthBefore = lengthBefore
+        resolved.equivalences = equivalences
         return resolved
     }
 }

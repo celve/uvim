@@ -44,4 +44,39 @@ public struct GeneratedTextScan<Node> {
         }
         return texts
     }
+
+    /// The page's generated text or a list marker holds all of `run`, in plain offsets: the leaf there, found by binary search
+    /// on its siblings' starts; false on a failed read or past the budget.
+    public mutating func generates(_ run: Range<Int>, in roots: [Node], offset: (Node, _ end: Bool) -> Int?) -> Bool {
+        var siblings = roots
+        for _ in 0..<16 {
+            var holder: Node?
+            var low = 0
+            var high = siblings.count - 1
+            while low <= high {
+                let middle = (low + high) / 2
+                reads += 1
+                guard reads <= budget, let start = offset(siblings[middle], false) else { return false }
+                if start <= run.lowerBound {
+                    holder = siblings[middle]
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+            reads += 2
+            guard let holder, reads <= budget, let end = offset(holder, true), run.upperBound <= end,
+                  let read = read(holder) else { return false }
+            switch read.role {
+            case "AXListMarker"?:
+                return true
+            case "AXStaticText"?:
+                return read.id.map { $0 < 0 } ?? false
+            default:
+                guard !read.children.isEmpty else { return false }
+                siblings = read.children
+            }
+        }
+        return false
+    }
 }
