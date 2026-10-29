@@ -37,8 +37,9 @@ func entry(_ contents: Beliefs.Contents, _ capability: Capability, chromium: Boo
                                       beliefs: resolved(contents, chromium: chromium)).report.entries[capability]
 }
 
-func belief(_ question: String, _ answer: String, version: String = "1.2", _ more: String = "") -> String {
-    #"{"rung": "\#(rung)", "question": "\#(question)", "answer": "\#(answer)", "appVersion": "\#(version)", "provenance": {}\#(more)},"#
+func belief(_ question: String, _ answer: String, version: String = "1.2", stamped: Bool = true, _ more: String = "") -> String {
+    let model = stamped && answer == "broken" ? #", "fieldModel": \#(BeliefStore.fieldModel)"# : ""
+    return #"{"rung": "\#(rung)", "question": "\#(question)", "answer": "\#(answer)", "appVersion": "\#(version)", "provenance": {}\#(model)\#(more)},"#
 }
 
 func file(_ beliefs: String..., overrides: String = "") -> String {
@@ -79,11 +80,62 @@ precondition(entry(try! edited.load(), .writeSelection) == .init(status: .unavai
 write(file(belief("fromLaterBuild", "anything"), overrides: #""\#(rung)": {"fromLaterBuild": "off"}"#), to: edited)
 precondition((try? edited.load()) != nil, "names this build does not know are kept")
 
+/// The Controller's learning step, run until it commits or stops striking.
+func relearn(_ file: Beliefs, _ capability: Capability) -> Learning.Lesson {
+    let miss = Evidence(Question(capability), .refutes, why: .unmoved, seen: .settle(1))
+    var strikes = Strikes()
+    var lesson = Learning.Lesson()
+    for _ in 0..<Strikes.limit(for: capability, why: .unmoved) {
+        try! file.update { contents in
+            var store = contents.store
+            let overrides = contents.overrides
+            lesson = Learning.learn(
+                store: &store, strikes: &strikes, rung: rung, versions: versions, model: ReadModel(answer: .value),
+                observed: Learning.Observation(before: .value, source: .start), run: [miss],
+                overridden: { CapabilityConfig.resolve(surface, capability: $0.rawValue, overrides: overrides).override != nil },
+                provenance: Beliefs.provenance(tag: "e1.c1"), tally: Tally()
+            )
+            contents.store = store
+        }
+        if lesson.skip != .strike { break }
+    }
+    return lesson
+}
+
+let unstamped = file(belief("lineStartKey", "broken", stamped: false), belief("insertText", "broken", stamped: false))
+let older = fresh()
+write(unstamped, to: older)
+let unstampedContents = try! older.load()
+precondition(resolved(unstampedContents).broken.isEmpty && resolved(unstampedContents).reopened.isEmpty, "unstamped verdicts are field model 0")
+precondition(entry(unstampedContents, .lineStartKey) == .init(status: .available, source: .probed) && text(older) == unstamped)
+write(file(belief("lineStartKey", "broken", stamped: false, #", "fieldModel": 0"#)), to: older)
+precondition(resolved(try! older.load()).broken.isEmpty)
+write(file(belief("lineStartKey", "broken", stamped: false, #", "fieldModel": \#(BeliefStore.fieldModel + 1)"#)), to: older)
+precondition(resolved(try! older.load()).broken.isEmpty, "nor is a later build's applied after a downgrade")
+
+let relearned = fresh()
+write(unstamped, to: relearned)
+precondition(relearn(relearned, .lineStartKey).committed == .lineStartKey, "a stale verdict is no reason to refuse the new one")
+let restarted = Beliefs(url: relearned.url, defaults: relearned.defaults)
+let afterRestart = try! restarted.load()
+precondition(afterRestart.beliefs.map(\.question) == [.key(.lineStartKey)] && afterRestart.beliefs[0].fieldModel == BeliefStore.fieldModel,
+             "the stale verdicts at the rung go with it")
+precondition(entry(afterRestart, .lineStartKey) == .init(status: .unavailable, source: .learned), "and it stands after a restart")
+precondition(relearn(restarted, .lineStartKey).skip == .alreadyCommitted)
+for (choice, expected) in [("on", CapabilityReport.Entry(status: .available, source: .probed)), ("off", .init(status: .unavailable, source: .user))] {
+    try! restarted.update { $0.overrides = [rung: ["lineStartKey": choice]] }
+    precondition(entry(try! restarted.load(), .lineStartKey) == expected, "the user's \(choice) beats a relearned verdict")
+    let overridden = fresh()
+    write(file(belief("lineStartKey", "broken", stamped: false), overrides: #""\#(rung)": {"lineStartKey": "\#(choice)"}"#), to: overridden)
+    precondition(entry(try! overridden.load(), .lineStartKey) == expected, "and a reopened one")
+    precondition(relearn(overridden, .lineStartKey).skip == .userOverride && entry(try! overridden.load(), .lineStartKey) == expected)
+}
+
 var tally = Tally()
 tally.textContent = 2
 let full = Beliefs.Contents(overrides: ["com.example.app": ["nativeMotions": "on"]], beliefs: [
     Belief(rung: rung, question: .write(.writeSelection), answer: Belief.broken, judgedUnder: .textContent,
-           versions: Versions(app: "1.2", engine: "41.3.0"),
+           fieldModel: BeliefStore.fieldModel, versions: Versions(app: "1.2", engine: "41.3.0"),
            provenance: Provenance(build: "1.0.0 (812)", learnedAt: "2026-09-28T07:00:00Z", tag: "e3.c7")),
     Belief(rung: rung, question: .offsets, answer: "textContent", versions: versions, tally: tally, anchor: true),
     Belief(rung: rung, question: .unknown("fromLaterBuild"), answer: "x", versions: versions),

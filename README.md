@@ -1000,7 +1000,9 @@ or in one app natively — and keeps them in the [beliefs file](#the-beliefs-fil
 
 A write or key answer records the offsets answer it was judged under and holds only while that
 answer does: a demotion made while uvim misread the field's offsets reopens once the offsets answer
-changes. Demotions from before beliefs carry over as judged under `value`.
+changes. It also records the revision of uvim's field model, how uvim reads a field's structure,
+and a build with a new model tries every demotion again once. Demotions from before beliefs carry
+over as judged under `value`, and like every demotion from before the revision they are tried again.
 
 Each piece of evidence is one `learn` line, `evidence q=<question> <outcome> why=<reason> seen=<where>`:
 the outcome is `supports`, `refutes` or `neutral`, and `seen` is `snapshot` or `settle@N`, the plan
@@ -1038,6 +1040,7 @@ File** in the menu opens it:
     {
       "answer" : "broken",
       "appVersion" : "153.0.6943.98",
+      "fieldModel" : 1,
       "judgedUnder" : "textContent",
       "provenance" : {
         "build" : "1.0.0 (812)",
@@ -1069,17 +1072,19 @@ File** in the menu opens it:
 - Each of `beliefs` is one learned answer. `question` is a write (`writeSelection`, `insertText`), a
   key (`lineStartKey`, `lineEndKey`, `documentStartKey`, `documentEndKey`, `wordKeys`,
   `paragraphKeys`) or `offsets`, and `answer` is `broken` for a write or key, or `value`,
-  `textContent` or `untrusted` for `offsets`. A write or key answer holds only at `appVersion`, and
-  only while the field's offsets answer is `judgedUnder` (`value` when absent). An offsets answer
-  holds only at `engineVersion`, an Electron app's framework version, else at `appVersion`, and not
-  while `anchor` is true. `provenance` (uvim's build, when, and by which command) and `tally` (the
-  evidence counted) are for reading; an entry needs `provenance`, even as `{}`.
+  `textContent` or `untrusted` for `offsets`. A write or key answer holds only at `appVersion` and
+  at this build's `fieldModel` (0 when absent), and only while the field's offsets answer is
+  `judgedUnder` (`value` when absent). An offsets answer holds only at `engineVersion`, an Electron
+  app's framework version, else at `appVersion`, and not while `anchor` is true. `provenance`
+  (uvim's build, when, and by which command) and `tally` (the evidence counted) are for reading; an
+  entry needs `provenance`, even as `{}`.
 
 uvim rereads the file whenever it binds a field, so an edit applies when you next focus one. An
 override you write lasts, as one chosen in the menu does, and beats a belief. A belief you write is
-treated as learned: evidence can move an offsets answer, and an app update reopens a verdict. uvim
-writes the file for the menu and for what it learns, but only over the version it read: an edit you
-save in between is read back, and the change is made to it instead.
+treated as learned: evidence can move an offsets answer, and an app update or a new field model
+reopens a verdict, so write `fieldModel` with one. uvim writes the file for the menu and for what
+it learns, but only over the version it read: an edit you save in between is read back, and the
+change is made to it instead.
 
 A file uvim cannot use is never written over: bad JSON, a missing key, another `schema`, an answer
 its question cannot take, or an override other than `on` or `off`. uvim goes on applying the last
