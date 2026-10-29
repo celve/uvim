@@ -350,22 +350,26 @@ public struct Expectation: Equatable, Sendable {
     private func lands(_ landing: Landing, _ observed: Range<Int>, side: ParagraphBreaks.Side?) -> Bool {
         guard !landing.matches(observed) else { return true }
         guard !equivalences.isEmpty else { return false }
+        let read = side?.isStart == true
+        let meant = edge == .paragraphStart
         if observed.isEmpty {
-            return places(observed.lowerBound, side: side).contains { landing.matches($0..<$0) }
+            return places(observed.lowerBound, read: read, meant: meant).contains { landing.matches($0..<$0) }
         }
-        let uppers = places(observed.upperBound, side: side)
-        return places(observed.lowerBound, side: nil).contains { lower in
+        let uppers = places(observed.upperBound, read: read, meant: meant)
+        return places(observed.lowerBound, read: false, meant: false).contains { lower in
             uppers.contains { lower < $0 && landing.matches(lower..<$0) }
         }
     }
 
-    /// `offset` and the carets the model holds as the same place, read on `side`.
-    private func places(_ offset: Int, side: ParagraphBreaks.Side?) -> [Int] {
+    /// `offset` and the carets the model holds as the same place. After a break a run's lower end is the paragraph before's end
+    /// too, so it joins only as a caret `read` on its start side, or as a place `meant` on it.
+    private func places(_ offset: Int, read: Bool, meant: Bool) -> [Int] {
         var places = [offset]
         for equivalence in equivalences where (equivalence.run.lowerBound...equivalence.run.upperBound).contains(offset) {
-            let joinsLower = !equivalence.afterBreak || side?.isStart == true
-            guard joinsLower || offset > equivalence.run.lowerBound else { continue }
-            places += (joinsLower ? equivalence.run.lowerBound : equivalence.run.lowerBound + 1)...equivalence.run.upperBound
+            let lower = equivalence.run.lowerBound
+            guard !equivalence.afterBreak || offset > lower || read else { continue }
+            let joinsLower = !equivalence.afterBreak || offset == lower || meant
+            places += (joinsLower ? lower : lower + 1)...equivalence.run.upperBound
         }
         return places
     }
@@ -380,8 +384,8 @@ public struct Expectation: Equatable, Sendable {
         let caret = observed.lowerBound
         for reach in 1...Self.misfitReach {
             for place in [caret + reach, caret - reach] where place >= 0 && landing.matches(place..<place) {
-                // A caret before the text may be the paragraph before's end, another place but on its start side.
-                guard place < caret || caret == 0 || side?.isStart == true else { continue }
+                // Either end before the text may be the paragraph before's end, another place but on its start side.
+                guard place < caret ? place == 0 || edge == .paragraphStart : caret == 0 || side?.isStart == true else { continue }
                 if converged(selection: place..<place, length: observedLength, selectedText: observedText, side: side) {
                     return min(caret, place)..<max(caret, place)
                 }

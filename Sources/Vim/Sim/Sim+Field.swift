@@ -65,12 +65,12 @@ extension Sim {
         return (passed, observed, fieldLength, misfit)
     }
 
-    /// Chromium's own list markers and Quill's are the page's; whether Linear's are is unmeasured (LIN-2369), so no.
+    /// List markers are the page's, Chromium's own and `li::before`'s in Quill and Linear (LIN-2369); code labels are not.
     func generatesText(_ run: Range<Int>) -> Bool {
         guard emptyParagraphs, let lines = listLines else { return false }
         let drawn = lines.filter { $0.marker != nil && !$0.controls }
         return zip(chromium.listMarkers, drawn).contains { start, line in
-            (quill || line.inline) && start <= run.lowerBound && run.upperBound <= start + (line.marker?.utf16.count ?? 0)
+            start <= run.lowerBound && run.upperBound <= start + (line.marker?.utf16.count ?? 0)
         }
     }
 

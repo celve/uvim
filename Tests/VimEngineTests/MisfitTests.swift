@@ -12,6 +12,12 @@ func testMisfits() {
     precondition(!lineStart.converged(selection: 8..<8, length: 15, selectedText: nil, side: start), "an equivalent place, a wrong length")
     precondition(!lineStart.converged(selection: 7..<7, length: 16, selectedText: nil, side: start), "a marker merely nearby")
     precondition(!lineStart.converged(selection: 10..<10, length: 16, selectedText: nil, side: start), "nor past it")
+    var lineEnd = Expectation(landing: .exact(8..<8), length: 16)
+    lineEnd.equivalences = held
+    precondition(!lineEnd.converged(selection: 9..<9, length: 16, selectedText: nil, side: start), "the line above's end is not the next one's start")
+    var before = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart)
+    before.equivalences = held
+    precondition(before.converged(selection: 9..<9, length: 16, selectedText: nil, side: start), "unless the expectation means its start side")
     var fieldStart = Expectation(landing: .exact(1..<1), length: 16)
     precondition(!fieldStart.matches(selection: 0..<0, length: 16), "only across a run the model holds")
     fieldStart.equivalences = held
@@ -36,6 +42,8 @@ func testMisfits() {
     precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil, side: start) == nil, "nor beyond a marker's reach")
     precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil, side: start) == nil, "nor a selection")
     precondition(k.misfit(selection: nil, length: 16, selectedText: nil, side: start) == nil, "nor a non-answer")
+    precondition(Expectation(landing: .exact(8..<8), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == nil,
+                 "a caret short of the line above's end")
     let past = Expectation(landing: .exact(9..<9), length: 16)
     precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil, side: nil) == nil, "a caret before may be the line above's end")
     precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil, side: start) == 8..<9)
@@ -63,7 +71,7 @@ func testMisfits() {
 
     // Quill's tree, as `UnreachableLineTests` has it: each item's `::before` group holds a generated `•`.
     let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/T/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/T/6/7 0.2.1/T/7/12", linear: false)
-    let generated = Set(quillTree[0].children.map { ObjectIdentifier($0.children[0].children[0]) })
+    var generated = Set(quillTree[0].children.map { ObjectIdentifier($0.children[0].children[0]) })
     func generates(_ run: Range<Int>, in roots: [FakeNode], budget: Int = GeneratedText.runBudget) -> Bool {
         var scan = GeneratedTextScan<FakeNode>(budget: budget) { node in
             node.fails ? nil : .init(role: node.role, id: generated.contains(ObjectIdentifier(node)) ? -1000000002 : 9, children: node.children)
@@ -76,6 +84,15 @@ func testMisfits() {
     precondition(!generates(6..<7, in: quillTree, budget: 4), "past the budget")
     quillTree[0].children[2].fails = true
     precondition(!generates(6..<7, in: quillTree), "a failed read")
+    // Linear's ordered marker is two generated nodes, `1` and `.` (softlash/LIN-2369's linearExample4).
+    let linearSpec = "0/L/0/2 0.0/G/0/2 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/G/1/2 0.0.1.0/T/1/2 1/L/2/5 1.0/G/2/5 1.0.0/G/2/4 1.0.0.0/Tg/2/3 1.0.0.1/Tg/3/4 1.0.1/G/4/5 1.0.1.0/T/4/5 2/G/5/12 2.0/T/5/12"
+    let linearTree = fakeTree(linearSpec, linear: false)
+    for token in linearSpec.split(separator: " ") where token.split(separator: "/")[1] == "Tg" {
+        let path = token.split(separator: "/")[0].split(separator: ".").map { Int($0)! }
+        generated.insert(ObjectIdentifier(path.dropFirst().reduce(linearTree[path[0]]) { $0.children[$1] }))
+    }
+    precondition(generates(2..<4, in: linearTree) && generates(0..<1, in: linearTree), "a marker over two leaves")
+    precondition(!generates(2..<5, in: linearTree) && !generates(1..<3, in: linearTree), "and not past them")
     let nativeTree = fakeTree("0/L/0/9 0.0/G/0/5 0.0.0/M/0/2 0.0.1/T/2/5 0.1/G/5/9 0.1.0/M/5/7 0.1.1/T/7/9", linear: false)
     precondition(generates(5..<7, in: nativeTree) && !generates(4..<6, in: nativeTree), "Chromium's own marker")
 
