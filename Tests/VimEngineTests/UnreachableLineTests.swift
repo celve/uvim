@@ -17,25 +17,25 @@ let dia1Raw = "Top paragraph of the LIN-1652 disposable list probe.1.Numbered on
     + "\u{FFFC}To-do open\u{FFFC}\u{FFFC}To-do done1.Paragraph after a literal one-dot line.\u{2022}9.Nint"
     + "h item10.Tenth item11.Eleventh itemLast paragraph."
 let dia1Spec = """
-0/G/0/52 0.0/T/0/52 1/L/52/138 1.0/G/52/66 1.0.0/G/52/54 1.0.0.0/T/52/53 1.0.0.1/T/53/54 1.0.1/G/54/66
-1.0.1.0/T/54/66 1.1/G/66/122 1.1.0/G/66/68 1.1.0.0/T/66/67 1.1.0.1/T/67/68 1.1.1/G/68/80 1.1.1.0/T/68/80
-1.1.2/L/80/122 1.1.2.0/G/80/101 1.1.2.0.0/G/80/82 1.1.2.0.0.0/T/80/81 1.1.2.0.0.1/T/81/82 1.1.2.0.1/G/82/101
-1.1.2.0.1.0/T/82/101 1.1.2.1/G/101/122 1.1.2.1.0/G/101/103 1.1.2.1.0.0/T/101/102 1.1.2.1.0.1/T/102/103
-1.1.2.1.1/G/103/122 1.1.2.1.1.0/T/103/122 1.2/G/122/138 1.2.0/G/122/124 1.2.0.0/T/122/123 1.2.0.1/T/123/124
+0/G/0/52 0.0/T/0/52 1/L/52/138 1.0/G/52/66 1.0.0/G/52/54 1.0.0.0/Tg/52/53 1.0.0.1/Tg/53/54 1.0.1/G/54/66
+1.0.1.0/T/54/66 1.1/G/66/122 1.1.0/G/66/68 1.1.0.0/Tg/66/67 1.1.0.1/Tg/67/68 1.1.1/G/68/80 1.1.1.0/T/68/80
+1.1.2/L/80/122 1.1.2.0/G/80/101 1.1.2.0.0/G/80/82 1.1.2.0.0.0/Tg/80/81 1.1.2.0.0.1/Tg/81/82 1.1.2.0.1/G/82/101
+1.1.2.0.1.0/T/82/101 1.1.2.1/G/101/122 1.1.2.1.0/G/101/103 1.1.2.1.0.0/Tg/101/102 1.1.2.1.0.1/Tg/102/103
+1.1.2.1.1/G/103/122 1.1.2.1.1.0/T/103/122 1.2/G/122/138 1.2.0/G/122/124 1.2.0.0/Tg/122/123 1.2.0.1/Tg/123/124
 1.2.1/G/124/138 1.2.1.0/T/124/138 2/G/138/179 2.0/T/138/179 3/L/179/322 3.0/G/179/229 3.0.0/G/179/180
-3.0.0.0/T/179/180 3.0.1/G/180/190 3.0.1.0/T/180/190 3.0.2/L/190/229 3.0.2.0/G/190/229 3.0.2.0.0/G/190/191
-3.0.2.0.0.0/T/190/191 3.0.2.0.1/G/191/208 3.0.2.0.1.0/T/191/208 3.0.2.0.2/L/208/229 3.0.2.0.2.0/G/208/229
-3.0.2.0.2.0.0/G/208/209 3.0.2.0.2.0.0.0/T/208/209 3.0.2.0.2.0.1/G/209/229 3.0.2.0.2.0.1.0/T/209/229
-3.1/G/229/311 3.1.0/G/229/230 3.1.0.0/T/229/230 3.1.1/G/230/311 3.1.1.0/T/230/252 3.1.1.1/A/252/310
+3.0.0.0/Tg/179/180 3.0.1/G/180/190 3.0.1.0/T/180/190 3.0.2/L/190/229 3.0.2.0/G/190/229 3.0.2.0.0/G/190/191
+3.0.2.0.0.0/Tg/190/191 3.0.2.0.1/G/191/208 3.0.2.0.1.0/T/191/208 3.0.2.0.2/L/208/229 3.0.2.0.2.0/G/208/229
+3.0.2.0.2.0.0/G/208/209 3.0.2.0.2.0.0.0/Tg/208/209 3.0.2.0.2.0.1/G/209/229 3.0.2.0.2.0.1.0/T/209/229
+3.1/G/229/311 3.1.0/G/229/230 3.1.0.0/Tg/229/230 3.1.1/G/230/311 3.1.1.0/T/230/252 3.1.1.1/A/252/310
 3.1.1.1.0/K/252/310 3.1.1.1.0.0/T/252/253 3.1.1.1.0.1/T/253/254 3.1.1.1.0.2/T/254/262 3.1.1.1.0.3/T/262/263
-3.1.1.1.0.4/T/263/310 3.2/G/311/322 3.2.0/G/311/312 3.2.0.0/T/311/312 3.2.1/G/312/322 3.2.1.0/T/312/322
+3.1.1.1.0.4/T/263/310 3.2/G/311/322 3.2.0/G/311/312 3.2.0.0/Tg/311/312 3.2.1/G/312/322 3.2.1.0/T/312/322
 4/H/322/333 4.0/G/322/322 4.0.0/G/322/322 4.0.0.0/E/322/322 4.0.0.1/P/322/322 4.1/T/322/333 5/L/333/353
 5.0/G/333/343 5.0.0/G/333/333 5.0.0.0/I/333/333 5.0.0.1/C/333/333 5.0.1/G/333/343 5.0.1.0/G/333/343
 5.0.1.0.0/T/333/343 5.1/G/343/353 5.1.0/G/343/343 5.1.0.0/I/343/343 5.1.0.1/C/343/343 5.1.1/G/343/353
 5.1.1.0/G/343/353 5.1.1.0.0/T/343/353 6/G/353/355 6.0/T/353/355 7/G/355/394 7.0/T/355/394 8/G/394/395
-8.0/T/394/395 9/L/395/436 9.0/G/395/407 9.0.0/G/395/397 9.0.0.0/T/395/396 9.0.0.1/T/396/397 9.0.1/G/397/407
-9.0.1.0/T/397/407 9.1/G/407/420 9.1.0/G/407/410 9.1.0.0/T/407/409 9.1.0.1/T/409/410 9.1.1/G/410/420
-9.1.1.0/T/410/420 9.2/G/420/436 9.2.0/G/420/423 9.2.0.0/T/420/422 9.2.0.1/T/422/423 9.2.1/G/423/436
+8.0/T/394/395 9/L/395/436 9.0/G/395/407 9.0.0/G/395/397 9.0.0.0/Tg/395/396 9.0.0.1/Tg/396/397 9.0.1/G/397/407
+9.0.1.0/T/397/407 9.1/G/407/420 9.1.0/G/407/410 9.1.0.0/Tg/407/409 9.1.0.1/Tg/409/410 9.1.1/G/410/420
+9.1.1.0/T/410/420 9.2/G/420/436 9.2.0/G/420/423 9.2.0.0/Tg/420/422 9.2.0.1/Tg/422/423 9.2.1/G/423/436
 9.2.1.0/T/423/436 10/G/436/451 10.0/T/436/451
 """
 let dia1Tree = fakeTree(dia1Spec)
@@ -79,10 +79,10 @@ let dia6Tree = fakeTree("""
 3/G/223/297 3.0/A/223/281 3.0.0/K/223/281 3.0.0.0/T/223/224 3.0.0.1/T/224/225 3.0.0.2/T/225/233
 3.0.0.3/T/233/234 3.0.0.4/T/234/281 3.1/T/281/297 4/G/297/393 4.0/A/297/392 4.0.0/K/297/392 4.0.0.0/T/297/298
 4.0.0.1/T/298/299 4.0.0.2/T/299/307 4.0.0.3/T/307/308 4.0.0.4/T/308/392 5/L/393/597 5.0/G/393/474
-5.0.0/G/393/394 5.0.0.0/T/393/394 5.0.1/G/394/474 5.0.1.0/T/394/406 5.0.1.1/A/406/464 5.0.1.1.0/K/406/464
+5.0.0/G/393/394 5.0.0.0/Tg/393/394 5.0.1/G/394/474 5.0.1.0/T/394/406 5.0.1.1/A/406/464 5.0.1.1.0/K/406/464
 5.0.1.1.0.0/T/406/407 5.0.1.1.0.1/T/407/408 5.0.1.1.0.2/T/408/416 5.0.1.1.0.3/T/416/417 5.0.1.1.0.4/T/417/464
-5.0.1.2/T/464/474 5.1/G/474/485 5.1.0/G/474/475 5.1.0.0/T/474/475 5.1.1/G/475/485 5.1.1.0/T/475/485
-5.2/G/485/597 5.2.0/G/485/486 5.2.0.0/T/485/486 5.2.1/G/486/597 5.2.1.0/A/486/581 5.2.1.0.0/K/486/581
+5.0.1.2/T/464/474 5.1/G/474/485 5.1.0/G/474/475 5.1.0.0/Tg/474/475 5.1.1/G/475/485 5.1.1.0/T/475/485
+5.2/G/485/597 5.2.0/G/485/486 5.2.0.0/Tg/485/486 5.2.1/G/486/597 5.2.1.0/A/486/581 5.2.1.0.0/K/486/581
 5.2.1.0.0.0/T/486/487 5.2.1.0.0.1/T/487/488 5.2.1.0.0.2/T/488/496 5.2.1.0.0.3/T/496/497 5.2.1.0.0.4/T/497/581
 5.2.1.1/T/581/597 6/G/597/633 6.0/T/597/633
 """)
@@ -113,13 +113,13 @@ let dia7Spec = """
 1.1.0.2/T/42/50 1.1.0.3/T/50/51 1.1.0.4/T/51/98 1.2/T/98/99 1.3/A/99/194 1.3.0/K/99/194 1.3.0.0/T/99/100
 1.3.0.1/T/100/101 1.3.0.2/T/101/109 1.3.0.3/T/109/110 1.3.0.4/T/110/194 1.4/T/194/199 2/G/199/274 2.0/T/199/215
 2.1/A/215/273 2.1.0/K/215/273 2.1.0.0/T/215/216 2.1.0.1/T/216/217 2.1.0.2/T/217/225 2.1.0.3/T/225/226
-2.1.0.4/T/226/273 3/L/274/538 3.0/G/274/371 3.0.0/G/274/275 3.0.0.0/T/274/275 3.0.1/G/275/371 3.0.1.0/A/275/370
+2.1.0.4/T/226/273 3/L/274/538 3.0/G/274/371 3.0.0/G/274/275 3.0.0.0/Tg/274/275 3.0.1/G/275/371 3.0.1.0/A/275/370
 3.0.1.0.0/K/275/370 3.0.1.0.0.0/T/275/276 3.0.1.0.0.1/T/276/277 3.0.1.0.0.2/T/277/285 3.0.1.0.0.3/T/285/286
-3.0.1.0.0.4/T/286/370 3.1/G/371/527 3.1.0/G/371/372 3.1.0.0/T/371/372 3.1.1/G/372/527 3.1.1.0/A/372/430
+3.0.1.0.0.4/T/286/370 3.1/G/371/527 3.1.0/G/371/372 3.1.0.0/Tg/371/372 3.1.1/G/372/527 3.1.1.0/A/372/430
 3.1.1.0.0/K/372/430 3.1.1.0.0.0/T/372/373 3.1.1.0.0.1/T/373/374 3.1.1.0.0.2/T/374/382 3.1.1.0.0.3/T/382/383
 3.1.1.0.0.4/T/383/430 3.1.1.1/T/430/431 3.1.1.2/A/431/526 3.1.1.2.0/K/431/526 3.1.1.2.0.0/T/431/432
 3.1.1.2.0.1/T/432/433 3.1.1.2.0.2/T/433/441 3.1.1.2.0.3/T/441/442 3.1.1.2.0.4/T/442/526 3.2/G/527/538
-3.2.0/G/527/528 3.2.0.0/T/527/528 3.2.1/G/528/538 3.2.1.0/T/528/538 4/G/538/575 4.0/T/538/575
+3.2.0/G/527/528 3.2.0.0/Tg/527/528 3.2.1/G/528/538 3.2.1.0/T/528/538 4/G/538/575 4.0/T/538/575
 """
 let dia7Tree = fakeTree(dia7Spec)
 
@@ -245,24 +245,24 @@ func testUnreachableLines() {
         + "with one pure builder shared by the runtime and the Sim\n1.\nQuoted paragraph\u{2022}Quoted bullet\u{FFFC}"
         + "\u{FFFC}Heading betweenClosing paragraph."
     let dia2Tree = fakeTree("""
-    0/G/0/37 0.0/T/0/37 1/L/37/78 1.0/G/37/57 1.0.0/G/37/38 1.0.0.0/T/37/38 1.0.1/G/38/57 1.0.1.0/T/38/57
-    1.1/G/57/59 1.1.0/G/57/58 1.1.0.0/T/57/58 1.1.1/E/58/59 1.2/G/59/78 1.2.0/G/59/60 1.2.0.0/T/59/60 1.2.1/G/60/78
-    1.2.1.0/T/60/78 2/L/78/93 2.0/G/78/83 2.0.0/G/78/80 2.0.0.0/T/78/79 2.0.0.1/T/79/80 2.0.1/G/80/83
-    2.0.1.0/T/80/83 2.1/G/83/86 2.1.0/G/83/85 2.1.0.0/T/83/84 2.1.0.1/T/84/85 2.1.1/E/85/86 2.2/G/86/93
-    2.2.0/G/86/88 2.2.0.0/T/86/87 2.2.0.1/T/87/88 2.2.1/G/88/93 2.2.1.0/T/88/93 3/L/93/410 3.0/G/93/111
+    0/G/0/37 0.0/T/0/37 1/L/37/78 1.0/G/37/57 1.0.0/G/37/38 1.0.0.0/Tg/37/38 1.0.1/G/38/57 1.0.1.0/T/38/57
+    1.1/G/57/59 1.1.0/G/57/58 1.1.0.0/Tg/57/58 1.1.1/E/58/59 1.2/G/59/78 1.2.0/G/59/60 1.2.0.0/Tg/59/60 1.2.1/G/60/78
+    1.2.1.0/T/60/78 2/L/78/93 2.0/G/78/83 2.0.0/G/78/80 2.0.0.0/Tg/78/79 2.0.0.1/Tg/79/80 2.0.1/G/80/83
+    2.0.1.0/T/80/83 2.1/G/83/86 2.1.0/G/83/85 2.1.0.0/Tg/83/84 2.1.0.1/Tg/84/85 2.1.1/E/85/86 2.2/G/86/93
+    2.2.0/G/86/88 2.2.0.0/Tg/86/87 2.2.0.1/Tg/87/88 2.2.1/G/88/93 2.2.1.0/T/88/93 3/L/93/410 3.0/G/93/111
     3.0.0/G/93/93 3.0.0.0/I/93/93 3.0.0.1/C/93/93 3.0.1/G/93/111 3.0.1.0/G/93/111 3.0.1.0.0/T/93/111 3.1/G/111/112
     3.1.0/G/111/111 3.1.0.0/I/111/111 3.1.0.1/C/111/111 3.1.1/E/111/112 3.1.1.0/E/111/112 3.2/G/112/129
     3.2.0/G/112/112 3.2.0.0/I/112/112 3.2.0.1/C/112/112 3.2.1/G/112/129 3.2.1.0/G/112/129 3.2.1.0.0/T/112/129
-    3.3/G/129/180 3.3.0/G/129/130 3.3.0.0/T/129/130 3.3.1/G/130/180 3.3.1.0/T/130/154 3.3.1.1/T/155/156
-    3.3.1.2/T/156/180 3.4/G/180/229 3.4.0/G/180/181 3.4.0.0/T/180/181 3.4.1/G/181/205 3.4.1.0/T/181/205
-    3.4.2/G/205/229 3.4.2.0/T/205/229 3.5/G/229/310 3.5.0/G/229/230 3.5.0.0/T/229/230 3.5.1/G/230/310
+    3.3/G/129/180 3.3.0/G/129/130 3.3.0.0/Tg/129/130 3.3.1/G/130/180 3.3.1.0/T/130/154 3.3.1.1/T/155/156
+    3.3.1.2/T/156/180 3.4/G/180/229 3.4.0/G/180/181 3.4.0.0/Tg/180/181 3.4.1/G/181/205 3.4.1.0/T/181/205
+    3.4.2/G/205/229 3.4.2.0/T/205/229 3.5/G/229/310 3.5.0/G/229/230 3.5.0.0/Tg/229/230 3.5.1/G/230/310
     3.5.1.0/T/230/237 3.5.1.1/A/237/295 3.5.1.1.0/K/237/295 3.5.1.1.0.0/T/237/238 3.5.1.1.0.1/T/238/239
     3.5.1.1.0.2/T/239/247 3.5.1.1.0.3/T/247/248 3.5.1.1.0.4/T/248/295 3.5.1.2/T/295/310 3.6/G/310/407
-    3.6.0/G/310/311 3.6.0.0/T/310/311 3.6.1/G/311/407 3.6.1.0/A/311/406 3.6.1.0.0/K/311/406 3.6.1.0.0.0/I/311/311
+    3.6.0/G/310/311 3.6.0.0/Tg/310/311 3.6.1/G/311/407 3.6.1.0/A/311/406 3.6.1.0.0/K/311/406 3.6.1.0.0.0/I/311/311
     3.6.1.0.0.1/T/311/312 3.6.1.0.0.2/T/312/313 3.6.1.0.0.3/T/313/321 3.6.1.0.0.4/T/321/322 3.6.1.0.0.5/T/322/406
-    3.7/G/407/410 3.7.0/L/407/410 3.7.0.0/G/407/410 3.7.0.0.0/G/407/409 3.7.0.0.0.0/T/407/408 3.7.0.0.0.1/T/408/409
+    3.7/G/407/410 3.7.0/L/407/410 3.7.0.0/G/407/410 3.7.0.0.0/G/407/409 3.7.0.0.0.0/Tg/407/408 3.7.0.0.0.1/Tg/408/409
     3.7.0.0.1/E/409/410 4/G/410/440 4.0/G/410/426 4.0.0/T/410/426 4.1/L/426/440 4.1.0/G/426/440 4.1.0.0/G/426/427
-    4.1.0.0.0/T/426/427 4.1.0.1/G/427/440 4.1.0.1.0/T/427/440 5/H/440/455 5.0/G/440/440 5.0.0/G/440/440
+    4.1.0.0.0/Tg/426/427 4.1.0.1/G/427/440 4.1.0.1.0/T/427/440 5/H/440/455 5.0/G/440/440 5.0.0/G/440/440
     5.0.0.0/E/440/440 5.0.0.1/P/440/440 5.1/T/440/455 6/G/455/473 6.0/T/455/473
     """)
 
@@ -270,7 +270,7 @@ func testUnreachableLines() {
     precondition(dia1Candidates.markers.map(\.lowerBound) == [52, 66, 80, 101, 122, 179, 190, 208, 229, 311, 353, 394, 395, 407, 420])
     precondition(dia1Candidates.chips == [252..<310])
     let dia1Found = unreachableScanned(dia1Tree, dia1Candidates)!
-    precondition(dia1Found.markers == [52, 66, 80, 101, 122, 179, 190, 208, 229, 311, 395, 407, 420],
+    precondition(dia1Found.markers.map(\.lowerBound) == [52, 66, 80, 101, 122, 179, 190, 208, 229, 311, 395, 407, 420],
                  "the paragraphs that only read 1. and • are no list's")
     precondition(dia1Found.chips == [UnreachableLines.Chip(range: 252..<310, paragraph: 230..<311)])
 
@@ -295,7 +295,7 @@ func testUnreachableLines() {
     let dia6Candidates = UnreachableLines.candidates(text: dia6Value, breaks: ParagraphBreaks(value: dia6Value, fieldText: dia6Plain)!)
     precondition(dia6Candidates.chips.map(\.lowerBound) == [36, 127, 223, 297, 406, 486])
     let dia6Found = unreachableScanned(dia6Tree, dia6Candidates)!
-    precondition(dia6Found.markers == [393, 474, 485])
+    precondition(dia6Found.markers == [393..<394, 474..<475, 485..<486])
     precondition(dia6Found.chips.map(\.paragraph) == [29..<110, 110..<223, 223..<297, 297..<393, 394..<474, 486..<597])
 
     precondition(dia6Model.text == [
@@ -337,8 +337,9 @@ func testUnreachableLines() {
     """)
     let dia8Plain = MarkerText.plain(dia8Raw)
     let dia8Candidates = UnreachableLines.candidates(text: dia8Value, breaks: ParagraphBreaks(value: dia8Value, fieldText: dia8Plain)!)
-    precondition(dia8Candidates.markers == [36..<38, 55..<57, 75..<77, 95..<97, 98..<100, 146..<149, 153..<157, 170..<173, 182..<186])
-    precondition(unreachableScanned(dia8Tree, dia8Candidates)?.markers == dia8Candidates.markers.map(\.lowerBound))
+    precondition(dia8Candidates.markers.map(\.lowerBound) == [36, 55, 75, 95, 98, 146, 153, 170, 182])
+    precondition(unreachableScanned(dia8Tree, dia8Candidates)?.markers
+                 == [36..<38, 55..<57, 75..<77, 95..<97, 98..<100, 146..<149, 153..<157, 170..<173, 182..<186], "each marker and its space")
     let dia8Model = folded(dia8Value, dia8Raw, dia8Tree)
     precondition(dia8Model.text == [
         "Native list probe opening paragraph.", "First bullet item", "Second bullet item", "Nested circle item", "",
@@ -370,7 +371,7 @@ func testUnreachableLines() {
     precondition(UnreachableLines.fold(text: "ab\ncd", breaks: ParagraphBreaks(offsets: [2]), raw: "abcd", found: noUnreachable)
                  == UnreachableLines.Model(text: "ab\ncd", breaks: ParagraphBreaks(offsets: [2]), folded: 0), "nothing to fold")
     let chipLast = UnreachableLines.fold(text: "a\n\u{2022}\nChip\n", breaks: ParagraphBreaks(offsets: [1, 3]), raw: "a\u{2022}Chip\n",
-                                         found: UnreachableLines.Found(markers: [1], chips: [.init(range: 2..<6, paragraph: 2..<7)]))
+                                         found: UnreachableLines.Found(markers: [1..<2], chips: [.init(range: 2..<6, paragraph: 2..<7)]))
     precondition(chipLast.text == "a\nC" && chipLast.breaks.fieldOffset(3) == 7, "a <br> ending the field leaves no line")
 
     let todoOne = FakeNode("AXList", "AXContentList", 0, 2, [FakeNode("AXGroup", nil, 0, 2, [
@@ -554,6 +555,7 @@ func testUnreachableLines() {
         [("one", "\u{2022}"), ("", "\u{2022}"), ("three", "\u{2022}"), ("four", "1."), ("", "2."), ("six", "a.")],
         [("", "\u{2022}"), (" one", "\u{2022}"), ("", "\u{2022}"), ("three", "1."), (" four", "2.")],
         [("", "\u{2022}"), ("", "\u{2022}")],
+        [("one", "\u{25B8}"), ("two", "a)"), ("", "\u{25B8}"), ("Last", nil)],
     ]
     for (doc, profile) in quillDocs.flatMap({ doc in [keyProfile, writeKeys].map { (doc, $0) } }) {
         for keys in ["jjjjjjjkkkkkkk", "3j2k4j3j3k", "5ljjjjjjkkkk", "$jjjjjjjkkkkk", "jjjjdd", "jjjjjdd", "jlx", "jjj0x", "jdd",
@@ -574,25 +576,24 @@ func testUnreachableLines() {
             precondition(quill.settleFailures == 0 && quill.bells == 0, "Quill \(keys) \(doc.map(\.0)) \(quill.settleFailures) \(quill.bells)")
         }
     }
-    precondition(UnreachableLines.prefixLength(Array("\u{2022}one".utf16), quill: true) == 1
-                 && UnreachableLines.prefixLength(Array("10.ten".utf16), quill: true) == 3)
-    precondition(UnreachableLines.prefixLength(Array("\u{2022}one".utf16)) == nil, "unspaced markers are Quill's alone")
-    precondition(UnreachableLines.prefixLength(Array("\u{2022} one".utf16), quill: true) == 1, "Quill's space is the item's text")
+    precondition(UnreachableLines.markerShape(Array("\u{2022}one".utf16)) == 1 && UnreachableLines.markerShape(Array("10.ten".utf16)) == 3
+                 && UnreachableLines.markerShape(Array("\u{25B8} one".utf16)) == 1 && UnreachableLines.markerShape(Array("a)two".utf16)) == 2)
+    precondition(UnreachableLines.markerShape(Array("one".utf16)) == nil && UnreachableLines.markerShape(Array("+1".utf16)) == nil
+                 && UnreachableLines.markerShape(Array("\u{1F600}".utf16)) == nil, "text, an ASCII symbol and an emoji are no shape")
 
     // `•one⏎•⏎•three` as Chromium 153 shows Quill 1.3.7's list: an empty item holds its `::before` group alone.
-    let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/T/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/T/6/7 0.2.1/T/7/12", linear: false)
+    let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/Tg/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/Tg/6/7 0.2.1/T/7/12", linear: false)
     let quillBreaks = ParagraphBreaks(offsets: [4])
-    let quillFound = unreachableScanned(quillTree, UnreachableLines.candidates(
-        text: "\u{2022}one\n\u{2022}\n\u{2022}three", breaks: quillBreaks, quill: true))
-    precondition(quillFound?.markers == [0, 4, 6], "the empty item's marker too")
-    precondition(unreachableScanned(quillTree, UnreachableLines.candidates(
-        text: "\u{2022}one\n\u{2022}\n\u{2022}three", breaks: quillBreaks))?.markers == [], "outside Quill, an unspaced marker is none")
-    let spacedTree = fakeTree("0/L/0/9 0.0/G/0/5 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/5 0.1/G/5/9 0.1.0/G/5/6 0.1.0.0/T/5/6 0.1.1/T/6/9", linear: false)
+    let quillCandidates = UnreachableLines.candidates(text: "\u{2022}one\n\u{2022}\n\u{2022}three", breaks: quillBreaks)
+    precondition(unreachableScanned(quillTree, quillCandidates)?.markers == [0..<1, 4..<5, 6..<7], "the empty item's marker too")
+    let typedTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/T/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/T/6/7 0.2.1/T/7/12", linear: false)
+    precondition(unreachableScanned(typedTree, quillCandidates)?.markers == [], "the same text the page does not generate is none")
+    let spacedTree = fakeTree("0/L/0/9 0.0/G/0/5 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/5 0.1/G/5/9 0.1.0/G/5/6 0.1.0.0/Tg/5/6 0.1.1/T/6/9", linear: false)
     let spacedBreaks = ParagraphBreaks(offsets: [5])
-    let spacedFound = unreachableScanned(spacedTree, UnreachableLines.candidates(text: "\u{2022} one\n\u{2022}two", breaks: spacedBreaks, quill: true))
-    precondition(spacedFound?.markers == [0, 5], "an item whose text starts with a space keeps its marker")
+    let spacedFound = unreachableScanned(spacedTree, UnreachableLines.candidates(text: "\u{2022} one\n\u{2022}two", breaks: spacedBreaks))
+    precondition(spacedFound?.markers == [0..<1, 5..<6], "an item whose text starts with a space keeps its marker")
     precondition(UnreachableLines.fold(text: "\u{2022} one\n\u{2022}two", breaks: spacedBreaks, raw: "\u{2022} one\u{2022}two",
-                                       found: spacedFound!, quill: true).text == " one\ntwo")
+                                       found: spacedFound!).text == " one\ntwo")
 
     var linearLogged = linearSim(keyProfile, findsUnreachable: false)
     linearLogged.type("j")

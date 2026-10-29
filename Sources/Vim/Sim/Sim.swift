@@ -51,7 +51,7 @@ public struct Sim {
 
     /// With `emptyParagraphs`, Linear's editor: blocks each line draws before its text, and each U+2060 a chip.
     public var listLines: [ListLine]?
-    /// The editor is Quill's, whose `listLines` markers have no space after them (LIN-2329).
+    /// The page is Quill's, which reads a caret at the field's start before its first marker; uvim is told nothing of it.
     public var quill = false
 
     /// Off, discovery of list markers and chips fails, and they stay lines.

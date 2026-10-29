@@ -1,4 +1,5 @@
-/// Confirms in a Chromium field's tree which lines are list markers and which are chips, with their paragraphs (LIN-1652).
+/// Confirms in a Chromium field's tree which lines start with list markers, and how long, and which are chips, with their
+/// paragraphs (LIN-1652).
 public struct UnreachableScan<Node> {
     /// Nil when a read fails for any reason but the attribute's absence. One read.
     private let block: (Node) -> EmptyBlockScan<Node>.Block?
@@ -24,12 +25,12 @@ public struct UnreachableScan<Node> {
 
     /// Nil on any failed read or past the budget.
     public mutating func run(blocks roots: [Node], candidates: UnreachableLines.Candidates) -> UnreachableLines.Found? {
-        var markers: [Int] = []
+        var markers: [Range<Int>] = []
         var chips: [UnreachableLines.Chip] = []
         var carets: [UnreachableLines.Caret] = []
         for candidate in candidates.markers {
-            guard let hit = descend(to: candidate, in: roots, quill: candidates.quill) else { return nil }
-            if case .marker = hit { markers.append(candidate.lowerBound) }
+            guard let hit = descend(to: candidate, in: roots) else { return nil }
+            if case .marker(let end) = hit { markers.append(candidate.lowerBound..<end) }
         }
         for candidate in candidates.chips {
             guard let hit = descend(to: candidate, in: roots) else { return nil }
@@ -54,13 +55,13 @@ public struct UnreachableScan<Node> {
     }
 
     private enum Hit {
-        case marker
+        case marker(end: Int)
         case chip(Range<Int>, paragraph: Range<Int>)
         case neither
     }
 
     /// Descends through the children holding the candidate's start, found by binary search on their starts.
-    private mutating func descend(to candidate: Range<Int>, in roots: [Node], quill: Bool = false) -> Hit? {
+    private mutating func descend(to candidate: Range<Int>, in roots: [Node]) -> Hit? {
         var siblings = roots
         var path: [Int] = []
         var parent: (node: Node, start: Int)?
@@ -90,17 +91,9 @@ public struct UnreachableScan<Node> {
                 guard chipEnd > candidate.lowerBound + 1, chipEnd <= candidate.upperBound else { return .neither }
                 return .chip(hit.start..<chipEnd, paragraph: parent.start..<paragraphEnd)
             }
-            if inList, hit.start == candidate.lowerBound, let first = read.children.first {
-                var marked = read.children.count > 1
-                // An empty item of Chromium's own list holds its marker alone, and of Quill's list the marker's group.
-                if !marked {
-                    guard let child = self.read(first, at: here + [0]) else { return nil }
-                    marked = child.role == "AXListMarker" || quill && child.role == "AXGroup"
-                }
-                if marked {
-                    guard let end = end(of: first, at: here + [0]) else { return nil }
-                    if end == candidate.upperBound { return .marker }
-                }
+            if inList, hit.start == candidate.lowerBound, !read.children.isEmpty {
+                guard let marker = marker(of: read.children, at: here) else { return nil }
+                if let end = marker, end > candidate.lowerBound { return .marker(end: end) }
             }
             if read.role == "AXStaticText" || read.children.isEmpty { return .neither }
             inList = read.role == "AXList"
@@ -109,6 +102,30 @@ public struct UnreachableScan<Node> {
             path = here
         }
         return nil
+    }
+
+    /// The end of a list item's marker: Chromium's own `AXListMarker`, or the page's generated text leading the item, directly
+    /// or as all of its first group, as `li::before` draws (LIN-2369); `.some(nil)` where there is none, nil on a failed read.
+    private mutating func marker(of children: [Node], at path: [Int]) -> Int?? {
+        var last: Int?
+        for (index, child) in children.enumerated() {
+            guard let read = read(child, at: path + [index]) else { return nil }
+            if index == 0, read.role == "AXListMarker" || read.role == "AXGroup" && !read.children.isEmpty {
+                if read.role == "AXGroup" {
+                    for (inner, node) in read.children.enumerated() {
+                        guard let text = self.read(node, at: path + [0, inner]) else { return nil }
+                        guard text.role == "AXStaticText", text.generated else { return .some(nil) }
+                    }
+                }
+                guard let end = end(of: child, at: path + [index]) else { return nil }
+                return end
+            }
+            guard read.role == "AXStaticText", read.generated else { break }
+            last = index
+        }
+        guard let last else { return .some(nil) }
+        guard let end = end(of: children[last], at: path + [last]) else { return nil }
+        return end
     }
 
     /// An ancestor of a drawn caret, nearest last: its reads, where it starts, and its place among its siblings.

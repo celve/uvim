@@ -49,7 +49,6 @@ extension Sim {
         )
         reads.roots = roots
         reads.proseMirror = listLines != nil && !quill
-        reads.quill = quill
         if showsPlaceholder {
             // What the Snapshotter makes of a field its scan finds shows only generated text (LIN-1930).
             reads = FieldSnapshot.Reads(
@@ -101,7 +100,7 @@ extension Sim {
         case .unreachable(let value, let markers, let candidates, let why):
             let shown = chromium
             let found = findsUnreachable ? UnreachableLines.Found(
-                markers: candidates.markers.map(\.lowerBound).filter(Set(shown.listMarkers).contains),
+                markers: shown.listMarkers.filter { marker in candidates.markers.contains { $0.lowerBound == marker.lowerBound } },
                 chips: shown.chips.filter { chip in
                     candidates.chips.contains { $0.lowerBound == chip.range.lowerBound && chip.range.upperBound <= $0.upperBound }
                 },

@@ -135,7 +135,7 @@ func testMisfits() {
     precondition(sided.evidence == [Evidence(.write(.writeSelection), .refutes, why: .edge, seen: .settle(1))], "a wrong side")
 
     // Quill's tree, as `UnreachableLineTests` has it: each item's `::before` group holds a generated `•`.
-    let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/T/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/T/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/T/6/7 0.2.1/T/7/12", linear: false)
+    let quillTree = fakeTree("0/L/0/12 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/6 0.1.0/G/4/5 0.1.0.0/Tg/4/5 0.2/G/6/12 0.2.0/G/6/7 0.2.0.0/Tg/6/7 0.2.1/T/7/12", linear: false)
     var generated = Set(quillTree[0].children.map { ObjectIdentifier($0.children[0].children[0]) })
     func generates(_ run: Range<Int>, in roots: [FakeNode], budget: Int = GeneratedText.runBudget) -> Bool {
         var scan = GeneratedTextScan<FakeNode>(budget: budget) { node in

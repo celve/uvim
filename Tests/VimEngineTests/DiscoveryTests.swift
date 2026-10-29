@@ -205,7 +205,7 @@ func testCarriedDiscovery() {
                   spec: "0/G/0/3 0.0/T/0/3 1/L/3/10 1.0/G/3/10 1.0.0/M/3/5 1.0.1/T/5/10 2/G/10/16 2.0/T/10/16 3/G/16/21 3.0/T/16/21")
     let nativeMemo = unreachableWalk(native.value, native.raw, fakeTree(native.spec, linear: false),
                                      linedCandidates(native.value, native.raw), roots: nil)
-    precondition(nativeMemo.found?.markers == [3])
+    precondition(nativeMemo.found?.markers == [3..<5])
     for (name, value, plain) in [("listed", "Top\n\u{2022} First\nMiddle\n\u{2022} Plain", "Top\u{2022} FirstMiddle\u{2022} Plain"),
                                  ("typed like one", "Top\n\u{2022} First\nMi. ddle\nPlain", "Top\u{2022} FirstMi. ddlePlain")] {
         precondition(nativeMemo.carried(value: value, markers: plain, blocks: 4, candidates: linedCandidates(value, plain))
@@ -239,7 +239,7 @@ func testCarriedDiscovery() {
                               candidates: linedCandidates("\u{2022} one\nTwox", "\u{2022} oneTwox")) == .failure(.unread)
                  && twoRoots.carried(value: "\u{2022} one\nTwox", markers: "\u{2022} oneTwox", blocks: 2,
                                      candidates: linedCandidates("\u{2022} one\nTwox", "\u{2022} oneTwox")).map(\.found?.markers)
-                     == .success([0]), "reads of a tree with other root blocks than the count")
+                     == .success([0..<2]), "reads of a tree with other root blocks than the count")
 
     precondition(blankMemo.found == [43] && blankCarried { _ in } == .success(blankMemo))
     let blankShifted = try! blankCarried { $0[0] = "Headingxy one" }.get()

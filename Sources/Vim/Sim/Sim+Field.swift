@@ -67,11 +67,8 @@ extension Sim {
 
     /// List markers are the page's, Chromium's own and `li::before`'s in Quill and Linear (LIN-2369); code labels are not.
     func generatesText(_ run: Range<Int>) -> Bool {
-        guard emptyParagraphs, let lines = listLines else { return false }
-        let drawn = lines.filter { $0.marker != nil && !$0.controls }
-        return zip(chromium.listMarkers, drawn).contains { start, line in
-            start <= run.lowerBound && run.upperBound <= start + (line.marker?.utf16.count ?? 0)
-        }
+        guard emptyParagraphs, listLines != nil else { return false }
+        return chromium.listMarkers.contains { $0.lowerBound <= run.lowerBound && run.upperBound <= $0.upperBound }
     }
 
     /// The keys lane B counts with, which run whether or not `emulatesKeys` is on.

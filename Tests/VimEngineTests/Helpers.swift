@@ -182,6 +182,7 @@ final class FakeNode {
     var fails = false
     var classes: [String] = []
     var quoteLevel = 0
+    var generated = false
 
     init(_ role: String, _ subrole: String? = nil, _ start: Int, _ end: Int, _ children: [FakeNode] = []) {
         self.role = role
@@ -192,7 +193,9 @@ final class FakeNode {
     }
 
     var block: EmptyBlockScan<FakeNode>.Block? {
-        fails ? nil : .init(role: role, subrole: subrole, children: children, classes: classes, quoteLevel: quoteLevel)
+        fails ? nil : .init(
+            role: role, subrole: subrole, children: children, classes: classes, quoteLevel: quoteLevel, generated: generated
+        )
     }
 }
 func text(_ start: Int, _ end: Int) -> FakeNode { FakeNode("AXStaticText", nil, start, end) }
@@ -206,7 +209,8 @@ func scanned(_ blocks: [FakeNode], _ plain: String, budget: Int = EmptyParagraph
 /// `path/role/start/end` per node, roles abbreviated, as softlash/LIN-1652 scripts/list-probe prints a tree; B is one of
 /// Linear's `block-node` groups, Q one that is a quote, N a `node-controls` group and R a rule; roots carry Linear's classes,
 /// which `linear` false leaves out. X is a table, Y its `AXTable`, O a row, U a column and Z a collapsible section
-/// (LIN-1780); a fifth field is a node's blockquote level, where it sits inside a quote.
+/// (LIN-1780); a `g` after the code marks a node the page generates (LIN-2369), and a fifth field is a node's blockquote level,
+/// where it sits inside a quote.
 func fakeTree(_ spec: String, linear: Bool = true) -> [FakeNode] {
     let roles: [Character: (String, String?)] = [
         "L": ("AXList", "AXContentList"), "G": ("AXGroup", nil), "T": ("AXStaticText", nil), "H": ("AXHeading", nil),
@@ -217,11 +221,11 @@ func fakeTree(_ spec: String, linear: Bool = true) -> [FakeNode] {
         "X": ("AXGroup", nil), "Y": ("AXTable", nil), "O": ("AXRow", nil), "U": ("AXColumn", nil),
         "Z": ("AXGroup", "AXLandmarkRegion"), "J": ("AXButton", nil),
     ]
-    var nodes: [[Int]: (code: Character, start: Int, end: Int, level: Int?)] = [:]
+    var nodes: [[Int]: (code: Character, generated: Bool, start: Int, end: Int, level: Int?)] = [:]
     for token in spec.split(whereSeparator: { $0 == " " || $0 == "\n" }) {
         let parts = token.split(separator: "/")
         nodes[parts[0].split(separator: ".").map { Int($0)! }]
-            = (parts[1].first!, Int(parts[2])!, Int(parts[3])!, parts.count > 4 ? Int(parts[4])! : nil)
+            = (parts[1].first!, parts[1].dropFirst() == "g", Int(parts[2])!, Int(parts[3])!, parts.count > 4 ? Int(parts[4])! : nil)
     }
     func build(_ path: [Int]) -> FakeNode {
         let node = nodes[path]!
@@ -236,6 +240,7 @@ func fakeTree(_ spec: String, linear: Bool = true) -> [FakeNode] {
         }
         // A list inside a quote or a section carries Linear's class as a root list does.
         if linear, path.count > 1, node.code == "L" { built.classes = [Linear.listClass] }
+        built.generated = node.generated
         if node.code == "Q" { built.quoteLevel = 1 }
         if let level = node.level { built.quoteLevel = level }
         return built
@@ -248,11 +253,11 @@ func unreachableScanned(
     var scan = UnreachableScan<FakeNode>(budget: budget, block: \.block, offset: { node, end in end ? node.end : node.start })
     return scan.run(blocks: blocks, candidates: candidates)
 }
-func folded(_ value: String, _ raw: String, _ tree: [FakeNode]) -> UnreachableLines.Model {
+func folded(_ value: String, _ raw: String, _ tree: [FakeNode], proseMirror: Bool = true) -> UnreachableLines.Model {
     let plain = MarkerText.plain(raw)
     let aligned = ParagraphBreaks(value: value, fieldText: plain)!
     let restored = EmptyParagraphs.restore(value: value, fieldText: plain, aligned: aligned, found: scanned(tree, plain)!)!
-    let candidates = UnreachableLines.candidates(text: restored.text, breaks: restored.breaks, raw: raw, proseMirror: true)
+    let candidates = UnreachableLines.candidates(text: restored.text, breaks: restored.breaks, raw: raw, proseMirror: proseMirror)
     return UnreachableLines.fold(text: restored.text, breaks: restored.breaks, raw: raw,
                                  found: unreachableScanned(tree, candidates)!)
 }
