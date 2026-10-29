@@ -237,7 +237,8 @@ extension PhysicalPlanner {
             return breaks.hidden.filter(\.isMarker).map { hidden in
                 let end = breaks.fieldOffset(hidden.at)
                 let start = end - hidden.text.utf16.count
-                return Expectation.Equivalence(run: start..<end, afterBreak: breaks.valueOffsets(start).count > 1)
+                // After a generated break the run's start is the paragraph before's end too; after a typed `\n` it is not.
+                return Expectation.Equivalence(run: start..<end, afterBreak: breaks.offsets.contains(hidden.at - 1))
             }
         }
 

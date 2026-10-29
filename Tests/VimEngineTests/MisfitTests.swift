@@ -47,6 +47,16 @@ func testMisfits() {
     precondition(lineStart.asksSide(at: 3..<3) && !word.asksSide(at: 4..<4) && word.asksSide(at: 8..<8) && !word.asksSide(at: 0..<0),
                  "a side is read for an edge, or at a held run's lower end after a break")
 
+    // `•one⏎•two` folded: the first marker starts the field, the second follows a generated break; `j` expects both held.
+    let folded = ParagraphBreaks(offsets: [3], hidden: [.init(at: 0, text: "\u{2022}", kind: .prefix), .init(at: 4, text: "\u{2022}", kind: .prefix)])
+    let planned = webPhysical("j", text: "one\ntwo", caret: 1, profile: keyProfile, breaks: folded).steps.compactMap { step -> Expectation? in
+        guard case .settle(let expectation) = step else { return nil }
+        return expectation
+    }
+    precondition(!planned.isEmpty && planned.allSatisfy {
+        $0.equivalences == [.init(run: 0..<1, afterBreak: false), .init(run: 4..<5, afterBreak: true)]
+    }, "\(planned.map(\.equivalences))")
+
     // The pre-#81 Slack `k`: ⌃A expected at 8, the start of `•three` as text, lands after the `•` it cannot reach.
     let unmoved = Expectation.Blame(capability: .lineStartKey, unmoved: [9..<9])
     var k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
