@@ -183,7 +183,9 @@ public final class FocusTracker {
             bundleID: identity.bundleID,
             origin: bound.surface.origin,
             role: gate.role,
-            identifier: gate.identifier
+            identifier: gate.identifier,
+            editor: gate.editor,
+            engine: gate.engine
         )
         let resolved = FieldProber.resolve(bound.element, surface: surface, versions: identity.versions, chromium: gate.isChromium)
         publish(Binding(
@@ -236,7 +238,9 @@ public final class FocusTracker {
             bundleID: identity.bundleID,
             origin: current.surface.origin,
             role: gate.role,
-            identifier: gate.identifier
+            identifier: gate.identifier,
+            editor: gate.editor,
+            engine: gate.engine
         )
         let resolved = FieldProber.resolve(element, surface: surface, versions: identity.versions, chromium: gate.isChromium)
         let candidate = Binding(
@@ -366,7 +370,9 @@ public final class FocusTracker {
             bundleID: bundleID,
             origin: walk?.origin,
             role: gate.role,
-            identifier: gate.identifier
+            identifier: gate.identifier,
+            editor: gate.editor,
+            engine: gate.engine
         )
         return (surface, walk)
     }

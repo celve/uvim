@@ -129,7 +129,9 @@ public final class Controller {
             contents.overrides = CapabilityConfig.setting(
                 override, at: rung, on: surface, capability: capability.rawValue, in: contents.overrides
             )
-            if override != nil, let role = surface.roleRung { contents.retire(capability, at: role) }
+            if override != nil {
+                for rung in [surface.roleRung, surface.editorRung].compactMap({ $0 }) { contents.retire(capability, at: rung) }
+            }
         }
     }
 
@@ -417,7 +419,8 @@ public final class Controller {
                 // `update` reapplies this to a file saved meanwhile, so each try counts from the same strikes.
                 after = before
                 lesson = Learning.learn(
-                    store: &store, strikes: &after, rung: rung, versions: binding.versions, model: model,
+                    store: &store, strikes: &after, rung: rung, editor: binding.surface.editor, versions: binding.versions,
+                    model: model,
                     observed: observed, run: run,
                     // The user has the last word: once they set an atom, stop inferring about it.
                     overridden: {

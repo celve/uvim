@@ -568,19 +568,25 @@ final class AppModel: ObservableObject {
     private nonisolated static func learned(
         _ lesson: ResolvedBeliefs.Lesson, app: String
     ) -> (lesson: Lesson, subtitle: String) {
-        let belief = lesson.beliefs[0]
+        // Try Again and Forget drop every belief shown, so an editor's verdict goes for all its apps.
+        let promoted = lesson.beliefs.first { BeliefStore.isEditorRung($0.rung) }
+        let belief = promoted ?? lesson.beliefs[0]
+        let editor = promoted?.editor.map(editorName)
+        let header = editor.map { "Learned" + (day(belief).map { " \($0)" } ?? "") + " in \($0) editors" }
+            ?? learnedWhen(belief, app: app)
+        let scope = editor.map { "in every \($0) editor" }
         switch lesson.state {
         case .inForce:
             let row = Lesson(
-                inForce: true, header: learnedWhen(belief, app: app), action: "Try Again",
-                actionDetail: "Forget this, and stay on Auto", beliefs: lesson.beliefs
+                inForce: true, header: header, action: "Try Again",
+                actionDetail: "Forget this" + (scope.map { " \($0)" } ?? "") + ", and stay on Auto", beliefs: lesson.beliefs
             )
-            return (row, "Off" + since(belief) + " · " + until(belief, app: app))
+            return (row, "Off" + since(belief) + " · " + (scope ?? until(belief, app: app)))
         case .reopened:
             let judged = judgedPhrase(belief.judgedUnder ?? .value)
             let row = Lesson(
-                inForce: false, header: learnedWhen(belief, app: app), action: "Forget",
-                actionDetail: "Try it again \(judged) too", beliefs: lesson.beliefs
+                inForce: false, header: header, action: "Forget",
+                actionDetail: "Try it again \(judged) too" + (scope.map { ", \($0)" } ?? ""), beliefs: lesson.beliefs
             )
             return (row, "Trying again here · failed" + (day(belief).map { " \($0)" } ?? "") + " " + judged)
         }
@@ -621,13 +627,31 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Where a choice was stored, as the On and Off sentences name it; a hand-written `web:` rung spans browsers.
+    /// Where a choice was stored, as the On and Off sentences name it; a hand-written `web:`, `editor:` or `engine:` rung spans apps.
     private nonisolated static func scopePhrase(
         _ rung: String?, surface: Surface, scopes: [(scope: Surface.Scope, rung: String)]
     ) -> String {
         if let scope = scopes.first(where: { $0.rung == rung }) { return " " + phrase(scope.scope) }
         if let origin = surface.origin, rung == Surface.webRung(origin) { return " on \(origin) in any browser" }
+        if let editor = surface.editor, rung == surface.editorRung { return " in \(editorName(editor)) editors" }
+        if let engine = surface.engine, rung == Surface.engineRung(engine) { return " in \(engineName(engine)) fields" }
         return ""
+    }
+
+    private nonisolated static func editorName(_ editor: String) -> String {
+        switch editor {
+        case "quill": return "Quill"
+        case "prosemirror": return "ProseMirror"
+        default: return editor
+        }
+    }
+
+    private nonisolated static func engineName(_ engine: Surface.Engine) -> String {
+        switch engine {
+        case .chromium: return "Chromium"
+        case .webkit: return "WebKit"
+        case .appkit: return "AppKit"
+        }
     }
 
     /// A read model expires with Electron's version where there is one; verdicts with the app's.

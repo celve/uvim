@@ -24,17 +24,19 @@ let surface = Surface(bundleID: "com.example.app", role: "AXTextArea")
 let rung = surface.roleRung!
 let versions = Versions(app: "1.2")
 
-func resolved(_ contents: Beliefs.Contents, chromium: Bool = false) -> ResolvedBeliefs {
-    contents.store.resolve(rungs: surface.rungs, rung: rung, versions: versions, chromium: chromium, children: true,
+func resolved(_ contents: Beliefs.Contents, chromium: Bool = false, at field: Surface = surface, app: String = "1.2") -> ResolvedBeliefs {
+    contents.store.resolve(rungs: field.rungs, rung: field.roleRung, versions: Versions(app: app), chromium: chromium, children: true,
                            userPinsOffsets: false)
 }
 
-func entry(_ contents: Beliefs.Contents, _ capability: Capability, chromium: Bool = false) -> CapabilityReport.Entry? {
-    let config = CapabilityConfig.resolveAll(surface, capabilities: [capability.rawValue], overrides: contents.overrides)
+func entry(
+    _ contents: Beliefs.Contents, _ capability: Capability, chromium: Bool = false, at field: Surface = surface, app: String = "1.2"
+) -> CapabilityReport.Entry? {
+    let config = CapabilityConfig.resolveAll(field, capabilities: [capability.rawValue], overrides: contents.overrides)
     let choice = config[capability.rawValue]!.override.map { $0 == .on ? ConfigChoice.Override.on : .off }
     let probed = CapabilityProfile(available: Set(Capability.allCases))
     return CapabilityResolver.resolve(probed: probed, config: [capability: ConfigChoice(override: choice)],
-                                      beliefs: resolved(contents, chromium: chromium)).report.entries[capability]
+                                      beliefs: resolved(contents, chromium: chromium, at: field, app: app)).report.entries[capability]
 }
 
 func belief(_ question: String, _ answer: String, version: String = "1.2", stamped: Bool = true, _ more: String = "") -> String {
@@ -261,6 +263,75 @@ try! linked.update { $0 = full }
 precondition((try? FileManager.default.destinationOfSymbolicLink(atPath: linked.url.path)) == elsewhere.path)
 precondition(try! Beliefs(url: elsewhere, defaults: linked.defaults).read() == full)
 
+let quill = (
+    first: Surface(bundleID: "com.example.chat", origin: "chat.example", role: "AXTextArea", editor: "quill", engine: .chromium),
+    second: Surface(bundleID: "com.example.browser", origin: "chat.example", role: "AXTextArea", editor: "quill", engine: .chromium),
+    third: Surface(bundleID: "com.example.notes", origin: "notes.example", role: "AXTextArea", editor: "quill", engine: .chromium)
+)
+func strike(_ file: Beliefs, at surface: Surface) -> Learning.Lesson {
+    let miss = Evidence(.key(.wordKeys), .refutes, why: .unmoved, seen: .settle(1))
+    var strikes = Strikes()
+    var lesson = Learning.Lesson()
+    try! file.update { contents in
+        var store = contents.store
+        lesson = Learning.learn(
+            store: &store, strikes: &strikes, rung: surface.roleRung!, editor: surface.editor, versions: versions,
+            model: ReadModel(answer: .value), observed: Learning.Observation(before: .value, source: .start), run: [miss],
+            overridden: { _ in false }, provenance: Beliefs.provenance(tag: "e1.c1"), tally: Tally()
+        )
+        contents.store = store
+    }
+    return lesson
+}
+func inForce(_ contents: Beliefs.Contents, at field: Surface, app: String = "9.0") -> [Belief] {
+    resolved(contents, at: field, app: app).inForce
+}
+
+let schema3 = file(belief("insertText", "broken"), overrides: #""\#(rung)": {"wordKeys": "off"}, "editor:quill": {"readCaret": "off"}"#)
+let old = fresh()
+write(schema3, to: old)
+var nowLaddered = surface
+nowLaddered.editor = "quill"
+nowLaddered.engine = .appkit
+let oldContents = try! old.load()
+precondition(text(old) == schema3 && resolved(oldContents, at: nowLaddered).broken == [.insertText],
+             "a schema 3 file reads unchanged, its verdicts in force on a field with the new rungs")
+precondition(CapabilityConfig.resolve(nowLaddered, capability: "readCaret", overrides: oldContents.overrides).overrideRung == "editor:quill"
+    && CapabilityConfig.resolve(nowLaddered, capability: "wordKeys", overrides: oldContents.overrides).overrideRung == rung)
+
+let editors = fresh()
+precondition(strike(editors, at: quill.first).promoted == nil && strike(editors, at: quill.second).promoted == "editor:quill")
+let promotedFile = try! Beliefs(url: editors.url, defaults: editors.defaults).load()
+precondition(inForce(promotedFile, at: quill.third).map(\.rung) == ["editor:quill"], "the editor's verdict outlives a restart")
+precondition(text(editors).contains(#""rung" : "editor:quill""#) && text(editors).contains(#""editor" : "quill""#))
+precondition(entry(promotedFile, .wordKeys, at: quill.third, app: "9.0") == .init(status: .unavailable, source: .learned))
+for (choice, expected) in [("on", CapabilityReport.Entry(status: .available, source: .probed)), ("off", .init(status: .unavailable, source: .user))] {
+    try! editors.update { $0.overrides = ["engine:chromium": ["wordKeys": choice]] }
+    precondition(entry(try! editors.load(), .wordKeys, at: quill.third, app: "9.0") == expected,
+                 "a hand-written \(choice) at the widest rung beats the editor's verdict")
+}
+try! editors.update { $0.overrides = [:] }
+try! editors.update { $0.forget(inForce($0, at: quill.third)) }
+let tried = try! editors.load()
+precondition(inForce(tried, at: quill.third).isEmpty && inForce(tried, at: quill.first, app: "1.2").count == 1,
+             "Try Again in a third app forgets the editor's verdict and leaves each site's")
+precondition(strike(editors, at: quill.third).promoted == "editor:quill", "and a site striking again restores it")
+try! editors.update { contents in
+    for rung in [quill.third.roleRung!, quill.third.editorRung!] { contents.retire(.wordKeys, at: rung) }
+}
+precondition(inForce(try! editors.load(), at: quill.third).isEmpty, "a menu choice retires the editor's verdict behind the row")
+
 try! FileManager.default.removeItem(at: root)
-for suite in suites { UserDefaults.standard.removePersistentDomain(forName: suite) }
+let preferences = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Preferences")
+for suite in suites {
+    UserDefaults.standard.removePersistentDomain(forName: suite)
+    // The emptied domain stays a file, which cfprefsd writes back after a bare removal while it still holds the domain.
+    let delete = Process()
+    delete.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+    delete.arguments = ["delete", suite]
+    delete.standardError = FileHandle.nullDevice
+    try? delete.run()
+    delete.waitUntilExit()
+    try? FileManager.default.removeItem(at: preferences.appending(path: "\(suite).plist"))
+}
 print("Belief file tests passed")

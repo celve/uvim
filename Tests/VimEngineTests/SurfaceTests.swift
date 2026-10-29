@@ -173,6 +173,10 @@ func testSurfaceRungs() {
         let reachable = rung == Surface.everywhere
             || (rung.hasPrefix("web:")
                 ? Surface(bundleID: "any", origin: String(rung.dropFirst(4))).rungs.contains(rung)
+                : rung.hasPrefix(Surface.editorPrefix)
+                ? Surface.editorClasses.contains { Surface.editorPrefix + $0.editor == rung }
+                : rung.hasPrefix(Surface.enginePrefix)
+                ? Surface.Engine(rawValue: String(rung.dropFirst(Surface.enginePrefix.count))) != nil
                 : Surface(bundleID: rung).rungs.contains(rung))
         precondition(reachable, "no surface can ever produce seed rung \(rung)")
     }
@@ -181,7 +185,9 @@ func testSurfaceRungs() {
                  == Surface.everywhere)
     precondition(SurfaceLadder.seedEntry("nativeMotions", rungs: [], seeds: CapabilitySeeds.denied)
                  == Surface.everywhere)
-    precondition(CapabilitySeeds.denied.keys.allSatisfy { $0 == Surface.everywhere }, "a shipped default names no app or host")
+    precondition(CapabilitySeeds.denied.keys.allSatisfy {
+        $0 == Surface.everywhere || $0.hasPrefix(Surface.editorPrefix) || $0.hasPrefix(Surface.enginePrefix)
+    }, "a shipped default names no app or host")
     for bundleID in ["company.thebrowser.dia", "notion.id"] {
         let block = Surface(bundleID: bundleID, origin: "app.notion.com", role: "AXTextArea")
         for capability in Capability.blockScoped {

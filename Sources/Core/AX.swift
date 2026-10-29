@@ -140,6 +140,9 @@ public enum AX {
 
         /// Chromium's rich-text fields select in text-content offsets, not `AXValue`'s.
         public let isChromium: Bool
+
+        /// The field's DOM classes, which name the editor library behind it; empty outside web content.
+        public let classes: [String]
     }
 
     public static func gateAttributes(of element: AXUIElement) -> GateAttributes {
@@ -153,6 +156,7 @@ public enum AX {
             "AXDOMIdentifier",    // 3
             "AXIdentifier",       // 4
             chromiumNodeIDAttribute,  // 5
+            "AXDOMClassList",     // 6
         ], of: element)
         let domIdentifier = reads.string(3)
         let identifier = [domIdentifier, reads.string(4)]
@@ -167,7 +171,8 @@ public enum AX {
             identifier: identifier,
             // Presence, not non-emptiness: `""` is a web input without an id.
             isWebElement: domIdentifier != nil,
-            isChromium: reads.string(5) != nil
+            isChromium: reads.string(5) != nil,
+            classes: reads.strings(6) ?? []
         )
     }
 

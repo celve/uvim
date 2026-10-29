@@ -68,7 +68,11 @@ public enum FieldProber {
         /// the same round trip; native fields skip the walk entirely.
         public let isWebElement: Bool
         public let isChromium: Bool
+        /// Read from the same round trip's DOM classes, once per bind.
+        public let editor: String?
         public var engageable: Bool { isTextual && !isSecure && isEnabled }
+
+        public var engine: Surface.Engine { isChromium ? .chromium : isWebElement ? .webkit : .appkit }
     }
 
     /// Whether uvim should engage at all. Conservative on purpose: only
@@ -88,7 +92,8 @@ public enum FieldProber {
             role: attributes.role,
             identifier: attributes.identifier,
             isWebElement: attributes.isWebElement,
-            isChromium: attributes.isChromium
+            isChromium: attributes.isChromium,
+            editor: Surface.editor(classes: attributes.classes)
         )
     }
 }
