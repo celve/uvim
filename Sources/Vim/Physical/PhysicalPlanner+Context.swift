@@ -206,10 +206,12 @@ extension PhysicalPlanner {
             }
             let read: Landing
             var side: Expectation.Edge?
+            var oneSided = false
             switch landing {
             case .exact(let range):
                 read = .exact(field(range))
                 side = unknown.contains(.edge) ? nil : edge(range.upperBound)
+                oneSided = range.isEmpty && breaks.map { $0.valueOffsets(field(range).lowerBound).count == 1 } ?? true
             case .caretAfter(let o, let strict):
                 read = .caretAfter(field(o..<o).lowerBound, strict: strict)
             case .caretBefore(let o, let strict):
@@ -225,6 +227,7 @@ extension PhysicalPlanner {
             expectation.longest = expectation.within?.count
             expectation.keeps = keeps
             expectation.equivalences = equivalences
+            expectation.oneSided = oneSided
             return expectation
         }
 
@@ -234,7 +237,7 @@ extension PhysicalPlanner {
             return breaks.hidden.filter(\.isMarker).map { hidden in
                 let end = breaks.fieldOffset(hidden.at)
                 let start = end - hidden.text.utf16.count
-                return Expectation.Equivalence(run: start..<end, afterBreak: start > 0)
+                return Expectation.Equivalence(run: start..<end, afterBreak: breaks.valueOffsets(start).count > 1)
             }
         }
 

@@ -32,22 +32,41 @@ func testMisfits() {
     var after = Expectation(landing: .caretAfter(8, strict: true), length: 16)
     after.equivalences = held
     precondition(after.matches(selection: 8..<8, length: 16, side: start), "any landing, across a held marker")
+    var strictBefore = Expectation(landing: .caretBefore(10, strict: true), length: 20, blame: .init(capability: .wordKeys, unmoved: [10..<10]))
+    strictBefore.equivalences = [Expectation.Equivalence(run: 8..<10, afterBreak: true)]
+    precondition(!strictBefore.converged(selection: 10..<10, length: 20, selectedText: nil, side: nil)
+                 && !strictBefore.converged(selection: 8..<8, length: 20, selectedText: nil, side: start), "the same place is no progress")
+    precondition(strictBefore.converged(selection: 8..<8, length: 20, selectedText: nil, side: .end), "the line above's end is")
+    var strictAfter = Expectation(landing: .caretAfter(0, strict: true), length: 20)
+    strictAfter.equivalences = [Expectation.Equivalence(run: 0..<2, afterBreak: false)]
+    precondition(!strictAfter.matches(selection: 2..<2, length: 20) && strictAfter.matches(selection: 3..<3, length: 20),
+                 "crossing only a marker is no progress")
+    var within = Expectation(landing: .caretWithin(9...12), length: 16)
+    within.equivalences = held
+    precondition(within.matches(selection: 8..<8, length: 16, side: start) && !within.matches(selection: 8..<8, length: 16, side: .end))
+    precondition(lineStart.asksSide(at: 3..<3) && !word.asksSide(at: 4..<4) && word.asksSide(at: 8..<8) && !word.asksSide(at: 0..<0),
+                 "a side is read for an edge, or at a held run's lower end after a break")
 
     // The pre-#81 Slack `k`: ⌃A expected at 8, the start of `•three` as text, lands after the `•` it cannot reach.
     let unmoved = Expectation.Blame(capability: .lineStartKey, unmoved: [9..<9])
     let k = Expectation(landing: .exact(8..<8), length: 16, edge: .paragraphStart, blame: unmoved)
-    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == 8..<9)
-    precondition(k.misfit(selection: 9..<9, length: 15, selectedText: nil, side: start) == nil, "a wrong length is no misfit")
-    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil, side: .end) == nil, "nor a wrong side")
-    precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil, side: start) == nil, "nor beyond a marker's reach")
-    precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil, side: start) == nil, "nor a selection")
-    precondition(k.misfit(selection: nil, length: 16, selectedText: nil, side: start) == nil, "nor a non-answer")
-    precondition(Expectation(landing: .exact(8..<8), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil, side: start) == nil,
+    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == 8..<9)
+    precondition(k.misfit(selection: 9..<9, length: 15, selectedText: nil) { start } == nil, "a wrong length is no misfit")
+    precondition(k.misfit(selection: 9..<9, length: 16, selectedText: nil) { .end } == nil, "nor a wrong side")
+    precondition(k.misfit(selection: 15..<15, length: 16, selectedText: nil) { start } == nil, "nor beyond a marker's reach")
+    precondition(k.misfit(selection: 9..<10, length: 16, selectedText: nil) { start } == nil, "nor a selection")
+    precondition(k.misfit(selection: nil, length: 16, selectedText: nil) { start } == nil, "nor a non-answer")
+    precondition(Expectation(landing: .exact(8..<8), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil,
                  "a caret short of the line above's end")
+    var afterNewline = Expectation(landing: .exact(6..<6), length: 13, blame: unmoved)
+    afterNewline.oneSided = true
+    precondition(afterNewline.misfit(selection: 7..<7, length: 13, selectedText: nil) { nil } == 6..<7, "no break, so no side to tell")
+    precondition(Expectation(landing: .caretBefore(9, strict: true), length: 16).misfit(selection: 9..<9, length: 16, selectedText: nil) { start } == nil,
+                 "a relative landing is no misfit")
     let past = Expectation(landing: .exact(9..<9), length: 16)
-    precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil, side: nil) == nil, "a caret before may be the line above's end")
-    precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil, side: start) == 8..<9)
-    precondition(Expectation(landing: .exact(1..<1), length: 16).misfit(selection: 0..<0, length: 16, selectedText: nil, side: nil) == 0..<1)
+    precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil) { nil } == nil, "a caret before may be the line above's end")
+    precondition(past.misfit(selection: 8..<8, length: 16, selectedText: nil) { start } == 8..<9)
+    precondition(Expectation(landing: .exact(1..<1), length: 16).misfit(selection: 0..<0, length: 16, selectedText: nil) { nil } == 0..<1)
 
     var misfitting = RunAttribution()
     misfitting.record(.settle(k), passed: false, selection: 9..<9, length: 16, misfit: true)
@@ -97,8 +116,8 @@ func testMisfits() {
     precondition(generates(5..<7, in: nativeTree) && !generates(4..<6, in: nativeTree), "Chromium's own marker")
 
     // The Sim's Quill list without discovery is uvim's model before #81: `k`'s ⌃A misfits and strikes nothing.
-    for keys in ["jjkk", "jjjkkk", "Gkk", "jj0k"] {
-        var slack = Sim(text: "one\ntwo\nthree", caret: 0, profile: keyProfile)
+    for (text, keys) in ["one\ntwo\nthree", "one\n\nthree"].flatMap({ text in ["jjkk", "jjjkkk", "Gkk", "jj0k"].map { (text, $0) } }) {
+        var slack = Sim(text: text, caret: 0, profile: keyProfile)
         slack.emptyParagraphs = true
         slack.quill = true
         slack.listLines = Array(repeating: Sim.ListLine(marker: "\u{2022}", inline: true), count: 3)
@@ -111,7 +130,7 @@ func testMisfits() {
             slack.type(String(key))
             misfits += slack.attribution.evidence.filter { $0.why == .misfit }.count
         }
-        precondition(misfits > 0 && slack.blamed.isEmpty && slack.learner!.strikes.runs(.lineStartKey) == 0, "Slack's \(keys)")
+        precondition(misfits > 0 && slack.blamed.isEmpty && slack.learner!.strikes.runs(.lineStartKey) == 0, "Slack's \(keys) in \(text)")
     }
 
     // With the model right and ⌃A really dead, `k` from mid-line still strikes it.

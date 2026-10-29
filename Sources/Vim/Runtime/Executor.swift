@@ -183,14 +183,16 @@ public final class Executor {
             }
             var side: ParagraphBreaks.Side?
             var checkedLength = length
+            var marked: AX.MarkedSelection?
             // Only the markers place a caret between elements or tell a boundary's sides apart.
             if !expectation.converged(selection: selection, length: length, selectedText: text, side: nil), paragraphs,
-               selectionSlot != nil, let marked = Snapshotter.markedSelection(of: element) {
-                selection = marked.range
-                side = expectation.edge == nil ? nil : Snapshotter.paragraphSide(of: marked, upper: true)
+               selectionSlot != nil, let read = Snapshotter.markedSelection(of: element) {
+                marked = read
+                selection = read.range
+                side = expectation.asksSide(at: read.range) ? Snapshotter.paragraphSide(of: read, upper: true) : nil
                 // The caret Linear draws at a code span's edge is lines of its own, which no expected length counts.
                 if let expected = expectation.length, let observed = length, (1...2).contains(observed - expected) {
-                    checkedLength = observed - Snapshotter.drawnLength(at: marked)
+                    checkedLength = observed - Snapshotter.drawnLength(at: read)
                 }
             }
             // A field showing only text its page generates, as an empty editor shows its placeholder, holds none (LIN-1930).
@@ -202,7 +204,9 @@ public final class Executor {
             }
             guard Date() < deadline, !AX.pastDeadline else {
                 var failed = outcome(false)
-                failed.misfit = expectation.misfit(selection: selection, length: checkedLength, selectedText: text, side: side)
+                failed.misfit = expectation.misfit(selection: selection, length: checkedLength, selectedText: text) {
+                    side ?? marked.flatMap { Snapshotter.paragraphSide(of: $0, upper: true) }
+                }
                 return failed
             }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).

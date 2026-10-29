@@ -239,10 +239,14 @@ public struct Expectation: Equatable, Sendable {
     /// Runs of field text the model holds as unreachable, either end of which is the same place (LIN-2370).
     public var equivalences: [Equivalence] = []
 
+    /// The exact landing is on no paragraph break, so it is one place whichever side a read gives.
+    public var oneSided = false
+
     /// Field text no caret reaches, such as a list marker the page draws.
     public struct Equivalence: Equatable, Sendable {
         public let run: Range<Int>
-        /// The run starts a paragraph after another, whose end its lower end also is: that end joins on its start side alone.
+        /// The run starts on a paragraph break, whose lower end is the paragraph before's end too: that end joins on its start
+        /// side alone.
         public let afterBreak: Bool
 
         public init(run: Range<Int>, afterBreak: Bool) {
@@ -346,52 +350,64 @@ public struct Expectation: Equatable, Sendable {
         return side.map { ($0 == .end) == (edge == .paragraphEnd) } ?? false
     }
 
-    /// `landing` meets `observed`, or a place the model holds as the same.
+    /// `landing` meets `observed` compared as the places the model holds them to be: crossing only a held run is no progress.
     private func lands(_ landing: Landing, _ observed: Range<Int>, side: ParagraphBreaks.Side?) -> Bool {
-        guard !landing.matches(observed) else { return true }
-        guard !equivalences.isEmpty else { return false }
+        guard !equivalences.isEmpty else { return landing.matches(observed) }
         let read = side?.isStart == true
         let meant = edge == .paragraphStart
-        if observed.isEmpty {
-            return places(observed.lowerBound, read: read, meant: meant).contains { landing.matches($0..<$0) }
-        }
-        let uppers = places(observed.upperBound, read: read, meant: meant)
-        return places(observed.lowerBound, read: false, meant: false).contains { lower in
-            uppers.contains { lower < $0 && landing.matches(lower..<$0) }
+        let lower = place(observed.lowerBound, onStart: observed.isEmpty && read)
+        let upper = observed.isEmpty ? lower : place(observed.upperBound, onStart: read)
+        func wanted(_ offset: Int) -> Int { place(offset, onStart: meant) }
+        switch landing {
+        case .exact(let range):
+            guard !landing.matches(observed) else { return true }
+            guard range.isEmpty == observed.isEmpty else { return false }
+            let wantedLower = range.isEmpty ? wanted(range.lowerBound) : place(range.lowerBound, onStart: false)
+            return lower == wantedLower && upper == (range.isEmpty ? wantedLower : wanted(range.upperBound))
+        case .caretAfter(let offset, let strict):
+            return observed.isEmpty && (strict ? lower > wanted(offset) : lower >= wanted(offset))
+        case .caretBefore(let offset, let strict):
+            return observed.isEmpty && (strict ? lower < wanted(offset) : lower <= wanted(offset))
+        case .caretWithin(let range):
+            return observed.isEmpty && (wanted(range.lowerBound)...wanted(range.upperBound)).contains(lower)
+        case .between:
+            return false
         }
     }
 
-    /// `offset` and the carets the model holds as the same place. After a break a run's lower end is the paragraph before's end
-    /// too, so it joins only as a caret `read` on its start side, or as a place `meant` on it.
-    private func places(_ offset: Int, read: Bool, meant: Bool) -> [Int] {
-        var places = [offset]
-        for equivalence in equivalences where (equivalence.run.lowerBound...equivalence.run.upperBound).contains(offset) {
-            let lower = equivalence.run.lowerBound
-            guard !equivalence.afterBreak || offset > lower || read else { continue }
-            let joinsLower = !equivalence.afterBreak || offset == lower || meant
-            places += (joinsLower ? lower : lower + 1)...equivalence.run.upperBound
+    /// The place `offset` is: a held run's upper end for any caret across it, but its lower end after a break only on its start
+    /// side, being the paragraph before's end too.
+    private func place(_ offset: Int, onStart: Bool) -> Int {
+        guard let held = equivalences.first(where: { ($0.run.lowerBound...$0.run.upperBound).contains(offset) }) else {
+            return offset
         }
-        return places
+        return offset > held.run.lowerBound || !held.afterBreak || onStart ? held.run.upperBound : offset
     }
 
-    /// The field text between a failed settle's caret and the nearest caret it would pass at, were the model to hold that text
-    /// unreachable: nil unless all else converges there (LIN-2370).
+    /// A marker read must give the upper end's side: to check `edge`, or to place a caret at a held run's lower end after a break.
+    public func asksSide(at observed: Range<Int>?) -> Bool {
+        edge != nil || observed.map { caret in
+            caret.isEmpty && equivalences.contains { $0.afterBreak && $0.run.lowerBound == caret.lowerBound }
+        } == true
+    }
+
+    /// The field text between a failed settle's caret and the exact caret it predicted, were the model to hold that text
+    /// unreachable: nil unless all else converges there (LIN-2370). `side` reads the caret's, where it is needed.
     public func misfit(
         selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String?,
-        side: ParagraphBreaks.Side?
+        side: () -> ParagraphBreaks.Side?
     ) -> Range<Int>? {
-        guard let landing, let observed, observed.isEmpty else { return nil }
-        let caret = observed.lowerBound
-        for reach in 1...Self.misfitReach {
-            for place in [caret + reach, caret - reach] where place >= 0 && landing.matches(place..<place) {
-                // Either end before the text may be the paragraph before's end, another place but on its start side.
-                guard place < caret ? place == 0 || edge == .paragraphStart : caret == 0 || side?.isStart == true else { continue }
-                if converged(selection: place..<place, length: observedLength, selectedText: observedText, side: side) {
-                    return min(caret, place)..<max(caret, place)
-                }
-            }
+        guard case .exact(let predicted)? = landing, predicted.isEmpty, let observed, observed.isEmpty,
+              observed != predicted, abs(observed.lowerBound - predicted.lowerBound) <= Self.misfitReach else { return nil }
+        let (caret, place) = (observed.lowerBound, predicted.lowerBound)
+        // The end before the text may be on a break, the paragraph before's end too, which is another place but on its start side.
+        let read = place < caret ? nil : side()
+        guard place < caret ? place == 0 || oneSided || edge == .paragraphStart : caret == 0 || read?.isStart == true else {
+            return nil
         }
-        return nil
+        let checked = edge == nil ? nil : read ?? side()
+        guard converged(selection: predicted, length: observedLength, selectedText: observedText, side: checked) else { return nil }
+        return min(caret, place)..<max(caret, place)
     }
 
     /// Met by a field showing only its page's generated text, which holds none wherever its caret reads (LIN-1930).
@@ -448,6 +464,7 @@ public struct Expectation: Equatable, Sendable {
         resolved.deletes = deletes
         resolved.lengthBefore = lengthBefore
         resolved.equivalences = equivalences
+        resolved.oneSided = oneSided
         return resolved
     }
 }
