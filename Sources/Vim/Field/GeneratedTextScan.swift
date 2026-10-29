@@ -44,4 +44,48 @@ public struct GeneratedTextScan<Node> {
         }
         return texts
     }
+
+    /// The page's generated text or list markers hold all of `run`, in plain offsets: each leaf there, found by binary search on
+    /// its siblings' starts; false on a failed read or past the budget.
+    public mutating func generates(_ run: Range<Int>, in roots: [Node], offset: (Node, _ end: Bool) -> Int?) -> Bool {
+        var from = run.lowerBound
+        while from < run.upperBound {
+            guard let end = generatedLeaf(at: from, in: roots, offset: offset), end > from else { return false }
+            from = end
+        }
+        return true
+    }
+
+    /// The end of the generated leaf holding `start`; nil where the leaf there is the page's own.
+    private mutating func generatedLeaf(at start: Int, in roots: [Node], offset: (Node, _ end: Bool) -> Int?) -> Int? {
+        var siblings = roots
+        for _ in 0..<16 {
+            var holder: Node?
+            var low = 0
+            var high = siblings.count - 1
+            while low <= high {
+                let middle = (low + high) / 2
+                reads += 1
+                guard reads <= budget, let begins = offset(siblings[middle], false) else { return nil }
+                if begins <= start {
+                    holder = siblings[middle]
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+            reads += 2
+            guard let holder, reads <= budget, let end = offset(holder, true), start < end, let read = read(holder) else { return nil }
+            switch read.role {
+            case "AXListMarker"?:
+                return end
+            case "AXStaticText"?:
+                return read.id.map { $0 < 0 } == true ? end : nil
+            default:
+                guard !read.children.isEmpty else { return nil }
+                siblings = read.children
+            }
+        }
+        return nil
+    }
 }

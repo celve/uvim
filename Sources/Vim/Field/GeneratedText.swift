@@ -3,6 +3,9 @@ public enum GeneratedText {
     /// A field showing only a placeholder is a few nodes deep; past this many reads it keeps its text.
     public static let readBudget = 16
 
+    /// Reads to find the node holding a misfit's text: a binary search per level, through a few levels of a long list.
+    public static let runBudget = 64
+
     /// One empty paragraph shows its `<br>` as at most one `\n`; a field of more shows more, and reads as it did.
     public static func mayFill(_ value: String) -> Bool {
         !value.isEmpty && value.utf16.filter { $0 == 10 }.count <= 1

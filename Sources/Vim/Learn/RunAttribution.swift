@@ -27,10 +27,12 @@ public struct RunAttribution: Equatable, Sendable {
 
     public init() {}
 
-    /// `writeError` is what the write before a failed settle returned, as `Executor.SettleFailure` keeps it.
+    /// `writeError` is what the write before a failed settle returned, as `Executor.SettleFailure` keeps it; `misfit`, that it
+    /// failed across text the page generates (LIN-2370).
     public mutating func record(
         _ step: PhysicalStep, passed: Bool = true,
-        selection: Range<Int>? = nil, length: Int? = nil, selectedText: String? = nil, writeError: Int32? = nil
+        selection: Range<Int>? = nil, length: Int? = nil, selectedText: String? = nil, writeError: Int32? = nil,
+        misfit: Bool = false
     ) {
         defer { index += 1 }
         let previous = settled
@@ -51,8 +53,8 @@ public struct RunAttribution: Equatable, Sendable {
             if expectation.checksWrite, pending == nil { pending = finishing }
             let read = Read(expectation, selection: selection, length: length)
             let unchanged = written != nil && read == written && writeError == nil
-            let item = passed
-                ? passing(expectation)
+            let item = passed ? passing(expectation)
+                : misfit ? misfitting(expectation)
                 : failing(expectation, selection: selection, length: length, selectedText: selectedText, unchanged: unchanged)
             if let item { evidence.append(item) }
             // A read that went dark fails any plan alike.
@@ -69,6 +71,12 @@ public struct RunAttribution: Equatable, Sendable {
     private func passing(_ expectation: Expectation) -> Evidence? {
         guard let question = expectation.checkedKey.map(Question.init) ?? pending else { return nil }
         return Evidence(question, .supports(nil), why: .settled, seen: .settle(index))
+    }
+
+    /// The key or write the model's misfit would have struck, unblamed and never offsets evidence.
+    private func misfitting(_ expectation: Expectation) -> Evidence? {
+        guard let question = expectation.blame.map({ Question($0.capability) }) ?? pending else { return nil }
+        return Evidence(question, .neutral, why: .misfit, seen: .settle(index))
     }
 
     private func failing(

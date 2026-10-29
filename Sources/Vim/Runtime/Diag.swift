@@ -164,6 +164,9 @@ enum Diag {
         if let error = failure.writeError {
             line += " axerror=\(error)"
         }
+        if let misfit = failure.misfit {
+            line += " misfit=\(misfit.lowerBound)..\(misfit.upperBound)"
+        }
         settle.log("\(line, privacy: .public)")
     }
 

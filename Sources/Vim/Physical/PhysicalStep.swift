@@ -236,6 +236,28 @@ public struct Expectation: Equatable, Sendable {
     /// The length the field had before that ⌫, where a settle there would have read one.
     public var lengthBefore: Int?
 
+    /// Runs of field text the model holds as unreachable, either end of which is the same place (LIN-2370).
+    public var equivalences: [Equivalence] = []
+
+    /// The exact caret touches a generated paragraph break and has no `edge` to say which paragraph's it is.
+    public var onBreak = false
+
+    /// Field text no caret reaches, such as a list marker the page draws.
+    public struct Equivalence: Equatable, Sendable {
+        public let run: Range<Int>
+        /// The run follows a generated break, so its lower end is the paragraph before's end too, and joins only where `edge`
+        /// means the start side.
+        public let afterBreak: Bool
+
+        public init(run: Range<Int>, afterBreak: Bool) {
+            self.run = run
+            self.afterBreak = afterBreak
+        }
+    }
+
+    /// The longest field text a misfit lies across: a list marker and its space, as `UnreachableLines.prefixLength` reaches.
+    public static let misfitReach = 6
+
     /// Demotes `capability` for `unmoved`, a `leavesCaret` key's selection, a `selects` key's caret, or `offTarget` landings.
     public struct Blame: Equatable, Sendable {
         public let capability: Capability
@@ -309,7 +331,7 @@ public struct Expectation: Equatable, Sendable {
         selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String? = nil
     ) -> Bool {
         if let landing {
-            guard let observed, landing.matches(observed) else { return false }
+            guard let observed, lands(landing, observed) else { return false }
         }
         if let longest, (observed?.count ?? 0) > longest { return false }
         if let length, observedLength != length { return false }
@@ -325,6 +347,69 @@ public struct Expectation: Equatable, Sendable {
         guard matches(selection: observed, length: observedLength, selectedText: observedText) else { return false }
         guard let edge else { return true }
         return side.map { ($0 == .end) == (edge == .paragraphEnd) } ?? false
+    }
+
+    /// `landing` meets `observed` compared as the places the model holds them to be: crossing only a held run is no progress.
+    private func lands(_ landing: Landing, _ observed: Range<Int>) -> Bool {
+        guard !equivalences.isEmpty else { return landing.matches(observed) }
+        // `converged` checks the side a read gives against `edge`.
+        let start = edge == .paragraphStart
+        let lower = place(observed.lowerBound, onStart: observed.isEmpty && start)
+        let upper = observed.isEmpty ? lower : place(observed.upperBound, onStart: start)
+        func wanted(_ offset: Int) -> Int { place(offset, onStart: start) }
+        // A caret read at a held run's lower end after a break is that paragraph's end or the run's: it passes only as both.
+        func passesAsEither(_ meets: (Int) -> Bool) -> Bool {
+            observed.isEmpty && ([lower] + upperAlias(of: observed.lowerBound)).allSatisfy(meets)
+        }
+        switch landing {
+        case .exact(let range):
+            guard !landing.matches(observed) else { return true }
+            guard range.isEmpty == observed.isEmpty else { return false }
+            let wantedLower = range.isEmpty ? wanted(range.lowerBound) : place(range.lowerBound, onStart: false)
+            return lower == wantedLower && upper == (range.isEmpty ? wantedLower : wanted(range.upperBound))
+        case .caretAfter(let offset, let strict):
+            return passesAsEither { strict ? $0 > wanted(offset) : $0 >= wanted(offset) }
+        case .caretBefore(let offset, let strict):
+            return passesAsEither { strict ? $0 < wanted(offset) : $0 <= wanted(offset) }
+        case .caretWithin(let range):
+            return passesAsEither { (wanted(range.lowerBound)...wanted(range.upperBound)).contains($0) }
+        case .between:
+            return false
+        }
+    }
+
+    /// The run's upper end, where `offset` is an after-break run's lower end and so may be read for it.
+    private func upperAlias(of offset: Int) -> [Int] {
+        equivalences.filter { $0.afterBreak && $0.run.lowerBound == offset }.map(\.run.upperBound)
+    }
+
+    /// The place `offset` is: a held run's upper end for any caret across it, but its lower end after a break only on its start side.
+    private func place(_ offset: Int, onStart: Bool) -> Int {
+        guard let held = equivalences.first(where: { ($0.run.lowerBound...$0.run.upperBound).contains(offset) }) else {
+            return offset
+        }
+        return offset > held.run.lowerBound || !held.afterBreak || onStart ? held.run.upperBound : offset
+    }
+
+    /// The field text, none of it held, between a failed settle's caret and the exact caret it predicted, which would pass were
+    /// that text unreachable: nil unless all else converges there (LIN-2370).
+    public func misfit(
+        selection observed: Range<Int>?, length observedLength: Int?, selectedText observedText: String?,
+        side: ParagraphBreaks.Side?
+    ) -> Range<Int>? {
+        guard case .exact(let predicted)? = landing, predicted.isEmpty, let observed, observed.isEmpty else { return nil }
+        let (caret, place) = (observed.lowerBound, predicted.lowerBound)
+        // Before the prediction only at the field's start: elsewhere the caret may be on the paragraph before's end.
+        guard place < caret || caret == 0 && place > 0, abs(caret - place) <= Self.misfitReach else { return nil }
+        let across = min(caret, place)..<max(caret, place)
+        // A prediction on a break may be the paragraph before's end, unless `edge` says the start.
+        guard edge.map({ $0 == .paragraphStart }) ?? !onBreak, !equivalences.contains(where: { $0.run.overlaps(across) }) else {
+            return nil
+        }
+        // Past its marker, an empty item's caret is its paragraph's end too.
+        let read = edge == .paragraphStart && place < caret && side == .end ? .start(skipping: 0) : side
+        guard converged(selection: predicted, length: observedLength, selectedText: observedText, side: read) else { return nil }
+        return across
     }
 
     /// Met by a field showing only its page's generated text, which holds none wherever its caret reads (LIN-1930).
@@ -358,6 +443,7 @@ public struct Expectation: Equatable, Sendable {
     public func rangeHeld(selection observed: Range<Int>?, length observedLength: Int?) -> Bool {
         var offsetsOnly = Expectation(landing: landing, length: length, edge: edge, blame: blame)
         offsetsOnly.longest = longest
+        offsetsOnly.equivalences = equivalences
         return offsetsOnly.matches(selection: observed, length: observedLength)
     }
 
@@ -379,6 +465,8 @@ public struct Expectation: Equatable, Sendable {
         resolved.checksWrite = checksWrite
         resolved.deletes = deletes
         resolved.lengthBefore = lengthBefore
+        resolved.equivalences = equivalences
+        resolved.onBreak = onBreak
         return resolved
     }
 }

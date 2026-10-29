@@ -575,6 +575,7 @@ extension Sim: StepHost {
         let selection: Range<Int>?
         let length: Int?
         let selectedText: String?
+        let misfit: Range<Int>?
     }
 
     // Each read or write first lands the ⌘Z Chrome runs late, as a key or a commit does not.
@@ -659,8 +660,13 @@ extension Sim: StepHost {
 
     mutating func settle(_ expectation: Expectation, at index: Int, generated: Bool) -> Read {
         landLateHistory()
-        let (passed, observed, length) = settles(expectation, generated: generated)
-        return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText)
+        let (passed, observed, length, misfit) = settles(expectation, generated: generated)
+        return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText, misfit: misfit)
+    }
+
+    /// A read of the tree, not the field, so it lands no late ⌘Z.
+    func generates(_ run: Range<Int>) -> Bool {
+        generatesText(run)
     }
 
     mutating func departure(fresh: Bool) -> KeyDestination.Departure? {

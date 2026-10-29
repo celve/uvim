@@ -206,13 +206,12 @@ extension PhysicalPlanner {
             }
             let read: Landing
             var side: Expectation.Edge?
+            var onBreak = false
             switch landing {
             case .exact(let range):
-                let at = field(range)
-                // A caret at the field's start can read before its first marker, the same place as after it (LIN-2329).
-                let startsMarked = range == 0..<0 && breaks?.hidden.first.map { $0.at == 0 && $0.isMarker } == true
-                read = startsMarked ? .caretWithin(0...at.lowerBound) : .exact(at)
+                read = .exact(field(range))
                 side = unknown.contains(.edge) ? nil : edge(range.upperBound)
+                onBreak = range.isEmpty && side == nil && breaks.map { [range.lowerBound - 1, range.lowerBound].contains(where: $0.offsets.contains) } == true
             case .caretAfter(let o, let strict):
                 read = .caretAfter(field(o..<o).lowerBound, strict: strict)
             case .caretBefore(let o, let strict):
@@ -227,7 +226,20 @@ extension PhysicalPlanner {
             expectation.within = within.map(field)
             expectation.longest = expectation.within?.count
             expectation.keeps = keeps
+            expectation.equivalences = equivalences
+            expectation.onBreak = onBreak
             return expectation
+        }
+
+        /// The folded markers and labels in field offsets, where a caret can read before one, the same place as after it.
+        var equivalences: [Expectation.Equivalence] {
+            guard let breaks else { return [] }
+            return breaks.hidden.filter(\.isMarker).map { hidden in
+                let end = breaks.fieldOffset(hidden.at)
+                let start = end - hidden.text.utf16.count
+                // After a generated break the run's start is the paragraph before's end too; after a typed `\n` it is not.
+                return Expectation.Equivalence(run: start..<end, afterBreak: breaks.offsets.contains(hidden.at - 1))
+            }
         }
 
         /// The model, but only where its geography is trustworthy.
