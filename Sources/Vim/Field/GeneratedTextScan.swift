@@ -13,6 +13,8 @@ public struct GeneratedTextScan<Node> {
             self.value = value
             self.children = children
         }
+
+        var isGeneratedText: Bool { FieldRules.isGeneratedText(role: role, generated: id.map { $0 < 0 } == true) }
     }
 
     /// Nil on a failed read.
@@ -32,13 +34,12 @@ public struct GeneratedTextScan<Node> {
         while let node = pending.popLast() {
             reads += 1
             guard reads <= budget, let read = read(node) else { return nil }
-            switch read.role {
-            case "AXStaticText"?:
-                guard let id = read.id, id < 0, let value = read.value else { return nil }
+            if read.role == "AXStaticText" {
+                guard read.isGeneratedText, let value = read.value else { return nil }
                 texts.append(value)
-            case "AXListMarker"?:
+            } else if FieldRules.isListMarker(role: read.role) {
                 return nil
-            default:
+            } else {
                 pending += read.children.reversed()
             }
         }
@@ -76,15 +77,10 @@ public struct GeneratedTextScan<Node> {
             }
             reads += 2
             guard let holder, reads <= budget, let end = offset(holder, true), start < end, let read = read(holder) else { return nil }
-            switch read.role {
-            case "AXListMarker"?:
-                return end
-            case "AXStaticText"?:
-                return read.id.map { $0 < 0 } == true ? end : nil
-            default:
-                guard !read.children.isEmpty else { return nil }
-                siblings = read.children
-            }
+            if FieldRules.isListMarker(role: read.role) { return end }
+            if read.role == "AXStaticText" { return read.isGeneratedText ? end : nil }
+            guard !read.children.isEmpty else { return nil }
+            siblings = read.children
         }
         return nil
     }

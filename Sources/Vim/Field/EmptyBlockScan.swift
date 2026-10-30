@@ -57,7 +57,7 @@ public struct EmptyBlockScan<Node> {
         var found: [Int] = []
         for node in blocks {
             guard spend(1), let read = block(node) else { return nil }
-            guard read.subrole == "AXEmptyGroup", read.children.isEmpty else { continue }
+            guard read.isEmptyBlock else { continue }
             guard spend(2), let start = offset(node, false) else { return nil }
             if plain.indices.contains(start), plain[start] == 10 { found.append(start) }
         }
@@ -96,7 +96,7 @@ public struct EmptyBlockScan<Node> {
             guard let hit else { return .text(end: b + 1) }
             let node = siblings[hit.index]
             guard spend(1), let read = block(node) else { return nil }
-            if read.subrole == "AXEmptyGroup", read.children.isEmpty {
+            if read.isEmptyBlock {
                 guard hit.start == b else { return .text(end: b + 1) }
                 // A caret drawn at a code span's end is followed by the `<br>` of the paragraph it ends (LIN-1683).
                 if DrawnCaret.isCaret(parent: parent, previous: nil, next: nil) { return .text(end: b + 1) }
@@ -104,10 +104,10 @@ public struct EmptyBlockScan<Node> {
                 guard spend(1), let previous = block(siblings[hit.index - 1]) else { return nil }
                 // After a chip it is the image Linear puts there while the caret is beside it (LIN-1652).
                 let drawn = DrawnCaret.isCaret(parent: nil, previous: previous.subrole, next: nil)
-                if previous.subrole == "AXApplicationGroup" || drawn { return .text(end: b + 1) }
-                return previous.role == "AXListMarker" ? .item : .line
+                if previous.isChip || drawn { return .text(end: b + 1) }
+                return previous.isListMarker ? .item : .line
             }
-            if read.role == "AXStaticText" || read.children.isEmpty {
+            if read.isLeaf {
                 guard spend(2), let end = offset(node, true) else { return nil }
                 return .text(end: max(end, b + 1))
             }
