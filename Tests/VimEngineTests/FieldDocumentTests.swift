@@ -187,6 +187,37 @@ func testFieldDocument() {
     precondition(documentRequest("one", "one").isIdle && !documentRequest("a\nb", "a\nb", folds: false).isIdle,
                  "a line of plain text asks for no walk, and a blank line for the blank lines' part alone")
 
+    // The runs are the document: text tiles what the rest leave, every U+FFFC is a leaf, and what the model hides of the field's
+    // text is its generated runs and its chips' labels, in order.
+    for (name, value, raw, spec) in documentTrees {
+        for linear in [true, false] {
+            let document = documentWalk(documentRequest(value, raw, caret: nil), fakeTree(spec, linear: linear), roots: nil).document
+            let plain = Array(MarkerText.plain(raw).utf16)
+            let tiles = (document.runs.filter { !$0.range.isEmpty }.map(\.range)
+                + (document.emptyParagraphs ?? []).map { $0..<($0 + 1) }).sorted { $0.lowerBound < $1.lowerBound }
+            precondition(tiles.first?.lowerBound ?? 0 == 0 && tiles.last?.upperBound ?? 0 == plain.count
+                         && zip(tiles, tiles.dropFirst()).allSatisfy { $0.upperBound == $1.lowerBound }, "\(name): the runs tile the text")
+            let leaves = document.runs.filter { if case .leaf = $0.kind { true } else { false } }.count
+            precondition(leaves == raw.utf16.filter { $0 == 0xFFFC }.count, "\(name): each object is a leaf")
+            func text(_ range: Range<Int>) -> String { String(decoding: plain[range], as: UTF16.self) }
+            let aligned = ParagraphBreaks(value: value, fieldText: MarkerText.plain(raw))!
+            let restored = EmptyParagraphs.restore(value: value, fieldText: MarkerText.plain(raw), aligned: aligned,
+                                                   found: document.emptyParagraphs!)
+            let model = UnreachableLines.fold(text: restored?.text ?? value, breaks: restored?.breaks ?? aligned, raw: raw,
+                                              found: document.found!)
+            let hidden = model.breaks.hidden
+            let generated = document.runs.compactMap { if case .generated = $0.kind { text($0.range) } else { nil } }.joined()
+            let labels = document.runs.compactMap { if case .atom = $0.kind { text($0.range.dropFirst()) } else { nil } }.joined()
+            precondition(hidden.filter { $0.kind == .prefix || $0.kind == .structure }.map(\.text).joined() == generated,
+                         "\(name) linear=\(linear): the model hides the generated runs")
+            precondition(hidden.filter { $0.kind == .atom }.map(\.text).joined() == labels, "\(name): and the chips' labels")
+        }
+    }
+    let slackList = documentWalk(documentRequest(quillEmptyValue, quillEmptyRaw, caret: nil, proseMirror: false),
+                                 fakeTree(quillEmptySpec, linear: false), roots: nil).document
+    precondition(slackList.runs.map(\.kind) == [.generated(.marker), .text, .generated(.marker), .text, .generated(.marker), .text],
+                 "field-model.md §5's Slack list: \(slackList.runs)")
+
     // The Sim walks Chrome 153's tree for plain paragraphs, as the runtime does.
     for paragraphs in [["L", "", "N"], ["", "", "L"], ["a", "", "bc", "", "", "d", ""]] {
         var host = blankSim(paragraphs, caret: 0)

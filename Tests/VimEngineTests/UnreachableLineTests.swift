@@ -401,7 +401,8 @@ func testUnreachableLines() {
     let dia1Walked = dia1Built.memo!.document
     let dia1Failed = dia1Build(caret: 68, memo: FieldDocument.Memo(
         request: dia1Built.memo!.request, blocks: dia1Tree.count,
-        document: FieldDocument(emptyParagraphs: dia1Walked.emptyParagraphs, candidates: dia1Walked.candidates, found: nil)
+        document: FieldDocument(markers: dia1Raw, emptyParagraphs: dia1Walked.emptyParagraphs, candidates: dia1Walked.candidates,
+                                found: nil)
     )).snapshot
     precondition(dia1Failed.text == dia1Unfound.text, "failed discovery keeps the markers' lines")
 

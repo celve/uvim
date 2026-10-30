@@ -1,14 +1,17 @@
 /// What one walk over a Chromium field's tree finds, the field model's document (softlash/LIN-2329 field-model.md §5): its
-/// empty paragraphs and its runs no caret reaches, from which `EmptyParagraphs.restore` and `UnreachableLines.fold` make the
-/// text model and its breaks.
+/// plain text as runs of five kinds, and its blocks. `EmptyParagraphs.restore` and `UnreachableLines.fold` make the text model
+/// and its breaks from `emptyParagraphs` and `found`, which are read off the runs and blocks.
 public struct FieldDocument: Equatable, Sendable {
-    /// C6: ascending plain offsets of the `<br>`s of empty paragraphs that start a line; nil where the walk could not tell.
-    public let emptyParagraphs: [Int]?
+    /// In plain order; text, generated and atom runs and empty paragraphs' `<br>`s tile the plain text, leaves and stops take none.
+    public let runs: [Run]
+    public let blocks: [Block]
     /// The lines the text says are worth confirming, from the text with its empty paragraphs put back.
     public let candidates: UnreachableLines.Candidates
-    /// C1, C2 and C4 runs, drawn carets and Linear's P1 stops and P2 labels; nil where the walk could not tell.
-    public let found: UnreachableLines.Found?
-    /// Which parts ran out of reads, rather than failing one.
+    /// Tree paths of the quotes and open sections whose children the stops were judged among, which the memo's witness reads.
+    public let containers: [[Int]]
+    /// The parts that could not tell what they read for: a read failed, the budget ran out, or they were not asked.
+    public let unknown: Parts
+    /// Which of those ran out of reads, rather than failing one.
     public let exhausted: Parts
     /// The reads the walk spent.
     public let reads: Int
@@ -20,15 +23,112 @@ public struct FieldDocument: Equatable, Sendable {
         public static let found = Parts(rawValue: 2)
     }
 
+    /// A plain range of one kind, which the rule in its name made.
+    public struct Run: Equatable, Sendable {
+        public let range: Range<Int>
+        public let kind: Kind
+
+        public enum Kind: Equatable, Sendable {
+            /// The page's own text, which a caret reaches.
+            case text
+            /// Text no caret enters: a C1 or C2 list marker, or a P2 code block's label.
+            case generated(Generated)
+            /// C4: a chip a caret crosses in one step, with its paragraph and the `<br>` Linear adds after one ending it.
+            case atom(paragraph: Range<Int>)
+            /// C5: a text-less object, one U+FFFC of the marker text, or the caret Linear draws at a code span's edge.
+            case leaf(drawn: UnreachableLines.Caret.Place?)
+            /// P1: a caret stop with no text before the line starting here; a join's kind is the fold's to tell from its leaves.
+            case stop(Linear.Stop?)
+        }
+
+        public enum Generated: Equatable, Sendable {
+            case marker
+            case label
+        }
+    }
+
+    public enum Block: Equatable, Sendable {
+        /// C6: an empty paragraph, whose `<br>` is at this plain offset.
+        case emptyParagraph(Int)
+        case table(UnreachableLines.Table)
+    }
+
+    /// The document of `markers`, the raw marker text, from what each part of the walk found; nil where a part could not tell.
     public init(
-        emptyParagraphs: [Int]?, candidates: UnreachableLines.Candidates = UnreachableLines.Candidates(markers: [], chips: []),
+        markers raw: String, emptyParagraphs: [Int]?, candidates: UnreachableLines.Candidates = UnreachableLines.Candidates(markers: [], chips: []),
         found: UnreachableLines.Found?, exhausted: Parts = [], reads: Int = 0
     ) {
-        self.emptyParagraphs = emptyParagraphs
+        var placed: [Run] = []
+        if let found {
+            placed += found.markers.map { Run(range: $0, kind: .generated(.marker)) }
+            placed += found.controls.map { Run(range: $0, kind: .generated(.label)) }
+            placed += found.chips.map { Run(range: $0.range, kind: .atom(paragraph: $0.paragraph)) }
+            placed += found.carets.map { Run(range: $0.offset..<$0.offset, kind: .leaf(drawn: $0.place)) }
+            placed += found.joins.map { Run(range: $0..<$0, kind: .stop(nil)) }
+            placed += found.stops.map { Run(range: $0.at..<$0.at, kind: .stop($0.kind)) }
+        }
+        let drawn = Dictionary(grouping: found?.carets ?? [], by: \.offset).mapValues(\.count)
+        for (at, count) in UnreachableLines.leafCounts(raw).sorted(by: { $0.key < $1.key }) {
+            let objects = max(count - (drawn[at] ?? 0), 0)
+            placed += Array(repeating: Run(range: at..<at, kind: .leaf(drawn: nil)), count: objects)
+        }
+        let length = raw.utf16.count - UnreachableLines.leafCounts(raw).values.reduce(0, +)
+        var covered = [Bool](repeating: false, count: length)
+        for run in placed where !run.range.isEmpty {
+            for unit in run.range where covered.indices.contains(unit) { covered[unit] = true }
+        }
+        for at in emptyParagraphs ?? [] where covered.indices.contains(at) { covered[at] = true }
+        var start: Int?
+        for unit in 0...length {
+            if unit < length, !covered[unit] {
+                start = start ?? unit
+            } else if let open = start {
+                placed.append(Run(range: open..<unit, kind: .text))
+                start = nil
+            }
+        }
+        // Stable by where each starts, a stop or leaf before the text there, as the fold inserts stops in this order.
+        runs = placed.enumerated().sorted {
+            ($0.element.range.lowerBound, $0.element.range.isEmpty ? 0 : 1, $0.offset)
+                < ($1.element.range.lowerBound, $1.element.range.isEmpty ? 0 : 1, $1.offset)
+        }.map(\.element)
+        blocks = (emptyParagraphs ?? []).map(Block.emptyParagraph) + (found?.tables ?? []).map(Block.table)
         self.candidates = candidates
-        self.found = found
+        containers = found?.containers ?? []
+        var unknown: Parts = []
+        if emptyParagraphs == nil { unknown.insert(.emptyParagraphs) }
+        if found == nil { unknown.insert(.found) }
+        self.unknown = unknown
         self.exhausted = exhausted
         self.reads = reads
+    }
+
+    /// C6: ascending plain offsets of the `<br>`s of empty paragraphs that start a line; nil where the walk could not tell.
+    public var emptyParagraphs: [Int]? {
+        unknown.contains(.emptyParagraphs) ? nil : blocks.compactMap { if case .emptyParagraph(let at) = $0 { at } else { nil } }
+    }
+
+    /// The runs no caret reaches as the fold reads them; nil where the walk could not tell.
+    public var found: UnreachableLines.Found? {
+        guard !unknown.contains(.found) else { return nil }
+        var markers: [Range<Int>] = [], controls: [Range<Int>] = [], chips: [UnreachableLines.Chip] = []
+        var carets: [UnreachableLines.Caret] = [], joins: [Int] = [], stops: [UnreachableLines.Stop] = []
+        for run in runs {
+            switch run.kind {
+            case .generated(.marker): markers.append(run.range)
+            case .generated(.label): controls.append(run.range)
+            case .atom(let paragraph): chips.append(UnreachableLines.Chip(range: run.range, paragraph: paragraph))
+            case .leaf(let place?): carets.append(UnreachableLines.Caret(offset: run.range.lowerBound, place: place))
+            case .stop(nil): joins.append(run.range.lowerBound)
+            case .stop(let kind?): stops.append(UnreachableLines.Stop(at: run.range.lowerBound, kind: kind))
+            case .text, .leaf(nil): break
+            }
+        }
+        let tables = blocks.compactMap { if case .table(let table) = $0 { table } else { nil } }
+        return UnreachableLines.Found(
+            markers: markers, chips: chips, carets: carets, joins: joins, controls: controls, stops: stops, tables: tables,
+            containers: containers
+        )
     }
 
     /// The most AX reads one walk may spend; the empty paragraphs, read first, may take only theirs of it, so the runs always
@@ -97,17 +197,21 @@ public struct FieldDocument: Equatable, Sendable {
             empty = walked.found
             if walked.exhausted { exhausted.insert(.emptyParagraphs) }
         }
-        guard request.folds else { return FieldDocument(emptyParagraphs: empty, found: nil, exhausted: exhausted) }
+        guard request.folds else {
+            return FieldDocument(markers: request.markers, emptyParagraphs: empty, found: nil, exhausted: exhausted)
+        }
         let candidates = request.candidates(restoring: empty)
         guard !candidates.isEmpty else {
             return FieldDocument(
-                emptyParagraphs: empty, candidates: candidates, found: UnreachableLines.Found(markers: [], chips: []),
-                exhausted: exhausted
+                markers: request.markers, emptyParagraphs: empty, candidates: candidates,
+                found: UnreachableLines.Found(markers: [], chips: []), exhausted: exhausted
             )
         }
         let walked = runs(candidates)
         if walked.exhausted { exhausted.insert(.found) }
-        return FieldDocument(emptyParagraphs: empty, candidates: candidates, found: walked.found, exhausted: exhausted)
+        return FieldDocument(
+            markers: request.markers, emptyParagraphs: empty, candidates: candidates, found: walked.found, exhausted: exhausted
+        )
     }
 
     /// The walk over a tree, both parts reading through `tree`; `roots` is read once, where a part needs it.
@@ -129,8 +233,8 @@ public struct FieldDocument: Equatable, Sendable {
             return (scan.run(blocks: blocks, candidates: candidates), scan.exhausted)
         })
         return FieldDocument(
-            emptyParagraphs: document.emptyParagraphs, candidates: document.candidates, found: document.found,
-            exhausted: document.exhausted, reads: tree.reads
+            markers: request.markers, emptyParagraphs: document.emptyParagraphs, candidates: document.candidates,
+            found: document.found, exhausted: document.exhausted, reads: tree.reads
         )
     }
 }
@@ -173,8 +277,8 @@ public extension FieldDocument {
             guard request.value != old.value || request.markers != old.markers, request.proseMirror == old.proseMirror,
                   request.folds == old.folds else { return .failure(.candidates) }
             return Discovery.run(markers: old.markers, value: old.value, to: request.markers, value: request.value).flatMap { edit in
-                guard document.emptyParagraphs != nil || document.exhausted.contains(.emptyParagraphs),
-                      document.found != nil || document.exhausted.contains(.found) || !request.folds
+                guard !document.unknown.subtracting(document.exhausted).contains(.emptyParagraphs),
+                      !document.unknown.subtracting(document.exhausted).contains(.found) || !request.folds
                 else { return .failure(.failed) }
                 guard let reads else { return .failure(.unread) }
                 guard let lines = Discovery.Lines(value: old.value, markers: old.markers, shown: edit.shown) else {

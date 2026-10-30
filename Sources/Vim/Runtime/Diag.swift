@@ -232,9 +232,18 @@ enum Diag {
         let empty = document.emptyParagraphs.map { "empty=\($0.count)" } ?? "empty-failed=\(failed(.emptyParagraphs))"
         let found = !memo.request.folds ? "" : document.found.map { " markers=\($0.markers.count) chips=\($0.chips.count)" }
             ?? " runs-failed=\(failed(.found))"
+        let runs = Dictionary(grouping: document.runs) { run -> String in
+            switch run.kind {
+            case .text: "text"
+            case .generated: "generated"
+            case .atom: "atom"
+            case .leaf: "leaf"
+            case .stop: "stop"
+            }
+        }.map { "\($0.key)=\($0.value.count)" }.sorted().joined(separator: ",")
         gate.debug("""
             e\(epoch, privacy: .public).c\(seq, privacy: .public) document \(empty, privacy: .public)\(found, privacy: .public) \
-            reads=\(document.reads, privacy: .public) \(memo.origin.traceField, privacy: .public)
+            runs=\(runs, privacy: .public) reads=\(document.reads, privacy: .public) \(memo.origin.traceField, privacy: .public)
             """)
     }
 

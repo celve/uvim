@@ -247,10 +247,10 @@ func testCarriedDiscovery() {
                  "typed in the blank line, or in two places")
     precondition(blankCarried { $0.insert("New", at: 1) } == .failure(.blocks))
     precondition(FieldDocument.Memo(request: documentRequest("ab\nc", "ab\nc", proseMirror: false, folds: false), blocks: nil,
-                                    document: FieldDocument(emptyParagraphs: [2], found: nil))
+                                    document: FieldDocument(markers: "ab\nc", emptyParagraphs: [2], found: nil))
                  .carried(documentRequest("axb\nc", "axb\nc", proseMirror: false, folds: false), blocks: nil, roots: nil) == .failure(.blocks))
     let failedBlank = FieldDocument.Memo(request: blankRequest(blankParagraphs), blocks: blankParagraphs.count,
-                                         document: FieldDocument(emptyParagraphs: nil, found: nil))
+                                         document: FieldDocument(markers: blankMarkers, emptyParagraphs: nil, found: nil))
     precondition(blankCarried({ $0[0] = "Headingxy one" }, memo: failedBlank) == .failure(.failed), "a failed read is read again")
     for budget in [3, 8] {
         let exhausted = documentWalk(blankRequest(blankParagraphs), blankTree(blankParagraphs), roots: nil, budget: budget)
