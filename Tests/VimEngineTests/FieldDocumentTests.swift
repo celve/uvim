@@ -213,6 +213,13 @@ func testFieldDocument() {
             precondition(hidden.filter { $0.kind == .atom }.map(\.text).joined() == labels, "\(name): and the chips' labels")
         }
     }
+    let none = UnreachableLines.Found(markers: [], chips: [])
+    let objectInside = FieldDocument(markers: "ab\u{FFFC}cd", emptyParagraphs: [], found: none).runs
+    precondition(objectInside == [.init(range: 0..<2, kind: .text), .init(range: 2..<2, kind: .leaf(drawn: nil)),
+                                  .init(range: 2..<4, kind: .text)], "an object inside text splits it: \(objectInside)")
+    let stopInside = FieldDocument(markers: "abcd", emptyParagraphs: [], found: UnreachableLines.Found(markers: [], chips: [], joins: [2]))
+    precondition(stopInside.runs == [.init(range: 0..<2, kind: .text), .init(range: 2..<2, kind: .stop(nil)),
+                                     .init(range: 2..<4, kind: .text)] && stopInside.found?.joins == [2], "and so does a stop")
     let slackList = documentWalk(documentRequest(quillEmptyValue, quillEmptyRaw, caret: nil, proseMirror: false),
                                  fakeTree(quillEmptySpec, linear: false), roots: nil).document
     precondition(slackList.runs.map(\.kind) == [.generated(.marker), .text, .generated(.marker), .text, .generated(.marker), .text],

@@ -14,7 +14,7 @@ public struct FieldDocument: Equatable, Sendable {
     /// Which of those ran out of reads, rather than failing one.
     public let exhausted: Parts
     /// The reads the walk spent.
-    public let reads: Int
+    public internal(set) var reads: Int
 
     public struct Parts: OptionSet, Equatable, Sendable {
         public let rawValue: Int
@@ -78,14 +78,15 @@ public struct FieldDocument: Equatable, Sendable {
             for unit in run.range where covered.indices.contains(unit) { covered[unit] = true }
         }
         for at in emptyParagraphs ?? [] where covered.indices.contains(at) { covered[at] = true }
+        // A leaf or stop inside text splits it, so the runs read in order meet it where it is.
+        let splits = Set(placed.filter(\.range.isEmpty).map(\.range.lowerBound))
         var start: Int?
         for unit in 0...length {
-            if unit < length, !covered[unit] {
-                start = start ?? unit
-            } else if let open = start {
+            if let open = start, unit == length || covered[unit] || splits.contains(unit) {
                 placed.append(Run(range: open..<unit, kind: .text))
                 start = nil
             }
+            if unit < length, !covered[unit] { start = start ?? unit }
         }
         // Stable by where each starts, a stop or leaf before the text there, as the fold inserts stops in this order.
         runs = placed.enumerated().sorted {
@@ -221,7 +222,7 @@ public struct FieldDocument: Equatable, Sendable {
             if known == nil { known = .some(roots()) }
             return known!
         }
-        let document = build(request, emptyParagraphs: { plain in
+        var document = build(request, emptyParagraphs: { plain in
             guard let blocks = root() else { return (nil, false) }
             tree.limit = min(tree.budget, EmptyParagraphs.readBudget - 2)
             var scan = EmptyBlockScan(tree: tree)
@@ -232,10 +233,8 @@ public struct FieldDocument: Equatable, Sendable {
             var scan = UnreachableScan(tree: tree)
             return (scan.run(blocks: blocks, candidates: candidates), scan.exhausted)
         })
-        return FieldDocument(
-            markers: request.markers, emptyParagraphs: document.emptyParagraphs, candidates: document.candidates,
-            found: document.found, exhausted: document.exhausted, reads: tree.reads
-        )
+        document.reads = tree.reads
+        return document
     }
 }
 
