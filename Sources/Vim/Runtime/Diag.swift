@@ -44,6 +44,9 @@ enum Diag {
         if binding.isChromium {
             line += " chromium=1"
         }
+        if let editor = binding.surface.editor {
+            line += " editor=\(editor)"
+        }
         // The grid hides the read where a seed or the user answers first.
         if binding.enclosing != nil {
             line += " enclosed=1"

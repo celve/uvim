@@ -39,16 +39,32 @@ public struct Surface: Equatable, Hashable, Sendable {
     /// and falls through to the wider rungs — a non-destructive failure.
     public var identifier: String?
 
+    /// The editor library the page runs in the field (`Surface.editor(classes:)`), whatever app or site hosts it.
+    public var editor: String?
+
+    /// The text system behind the field; nil where nothing was read, as for a forced binding.
+    public var engine: Engine?
+
+    public enum Engine: String, Sendable {
+        case chromium, webkit
+        /// Every field that is not web content.
+        case appkit
+    }
+
     public init(
         bundleID: String? = nil,
         origin: String? = nil,
         role: String? = nil,
-        identifier: String? = nil
+        identifier: String? = nil,
+        editor: String? = nil,
+        engine: Engine? = nil
     ) {
         self.bundleID = bundleID
         self.origin = origin
         self.role = role
         self.identifier = identifier
+        self.editor = editor
+        self.engine = engine
     }
 
     /// The site half — everything but the element.
@@ -76,6 +92,8 @@ public extension Surface {
     ///     com.dia.app|notion.so                   that site in that app
     ///     web:notion.so                           that site in ANY browser (seeds only)
     ///     com.dia.app                             the whole app — today's key
+    ///     editor:prosemirror                      that editor in any app (seeds and promoted verdicts)
+    ///     engine:chromium                         that engine in any app (seeds only)
     ///
     /// A native field has no origin and collapses to the app-prefixed element
     /// rungs plus the bare bundle ID.
@@ -86,7 +104,8 @@ public extension Surface {
     ///
     /// `web:` sits *below* the app rung deliberately — a site's own nature
     /// (a block editor is a block editor everywhere) is more specific than a
-    /// blanket statement about the app hosting it.
+    /// blanket statement about the app hosting it. The editor and engine rungs
+    /// sit past the app for the same reason: an app's own nature is narrower.
     var rungs: [String] {
         var rungs: [String] = []
         // The prefix the element rungs hang off: the site when there is one,
@@ -111,7 +130,29 @@ public extension Surface {
         }
         if let origin { rungs.append(Self.webRung(origin)) }
         if let bundleID { rungs.append(bundleID) }
+        if let editorRung { rungs.append(editorRung) }
+        if let engine { rungs.append(Self.engineRung(engine)) }
         return rungs
+    }
+
+    var editorRung: String? {
+        editor.flatMap { $0.isEmpty ? nil : Self.editorPrefix + $0 }
+    }
+
+    static let editorPrefix = "editor:"
+    static let enginePrefix = "engine:"
+
+    static func engineRung(_ engine: Engine) -> String { enginePrefix + engine.rawValue }
+
+    /// The editor a field's DOM classes name, first match wins; Tiptap renders a ProseMirror view.
+    static let editorClasses: [(className: String, editor: String)] = [
+        ("ql-editor", "quill"),
+        ("ProseMirror", "prosemirror"),
+        ("tiptap", "prosemirror"),
+    ]
+
+    static func editor(classes: [String]) -> String? {
+        editorClasses.first { classes.contains($0.className) }?.editor
     }
 
     /// The rung the **learner** writes at: every field of this role on this
@@ -167,7 +208,8 @@ public extension Surface {
 public extension Surface {
     /// A rung a user is allowed to configure, paired with what it means.
     ///
-    /// The `web:` rung is absent on purpose (seeds only). UI strings are not
+    /// The `web:`, `editor:` and `engine:` rungs are absent on purpose: a claim
+    /// about every app is curation's or two sites' to make. UI strings are not
     /// here either — the app layer names rows; this type names rungs.
     enum Scope: Equatable, Sendable {
         /// This one field, by its identifier.

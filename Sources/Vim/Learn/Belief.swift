@@ -48,6 +48,8 @@ public struct Belief: Codable, Equatable, Sendable {
     public var judgedUnder: OffsetsAnswer?
     /// The verdict holds only under this `BeliefStore.fieldModel`; nil is 0, from before the stamp.
     public var fieldModel: Int?
+    /// The editor library of the field it judged, which a verdict from another site must share to be promoted.
+    public var editor: String?
     public var appVersion: String
     public var engineVersion: String?
     public var provenance: Provenance
@@ -57,13 +59,14 @@ public struct Belief: Codable, Equatable, Sendable {
 
     public init(
         rung: String, question: Question, answer: String, judgedUnder: OffsetsAnswer? = nil, fieldModel: Int? = nil,
-        versions: Versions, provenance: Provenance = Provenance(), tally: Tally? = nil, anchor: Bool? = nil
+        editor: String? = nil, versions: Versions, provenance: Provenance = Provenance(), tally: Tally? = nil, anchor: Bool? = nil
     ) {
         self.rung = rung
         self.question = question
         self.answer = answer
         self.judgedUnder = judgedUnder
         self.fieldModel = fieldModel
+        self.editor = editor
         self.appVersion = versions.app ?? ""
         self.engineVersion = versions.engine
         self.provenance = provenance
@@ -73,9 +76,9 @@ public struct Belief: Codable, Equatable, Sendable {
 
     public var capability: Capability? { question.capability }
 
-    /// False for a verdict from another app version or field model, which judged a field uvim no longer sees.
+    /// False for a verdict from another app version or field model, which judged a field uvim no longer sees; an editor's spans apps.
     func current(app: String) -> Bool {
-        appVersion == app && (fieldModel ?? 0) == BeliefStore.fieldModel
+        (appVersion == app || BeliefStore.isEditorRung(rung)) && (fieldModel ?? 0) == BeliefStore.fieldModel
     }
 
     public var offsetsAnswer: OffsetsAnswer? {
@@ -155,6 +158,17 @@ public struct BeliefStore: Codable, Equatable, Sendable {
     public static let currentSchema = 3
     /// Bump in any change to how uvim models a field's structure: every broken verdict is then tried again once.
     public static let fieldModel = 1
+    /// `Surface.editorPrefix`, which this module cannot import.
+    public static let editorPrefix = "editor:"
+
+    public static func isEditorRung(_ rung: String) -> Bool { rung.hasPrefix(editorPrefix) }
+
+    /// A web learner rung's app and host, `app|host|role:…`; nil for a native field's, which names no website.
+    static func website(ofRoleRung rung: String) -> (app: Substring, host: Substring)? {
+        let parts = rung.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[2].hasPrefix("role:") else { return nil }
+        return (parts[0], parts[1])
+    }
 
     public var schema = BeliefStore.currentSchema
     public var beliefs: [Belief] = []
@@ -247,7 +261,7 @@ public extension BeliefStore {
 
     /// False when that verdict already stood.
     mutating func commit(
-        broken capability: Capability, at rung: String, judgedUnder offsets: OffsetsAnswer,
+        broken capability: Capability, at rung: String, editor: String? = nil, judgedUnder offsets: OffsetsAnswer,
         versions: Versions, provenance: Provenance
     ) -> Bool {
         let app = versions.app ?? ""
@@ -255,7 +269,7 @@ public extension BeliefStore {
         beliefs.removeAll { $0.rung == rung && $0.question != .offsets && !$0.current(app: app) }
         let verdict = Belief(
             rung: rung, question: Question(capability), answer: Belief.broken, judgedUnder: offsets,
-            fieldModel: BeliefStore.fieldModel, versions: versions, provenance: provenance
+            fieldModel: BeliefStore.fieldModel, editor: editor, versions: versions, provenance: provenance
         )
         guard let index = beliefs.firstIndex(where: { $0.rung == rung && $0.question == verdict.question }) else {
             beliefs.append(verdict)
@@ -265,6 +279,36 @@ public extension BeliefStore {
         guard old.answer != verdict.answer || old.judgedUnder != verdict.judgedUnder else { return false }
         beliefs[index] = verdict
         return true
+    }
+
+    /// Records the verdict just committed at `rung` at its editor's rung too, once a verdict from another website in that editor agrees.
+    mutating func promote(
+        broken capability: Capability, from rung: String, editor: String?, judgedUnder offsets: OffsetsAnswer,
+        versions: Versions, provenance: Provenance
+    ) -> String? {
+        guard let editor, !editor.isEmpty, let here = Self.website(ofRoleRung: rung) else { return nil }
+        let question = Question(capability)
+        // One website in two apps is one page's quirk; another app's verdict is taken at whatever version it judged.
+        let agrees = beliefs.contains {
+            guard let there = Self.website(ofRoleRung: $0.rung), there.host != here.host else { return false }
+            return $0.question == question && $0.answer == Belief.broken && $0.editor == editor
+                && ($0.judgedUnder ?? .value) == offsets && ($0.fieldModel ?? 0) == Self.fieldModel
+                && (there.app != here.app || $0.appVersion == (versions.app ?? ""))
+        }
+        guard agrees else { return nil }
+        let target = Self.editorPrefix + editor
+        beliefs.removeAll { $0.rung == target && $0.question != .offsets && !$0.current(app: "") }
+        let verdict = Belief(
+            rung: target, question: question, answer: Belief.broken, judgedUnder: offsets, fieldModel: Self.fieldModel,
+            editor: editor, versions: versions, provenance: provenance
+        )
+        guard let index = beliefs.firstIndex(where: { $0.rung == target && $0.question == question }) else {
+            beliefs.append(verdict)
+            return target
+        }
+        guard beliefs[index].judgedUnder != offsets else { return nil }
+        beliefs[index] = verdict
+        return target
     }
 
     /// False, writing nothing, when it already stood at this engine.
@@ -318,6 +362,7 @@ extension Belief {
         var fields = "q=\(question.rawValue) a=\(answer)"
         if let judgedUnder { fields += " judged=\(judgedUnder.rawValue)" }
         if let fieldModel { fields += " model=\(fieldModel)" }
+        if let editor { fields += " editor=\(editor)" }
         fields += " ver=\(appVersion.isEmpty ? "nil" : appVersion)"
         if let engineVersion { fields += " engine=\(engineVersion)" }
         if let build = provenance.build { fields += " build=\(build.filter { $0 != " " })" }

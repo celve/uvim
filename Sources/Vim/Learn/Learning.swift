@@ -48,6 +48,8 @@ public enum Learning {
         public var skip: Skip?
         /// Its refuted runs in a row, this one included.
         public var strikes = 0
+        /// The editor rung the committed verdict was also recorded at.
+        public var promoted: String?
         public var republish = false
 
         public var committed: Capability? { skip == nil ? refuted?.question.capability : nil }
@@ -60,7 +62,7 @@ public enum Learning {
 
     /// The snapshot's offsets evidence already moved its answer, so `run` holds the command's settles alone.
     public static func learn(
-        store: inout BeliefStore, strikes: inout Strikes, rung: String, versions: Versions, model: ReadModel,
+        store: inout BeliefStore, strikes: inout Strikes, rung: String, editor: String? = nil, versions: Versions, model: ReadModel,
         observed snapshot: Observation, run: [Evidence], overridden: (Capability) -> Bool, provenance: Provenance,
         tally: Tally
     ) -> Lesson {
@@ -99,8 +101,14 @@ public enum Learning {
                 return lesson
             }
             strikes.clear(capability)
-            if store.commit(broken: capability, at: rung, judgedUnder: snapshot.after, versions: versions, provenance: provenance) {
+            if store.commit(
+                broken: capability, at: rung, editor: editor, judgedUnder: snapshot.after, versions: versions, provenance: provenance
+            ) {
                 lesson.republish = true
+                lesson.promoted = store.promote(
+                    broken: capability, from: rung, editor: editor, judgedUnder: snapshot.after, versions: versions,
+                    provenance: provenance
+                )
             } else {
                 lesson.skip = .alreadyCommitted
             }
@@ -126,7 +134,9 @@ extension Learning.Lesson {
                 let limit = refuted.question.capability.map { Strikes.limit(for: $0, why: refuted.why) } ?? Strikes.limit
                 lines.append("strike \(strikes)/\(limit) \(fields) rung=\(rung)")
             case let skip?: lines.append("skip=\(skip.rawValue) \(fields)")
-            case nil: lines.append("commit \(fields) rung=\(rung) ver=\(versions.app ?? "nil")")
+            case nil:
+                lines.append("commit \(fields) rung=\(rung) ver=\(versions.app ?? "nil")")
+                if let promoted { lines.append("promote \(fields) rung=\(promoted)") }
             }
         }
         if republish {

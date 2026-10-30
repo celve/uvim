@@ -1020,10 +1020,12 @@ stored answer that touched the field, with its provenance and whether it is `in-
 the menu, **Capabilities** opens on what a belief switched off in the field, a demotion or **Read
 caret** while it is `untrusted`, with the day and until when it holds, and on verdicts reopened in
 this field, which read **Trying again here** and are not counted in the badge. **Try Again**, or
-**Forget** for a reopened verdict, removes those beliefs and makes no choice. A learned `value` or
+**Forget** for a reopened verdict, removes those beliefs and makes no choice; a verdict two websites
+taught about one editor reads **Learned … in Quill editors**, and Try Again forgets it in every
+app with that editor. A learned `value` or
 `textContent` only shows under **Read caret**: forgetting it would restart the field at an answer
-its reads already moved it off. Choosing On or Off for a row retires what fields like this one
-learned about it.
+its reads already moved it off. Choosing On or Off for a row retires what fields like this one,
+and their editor, learned about it.
 
 </details>
 
@@ -1063,7 +1065,11 @@ File** in the menu opens it:
 - `overrides` maps a rung, then a capability, to `on` or `off`, as the menu's On and Off write them.
   A rung is `<bundle ID>` for an app, `<bundle ID>|<site>` for a site in it, `…|role:<role>` for
   fields like one (natively `<bundle ID>|role:<role>`) and `…|id:<identifier>` for one field; the
-  bind line's `rung=` prints a field's role rung.
+  bind line's `rung=` prints a field's role rung. Past the app come `editor:<editor>`, every field
+  of one editor library in any app (`quill` or `prosemirror`, read from the field's DOM classes and
+  printed as the bind line's `editor=`), and `engine:<engine>`, every field of one engine
+  (`chromium`, `webkit`, or `appkit` for any field outside web content). The menu writes neither,
+  but one you write applies wherever the field matches, and a narrower choice beats it.
 - The capabilities, by menu row: `readText`, `readLength`, `readCaret`, `readSelectedText` (the
   Read rows), `writeSelection` (Set selection), `insertText` (Replace text), `drawCursor`,
   `wholeDocument`, `fieldIsSession` (New field starts a session), `lineStartKey`, `lineEndKey`,
@@ -1077,7 +1083,10 @@ File** in the menu opens it:
   `judgedUnder` (`value` when absent). An offsets answer holds only at `engineVersion`, an Electron
   app's framework version, else at `appVersion`, and not while `anchor` is true. `provenance`
   (uvim's build, when, and by which command) and `tally` (the evidence counted) are for reading; an
-  entry needs `provenance`, even as `{}`.
+  entry needs `provenance`, even as `{}`. `editor` names the editor library of the field a verdict
+  judged: once a field on another website (another host, not the same one in another app) in the
+  same editor agrees on the same verdict, uvim records it at `editor:<editor>` too, where it holds
+  in every app regardless of `appVersion`, until the `fieldModel` changes or you choose Try Again.
 
 uvim rereads the file whenever it binds a field, so an edit applies when you next focus one. An
 override you write lasts, as one chosen in the menu does, and beats a belief. A belief you write is
