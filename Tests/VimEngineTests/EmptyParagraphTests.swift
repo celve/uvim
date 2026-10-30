@@ -10,9 +10,7 @@ let blankMarkers = "Heading oneFirst paragraph with some words.\nSecond paragrap
 let blankAligned = ParagraphBreaks(value: blankValue, fieldText: blankMarkers)!
 
 var blankNeeds: [FieldSnapshot.Need] = []
-func blankBuild(
-    memo known: EmptyParagraphs.Memo?, unreachable knownUnreachable: UnreachableLines.Memo? = nil
-) -> (snapshot: FieldSnapshot, memo: EmptyParagraphs.Memo?, unreachable: UnreachableLines.Memo?) {
+func blankBuild(memo known: FieldDocument.Memo?) -> (snapshot: FieldSnapshot, memo: FieldDocument.Memo?) {
     var reads = FieldSnapshot.Reads(
         field: FieldReads(text: blankValue, plain: 43..<43, markers: MarkerReads(
             breaks: blankAligned, value: blankAligned.valueRange(43..<43) { _ in .start(skipping: 0) }
@@ -20,20 +18,17 @@ func blankBuild(
         length: blankValue.utf16.count, webContent: true, blocks: blankParagraphs.count, marked: 43..<43, markerText: blankMarkers
     )
     var memo = known
-    var unreachable = knownUnreachable
     return FieldSnapshot.Step.run(taking: { need in
         blankNeeds.append(need)
         switch need {
         case .side(let end): reads.sides.updateValue(.start(skipping: 0), forKey: end)
         case .emptyParagraph: reads.inEmptyParagraph = true
-        case .emptyParagraphs(let value, let markers, _):
-            memo = EmptyParagraphs.Memo(value: value, markers: markers, blocks: reads.blocks, found: [43])
-        case .unreachable(let value, let markers, _, _):
-            unreachable = UnreachableLines.Memo(value: value, markers: markers, blocks: reads.blocks, found: nil)
+        case .document(let request, _):
+            let document = FieldDocument.build(request, emptyParagraphs: { _ in ([43], false) }, runs: { _ in (nil, false) })
+            memo = FieldDocument.Memo(request: request, blocks: reads.blocks, document: document)
         }
     }) {
-        FieldSnapshot.build(reads, capabilities: readProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo,
-                            unreachable: unreachable)
+        FieldSnapshot.build(reads, capabilities: readProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo)
     }
 }
 
@@ -85,14 +80,17 @@ func testEmptyParagraphs() {
 
     let blankBuilt = blankBuild(memo: nil)
     precondition(blankNeeds == [
-        .emptyParagraph, .emptyParagraphs(value: blankValue, markers: blankMarkers, why: .first), .side(.lower), .side(.upper),
-        .unreachable(value: blankValue, markers: blankMarkers,
-                     candidates: UnreachableLines.candidates(text: blankModel.text, breaks: blankModel.breaks), why: .first),
+        .emptyParagraph,
+        .document(FieldDocument.Request(value: blankValue, markers: blankMarkers, aligned: blankAligned, caret: 43, proseMirror: false,
+                                        folds: readProfile.has(.readCaret)), why: .first),
+        .side(.lower), .side(.upper),
     ])
+    precondition(blankBuilt.memo?.document.candidates == UnreachableLines.candidates(text: blankModel.text, breaks: blankModel.breaks),
+                 "the walk takes its candidates from the text with the blank line put back")
     precondition(blankBuilt.snapshot.text == blankModel.text && blankBuilt.snapshot.selection == 45..<45 && blankBuilt.snapshot.valueGap == 1)
     precondition(blankBuilt.snapshot.holdsEmptyParagraphs && !blankBuilt.snapshot.caretInEmptyParagraph, "its own line holds the caret")
     blankNeeds = []
-    let blankRebuilt = blankBuild(memo: blankBuilt.memo, unreachable: blankBuilt.unreachable)
+    let blankRebuilt = blankBuild(memo: blankBuilt.memo)
     precondition(blankRebuilt.snapshot == blankBuilt.snapshot && blankRebuilt.memo == blankBuilt.memo)
     precondition(blankNeeds == [.emptyParagraph, .side(.lower), .side(.upper)], "a memo that holds spares discovery")
 

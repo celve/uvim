@@ -1,26 +1,22 @@
 /// Confirms in a Chromium field's tree which lines start with list markers, and how long, and which are chips, with their
 /// paragraphs (LIN-1652).
 public struct UnreachableScan<Node> {
-    /// Nil when a read fails for any reason but the attribute's absence. One read.
-    private let block: (Node) -> EmptyBlockScan<Node>.Block?
-    /// A node's plain offset from the field's start, at its start or its end; nil on a failed read. Two reads.
-    private let offset: (Node, _ end: Bool) -> Int?
-    private let budget: Int
-    public private(set) var reads = 0
+    private let tree: TreeReads<Node>
+    public var reads: Int { tree.reads }
     /// The scan failed by running out of reads, not on a read.
-    public private(set) var exhausted = false
+    public var exhausted: Bool { tree.exhausted }
 
-    /// Reads by tree path, so candidates in one list or paragraph share them.
-    private var blocks: [[Int]: EmptyBlockScan<Node>.Block] = [:]
-    private var starts: [[Int]: Int] = [:]
-    private var ends: [[Int]: Int] = [:]
-
+    /// `block` is nil when a read fails for any reason but the attribute's absence, one read; `offset` a node's plain offset
+    /// from the field's start, at its start or its end, nil on a failed read, two reads.
     public init(
         budget: Int, block: @escaping (Node) -> EmptyBlockScan<Node>.Block?, offset: @escaping (Node, _ end: Bool) -> Int?
     ) {
-        self.budget = budget
-        self.block = block
-        self.offset = offset
+        tree = TreeReads(budget: budget, block: block, offset: offset)
+    }
+
+    /// Reading through a walk's `tree`, where the empty paragraphs' reads are already kept (LIN-2388).
+    init(tree: TreeReads<Node>) {
+        self.tree = tree
     }
 
     /// Nil on any failed read or past the budget.
@@ -213,30 +209,15 @@ public struct UnreachableScan<Node> {
         return .some(atStart ? .start : atEnd ? .end : .middle)
     }
 
-    mutating func start(of node: Node, at path: [Int]) -> Int? {
-        if let known = starts[path] { return known }
-        guard spend(2), let start = offset(node, false) else { return nil }
-        starts[path] = start
-        return start
+    func start(of node: Node, at path: [Int]) -> Int? {
+        tree.start(of: node, at: path)
     }
 
-    mutating func end(of node: Node, at path: [Int]) -> Int? {
-        if let known = ends[path] { return known }
-        guard spend(2), let end = offset(node, true) else { return nil }
-        ends[path] = end
-        return end
+    func end(of node: Node, at path: [Int]) -> Int? {
+        tree.end(of: node, at: path)
     }
 
-    mutating func read(_ node: Node, at path: [Int]) -> EmptyBlockScan<Node>.Block? {
-        if let known = blocks[path] { return known }
-        guard spend(1), let read = block(node) else { return nil }
-        blocks[path] = read
-        return read
-    }
-
-    private mutating func spend(_ count: Int) -> Bool {
-        reads += count
-        exhausted = reads > budget
-        return !exhausted
+    func read(_ node: Node, at path: [Int]) -> EmptyBlockScan<Node>.Block? {
+        tree.read(node, at: path)
     }
 }

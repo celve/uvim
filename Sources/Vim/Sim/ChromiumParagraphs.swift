@@ -329,6 +329,30 @@ struct ChromiumParagraphs {
         return marker > 0 && offset >= field(last + 1) - marker && (caret <= last || next.inline) ? last + 1 : last
     }
 
+    /// A node of the tree Chrome 153 shows plain paragraphs as, in plain offsets.
+    final class Node {
+        let read: EmptyBlockScan<Node>.Block
+        let start: Int
+        let end: Int
+
+        init(_ role: String, _ subrole: String? = nil, _ start: Int, _ end: Int, _ children: [Node] = []) {
+            read = EmptyBlockScan.Block(role: role, subrole: subrole, children: children)
+            self.start = start
+            self.end = end
+        }
+    }
+
+    /// A group per paragraph, holding its text, or empty with its `<br>`.
+    var tree: [Node] {
+        var at = 0
+        return paragraphs.map { paragraph in
+            let length = paragraph.utf16.count
+            defer { at += max(length, 1) }
+            guard length > 0 else { return Node("AXGroup", "AXEmptyGroup", at, at + 1) }
+            return Node("AXGroup", nil, at, at + length, [Node("AXStaticText", nil, at, at + length)])
+        }
+    }
+
     /// Offsets of the chips, which keys cross in one step.
     var atoms: Set<Int> {
         guard lines != nil else { return [] }

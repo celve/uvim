@@ -209,7 +209,7 @@ func scanned(_ blocks: [FakeNode], _ plain: String, budget: Int = EmptyParagraph
 /// `path/role/start/end` per node, roles abbreviated, as softlash/LIN-1652 scripts/list-probe prints a tree; B is one of
 /// Linear's `block-node` groups, Q one that is a quote, N a `node-controls` group and R a rule; roots carry Linear's classes,
 /// which `linear` false leaves out. X is a table, Y its `AXTable`, O a row, U a column and Z a collapsible section
-/// (LIN-1780); a `g` after the code marks a node the page generates (LIN-2369), and a fifth field is a node's blockquote level,
+/// (LIN-1780), W a cell; a `g` after the code marks a node the page generates (LIN-2369), and a fifth field is a node's blockquote level,
 /// where it sits inside a quote.
 func fakeTree(_ spec: String, linear: Bool = true) -> [FakeNode] {
     let roles: [Character: (String, String?)] = [
@@ -219,7 +219,7 @@ func fakeTree(_ spec: String, linear: Bool = true) -> [FakeNode] {
         "D": ("AXGroup", "AXCodeStyleGroup"), "S": ("AXGroup", "AXStrongStyleGroup"), "F": ("AXGroup", "AXEmphasisStyleGroup"),
         "B": ("AXGroup", nil), "Q": ("AXGroup", nil), "N": ("AXGroup", nil), "R": ("AXSplitter", nil),
         "X": ("AXGroup", nil), "Y": ("AXTable", nil), "O": ("AXRow", nil), "U": ("AXColumn", nil),
-        "Z": ("AXGroup", "AXLandmarkRegion"), "J": ("AXButton", nil),
+        "Z": ("AXGroup", "AXLandmarkRegion"), "J": ("AXButton", nil), "W": ("AXCell", nil),
     ]
     var nodes: [[Int]: (code: Character, generated: Bool, start: Int, end: Int, level: Int?)] = [:]
     for token in spec.split(whereSeparator: { $0 == " " || $0 == "\n" }) {

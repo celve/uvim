@@ -48,11 +48,8 @@ public final class Controller {
     /// Marker sampling for the bound field; a new element starts over.
     private var sampling = OffsetsSampling()
 
-    /// The bound field's empty paragraphs, found again when its text changes.
-    private var emptyParagraphs: EmptyParagraphs.Memo?
-
-    /// Its list markers and chips, found again the same way.
-    private var unreachable: UnreachableLines.Memo?
+    /// The bound field's document walk, walked again or replayed when its text changes.
+    private var document: FieldDocument.Memo?
 
     /// Per-rung evidence this process, stored with the read model.
     private var tallies: [String: Tally] = [:]
@@ -325,8 +322,7 @@ public final class Controller {
         if transition != .sameElement {
             loop.pendingUndo = nil
             sampling = OffsetsSampling()
-            emptyParagraphs = nil
-            unreachable = nil
+            document = nil
         }
         binding = new
         Diag.bind(tracker.epoch, transition, new)
@@ -543,17 +539,12 @@ extension Controller {
                 chromium: binding.isChromium,
                 model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
                 sampling: controller.sampling,
-                known: controller.emptyParagraphs,
-                knownUnreachable: controller.unreachable
+                known: controller.document
             )
-            if reading.emptyParagraphs != controller.emptyParagraphs, let memo = reading.emptyParagraphs {
-                Diag.emptyParagraphs(controller.tracker.epoch, seq, memo)
+            if reading.document != controller.document, let memo = reading.document {
+                Diag.document(controller.tracker.epoch, seq, memo)
             }
-            controller.emptyParagraphs = reading.emptyParagraphs
-            if reading.unreachable != controller.unreachable, let memo = reading.unreachable {
-                Diag.unreachable(controller.tracker.epoch, seq, memo)
-            }
-            controller.unreachable = reading.unreachable
+            controller.document = reading.document
             if reading.sampled {
                 controller.sampling.sampled(
                     markers: reading.markers, evidence: reading.observed.evidence, text: reading.reads.text,
@@ -716,7 +707,7 @@ extension Controller {
             Snapshotter.snapshot(
                 of: binding.element, capabilities: binding.capabilities, anchor: nil, cursor: controller.state.field.cursor,
                 chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
-                sampling: controller.sampling, known: controller.emptyParagraphs, knownUnreachable: controller.unreachable
+                sampling: controller.sampling, known: controller.document
             ).snapshot
         }
 

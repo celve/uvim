@@ -1,37 +1,25 @@
 import ApplicationServices
 import Core
 
-/// `EmptyBlockScan` over a Chromium field's accessibility tree, for `EmptyParagraphs.restore` (LIN-1612).
-enum EmptyParagraphDiscovery {
-    /// Plain offsets in `markers` of the `<br>`s of line-starting empty blocks; nil on a failed read or past `budget` reads.
-    static func found(
-        in element: AXUIElement, markers: String, budget: Int
-    ) -> (found: [Int]?, exhausted: Bool, reads: Discovery.Reads) {
-        let plain = Array(markers.utf16).filter { $0 != 0xFFFC }
-        guard plain.contains(10) else { return ([], false, Discovery.Reads(budget: budget - 2)) }
-        guard let tree = FieldTree(element, markers: markers) else { return (nil, false, Discovery.Reads(budget: budget - 2)) }
-        let recorder = Discovery.Recorder(budget: budget - 2, block: tree.block, offset: tree.offset)
-        var scan = EmptyBlockScan(budget: budget - 2, block: recorder.block, offset: recorder.offset)
-        return (scan.run(blocks: recorder.roots(tree.blocks), plain: plain), scan.exhausted, recorder.reads)
+/// `FieldDocument.walk` over a Chromium field's accessibility tree, both its parts through one `TreeReads` (LIN-2388).
+enum FieldDocumentReads {
+    /// The tree is read only where a part needs it; a failed read fails the parts that needed it.
+    static func walk(in element: AXUIElement, _ request: FieldDocument.Request) -> (document: FieldDocument, reads: Discovery.Reads) {
+        let budget = FieldDocument.readBudget - 2
+        var field: FieldTree?
+        let recorder = Discovery.Recorder<AXUIElement>(
+            budget: budget, block: { field?.block($0) }, offset: { field?.offset($0, $1) }
+        )
+        let tree = TreeReads(budget: budget, block: recorder.block, offset: recorder.offset)
+        let document = FieldDocument.walk(request, roots: {
+            field = FieldTree(element, markers: request.markers)
+            return field.map { recorder.roots($0.blocks) }
+        }, tree: tree)
+        return (document, recorder.reads)
     }
 }
 
-/// `UnreachableScan` over a Chromium field's accessibility tree, for `UnreachableLines.fold` (LIN-1652).
-enum UnreachableDiscovery {
-    /// Nil on a failed read or past `budget` reads.
-    static func found(
-        in element: AXUIElement, markers: String, candidates: UnreachableLines.Candidates, budget: Int
-    ) -> (found: UnreachableLines.Found?, exhausted: Bool, reads: Discovery.Reads) {
-        let reads = Discovery.Reads(budget: budget - 2)
-        guard !candidates.isEmpty else { return (UnreachableLines.Found(markers: [], chips: []), false, reads) }
-        guard let tree = FieldTree(element, markers: markers) else { return (nil, false, reads) }
-        let recorder = Discovery.Recorder(budget: budget - 2, block: tree.block, offset: tree.offset)
-        var scan = UnreachableScan(budget: budget - 2, block: recorder.block, offset: recorder.offset)
-        return (scan.run(blocks: recorder.roots(tree.blocks), candidates: candidates), scan.exhausted, recorder.reads)
-    }
-}
-
-/// The reads both discoveries descend a Chromium field's tree by.
+/// The reads the document walk descends a Chromium field's tree by.
 struct FieldTree {
     let blocks: [AXUIElement]
     let block: (AXUIElement) -> EmptyBlockScan<AXUIElement>.Block?

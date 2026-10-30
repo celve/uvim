@@ -124,30 +124,25 @@ let dia7Spec = """
 let dia7Tree = fakeTree(dia7Spec)
 
 var dia1Needs: [FieldSnapshot.Need] = []
-func dia1Build(caret field: Int, side: ParagraphBreaks.Side = .start(skipping: 0), unreachable known: UnreachableLines.Memo?)
-    -> (snapshot: FieldSnapshot, memo: EmptyParagraphs.Memo?, unreachable: UnreachableLines.Memo?) {
+func dia1Build(caret field: Int, side: ParagraphBreaks.Side = .start(skipping: 0), memo known: FieldDocument.Memo?)
+    -> (snapshot: FieldSnapshot, memo: FieldDocument.Memo?) {
     var reads = FieldSnapshot.Reads(
         field: FieldReads(text: dia1Value, plain: field..<field, markers: MarkerReads(
             breaks: dia1Aligned, value: dia1Aligned.valueRange(field..<field) { _ in side }
         )),
         length: dia1Value.utf16.count, webContent: true, blocks: dia1Tree.count, marked: field..<field, markerText: dia1Raw
     )
-    var memo: EmptyParagraphs.Memo?
-    var unreachable = known
+    var memo = known
     return FieldSnapshot.Step.run(taking: { need in
         dia1Needs.append(need)
         switch need {
         case .side(let end): reads.sides.updateValue(side, forKey: end)
         case .emptyParagraph: reads.inEmptyParagraph = false
-        case .emptyParagraphs(let value, let raw, _):
-            memo = EmptyParagraphs.Memo(value: value, markers: raw, blocks: reads.blocks, found: scanned(dia1Tree, dia1Plain))
-        case .unreachable(let value, let raw, let candidates, _):
-            unreachable = UnreachableLines.Memo(value: value, markers: raw, blocks: reads.blocks,
-                                                found: unreachableScanned(dia1Tree, candidates))
+        case .document(let request, _):
+            memo = documentWalk(request, dia1Tree, roots: nil)
         }
     }) {
-        FieldSnapshot.build(reads, capabilities: keyProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo,
-                            unreachable: unreachable)
+        FieldSnapshot.build(reads, capabilities: keyProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo)
     }
 }
 
@@ -391,19 +386,22 @@ func testUnreachableLines() {
         FakeNode("AXGroup", nil, 1, 2, [text(1, 2)]), separated,
     ])])], "a\u{2022}Chip one\n") == [], "the image after a chip is no empty paragraph")
 
-    let dia1Built = dia1Build(caret: 68, unreachable: nil)
-    precondition(dia1Needs.contains(.unreachable(value: dia1Value, markers: dia1Raw, candidates: dia1Candidates, why: .first)))
+    let dia1Built = dia1Build(caret: 68, memo: nil)
+    precondition(dia1Needs.contains { if case .document(let request, .first) = $0 { request.value == dia1Value } else { false } }
+                 && dia1Built.memo?.document.candidates == dia1Candidates)
     precondition(dia1Built.snapshot.text == dia1Model.text && dia1Built.snapshot.breaks == dia1Model.breaks)
     precondition(dia1Built.snapshot.selection == 66..<66 && dia1Built.snapshot.foldedLength == dia1Model.folded
                  && dia1Built.snapshot.holdsChips, "the caret past 2. is at Numbered two's start")
     dia1Needs = []
-    let dia1Rebuilt = dia1Build(caret: 68, unreachable: dia1Built.unreachable)
-    precondition(dia1Rebuilt.snapshot == dia1Built.snapshot && !dia1Needs.contains { if case .unreachable = $0 { true } else { false } },
+    let dia1Rebuilt = dia1Build(caret: 68, memo: dia1Built.memo)
+    precondition(dia1Rebuilt.snapshot == dia1Built.snapshot && !dia1Needs.contains { if case .document = $0 { true } else { false } },
                  "a memo that holds spares discovery")
-    precondition(dia1Build(caret: 66, side: .end, unreachable: dia1Built.unreachable).snapshot.selection == 65..<65,
+    precondition(dia1Build(caret: 66, side: .end, memo: dia1Built.memo).snapshot.selection == 65..<65,
                  "a caret before a marker is at the line above's end")
-    let dia1Failed = dia1Build(caret: 68, unreachable: UnreachableLines.Memo(
-        value: dia1Value, markers: dia1Raw, blocks: dia1Tree.count, found: nil
+    let dia1Walked = dia1Built.memo!.document
+    let dia1Failed = dia1Build(caret: 68, memo: FieldDocument.Memo(
+        request: dia1Built.memo!.request, blocks: dia1Tree.count,
+        document: FieldDocument(emptyParagraphs: dia1Walked.emptyParagraphs, candidates: dia1Walked.candidates, found: nil)
     )).snapshot
     precondition(dia1Failed.text == dia1Unfound.text, "failed discovery keeps the markers' lines")
 

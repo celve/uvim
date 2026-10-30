@@ -242,9 +242,8 @@ public struct Sim {
     /// The last snapshot's, to convert the drawn cursor at unbind.
     private var fieldBreaks: ParagraphBreaks?
 
-    /// The last snapshot's discoveries, found again when the text changes.
-    private var foundEmptyParagraphs: EmptyParagraphs.Memo?
-    private var foundUnreachable: UnreachableLines.Memo?
+    /// The last snapshot's document walk, walked again or replayed when the text changes.
+    private var foundDocument: FieldDocument.Memo?
 
     public init(
         text: String,
@@ -349,8 +348,7 @@ public struct Sim {
             fieldBreaks = nil
         }
         if transition != .sameElement {
-            foundEmptyParagraphs = nil
-            foundUnreachable = nil
+            foundDocument = nil
         }
         if let text {
             self.text = text
@@ -428,15 +426,13 @@ extension Sim: CommandHost {
     }
 
     mutating func snapshot(anchor: Int?) -> CommandLoop<Sim>.Reading {
-        var memo = foundEmptyParagraphs
-        var unreachable = foundUnreachable
-        func reading() -> (built: (snapshot: FieldSnapshot, memo: EmptyParagraphs.Memo?, unreachable: UnreachableLines.Memo?),
-                           observed: Learning.Observation, value: String?) {
+        var memo = foundDocument
+        func reading() -> (built: (snapshot: FieldSnapshot, memo: FieldDocument.Memo?), observed: Learning.Observation,
+                           value: String?) {
             var (reads, observed) = read()
-            let built = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
+            let built = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo) }) {
                 FieldSnapshot.build(
-                    reads, capabilities: profile, answer: observed.after, anchor: anchor, cursor: state.field.cursor, memo: memo,
-                    unreachable: unreachable
+                    reads, capabilities: profile, answer: observed.after, anchor: anchor, cursor: state.field.cursor, memo: memo
                 )
             }
             return (built, observed, shownValue)
@@ -450,8 +446,7 @@ extension Sim: CommandHost {
            isCodeEdge(caret, start: false), TextModel(text).lineBreak(of: caret) == caret {
             (built, observed, value) = reading()
         }
-        foundEmptyParagraphs = built.memo
-        foundUnreachable = built.unreachable
+        foundDocument = built.memo
         fieldBreaks = built.snapshot.breaks
         return CommandLoop.Reading(snapshot: built.snapshot, observed: observed, value: value, generated: showsPlaceholder)
     }
@@ -539,13 +534,9 @@ extension Sim: CommandHost {
             unansweredSelectionsAside -= 1
             reads.field.plain = nil
         }
-        var memo = foundEmptyParagraphs
-        var unreachable = foundUnreachable
-        return FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
-            FieldSnapshot.build(
-                reads, capabilities: profile, answer: observed.after, anchor: nil, cursor: state.field.cursor, memo: memo,
-                unreachable: unreachable
-            )
+        var memo = foundDocument
+        return FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo) }) {
+            FieldSnapshot.build(reads, capabilities: profile, answer: observed.after, anchor: nil, cursor: state.field.cursor, memo: memo)
         }.snapshot
     }
 
