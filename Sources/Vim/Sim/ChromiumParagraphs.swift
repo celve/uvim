@@ -86,8 +86,8 @@ struct ChromiumParagraphs {
     /// `AXValue`, the raw marker text and each empty paragraph's `<br>` offset.
     let shown: (value: String, markers: String, found: [Int])
     let plainMarkers: String
-    /// Plain starts of the list markers, and the chips.
-    let listMarkers: [Int]
+    /// Plain ranges of the list markers, and the chips.
+    let listMarkers: [Range<Int>]
     let chips: [UnreachableLines.Chip]
     /// Plain starts of blocks a stop comes before, the Sim offsets of their first lines, and code blocks' labels.
     let joins: [Int]
@@ -130,7 +130,7 @@ struct ChromiumParagraphs {
         var value = ""
         var raw = ""
         var found: [Int] = []
-        var markers: [Int] = []
+        var markers: [Range<Int>] = []
         var chips: [UnreachableLines.Chip] = []
         var joins: [Int] = []
         var gaps: Set<Int> = []
@@ -176,7 +176,7 @@ struct ChromiumParagraphs {
                 table = nil
             }
             if let marker = line.marker {
-                if line.controls { controls.append(plain..<(plain + marker.utf16.count)) } else { markers.append(plain) }
+                if line.controls { controls.append(plain..<(plain + marker.utf16.count)) } else { markers.append(plain..<(plain + marker.utf16.count)) }
                 if !line.inline {
                     block(Array(marker.utf16))
                     raw += marker

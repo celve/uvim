@@ -46,13 +46,17 @@ struct FieldTree {
         self.blocks = blocks
         block = { node in
             let reads = AX.attributes(
-                [kAXRoleAttribute, kAXSubroleAttribute, kAXChildrenAttribute, "AXDOMClassList", "AXBlockQuoteLevel"], of: node
+                [kAXRoleAttribute, kAXSubroleAttribute, kAXChildrenAttribute, "AXDOMClassList", "AXBlockQuoteLevel",
+                 AX.chromiumNodeIDAttribute],
+                of: node
             )
             guard (0..<3).allSatisfy({ Self.absentOrRead(reads, $0) }) else { return nil }
-            // The last two only add Linear's stops and controls, so one that fails reads as none.
+            // The last three only add Linear's stops and controls and the page's markers, so one that fails reads as none;
+            // Chromium answers its node id as a string.
             return EmptyBlockScan.Block(
                 role: reads.string(0), subrole: reads.string(1), children: reads.elements(2) ?? [],
-                classes: reads.strings(3) ?? [], quoteLevel: reads.int(4) ?? 0
+                classes: reads.strings(3) ?? [], quoteLevel: reads.int(4) ?? 0,
+                generated: reads.string(5).flatMap { Int($0) }.map { $0 < 0 } ?? false
             )
         }
         offset = { node, end in

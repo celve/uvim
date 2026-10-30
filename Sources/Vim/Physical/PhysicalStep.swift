@@ -255,7 +255,7 @@ public struct Expectation: Equatable, Sendable {
         }
     }
 
-    /// The longest field text a misfit lies across: a list marker and its space, as `UnreachableLines.prefixLength` reaches.
+    /// The longest field text a misfit lies across: a list marker and its space, as Chromium draws `10. `.
     public static let misfitReach = 6
 
     /// Demotes `capability` for `unmoved`, a `leavesCaret` key's selection, a `selects` key's caret, or `offTarget` landings.

@@ -176,6 +176,7 @@ public enum Discovery {
             let children: Int
             let classes: [String]
             let quoteLevel: Int
+            let generated: Bool
         }
 
         struct Key: Hashable, Sendable {
@@ -234,12 +235,12 @@ public enum Discovery {
             guard let read = readBlock(pathed.node) else { return nil }
             reads.shapes[pathed.path] = Reads.Shape(
                 role: read.role, subrole: read.subrole, children: read.children.count, classes: read.classes,
-                quoteLevel: read.quoteLevel
+                quoteLevel: read.quoteLevel, generated: read.generated
             )
             return EmptyBlockScan.Block(
                 role: read.role, subrole: read.subrole,
                 children: read.children.enumerated().map { Pathed(node: $1, path: pathed.path + [$0]) }, classes: read.classes,
-                quoteLevel: read.quoteLevel
+                quoteLevel: read.quoteLevel, generated: read.generated
             )
         }
 
@@ -271,7 +272,7 @@ public enum Discovery {
             }
             return EmptyBlockScan.Block(
                 role: shape.role, subrole: shape.subrole, children: (0..<shape.children).map { path + [$0] },
-                classes: shape.classes, quoteLevel: shape.quoteLevel
+                classes: shape.classes, quoteLevel: shape.quoteLevel, generated: shape.generated
             )
         }
 
