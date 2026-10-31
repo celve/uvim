@@ -49,7 +49,7 @@ let dia1Lines = [
     "Double nested bullet", "Bullet with a mention \u{2060}", "Bullet two", "Heading two", "To-do open", "To-do done", "1.",
     "Paragraph after a literal one-dot line.", "\u{2022}", "Ninth item", "Tenth item", "Eleventh item", "Last paragraph.",
 ]
-let dia1Model = folded(dia1Value, dia1Raw, dia1Tree)
+let dia1Model = folded(dia1Value, dia1Raw, dia1Tree, proseMirror: false)
 
 // Chips inside, ending, starting and alone in paragraphs and items.
 let dia6Value = [

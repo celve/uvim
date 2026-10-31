@@ -61,11 +61,18 @@ extension PhysicalPlanner {
             let count = model.graphemes(in: min(from, to)..<max(from, to))
             return presses + run(to > from ? .right : .left, count: count, selecting: selecting, normalizing: context.normalizes(to))
         }
+        if let walk = tableWalk(from: from, to: toLine, model: model, context: context) {
+            presses += counted(walk)
+            if context.normalizes(toLine) { presses += outside }
+            let column = model.graphemes(in: toLine..<to)
+            return column > 0 ? presses + run(.right, count: column, selecting: selecting, normalizing: false) : presses
+        }
         let lines = model.newlineCount(in: min(fromLine, toLine)..<max(fromLine, toLine))
-        // ↓ or ↑ across a line that starts after a block or rule Linear stops beside stops there first.
+        // ↓ or ↑ across a line that starts after a block or rule a stop is beside stops there first.
         let way: KeyModel.Way = toLine > fromLine ? .down : .up
+        let navigation = context.navigation
         let stops = context.stops.filter { min(fromLine, toLine) < $0.key && $0.key <= max(fromLine, toLine) }
-            .values.reduce(0) { $0 + $1.filter { Linear.visits($0, way) }.count }
+            .values.reduce(0) { $0 + $1.filter { navigation.visits($0, way) }.count }
         presses.append(.press(toLine > fromLine ? .down : .up, count: lines + stops))
         presses.append(.press(.lineStart, count: 1))
         if context.normalizes(toLine) { presses += outside }
@@ -74,6 +81,29 @@ extension PhysicalPlanner {
             presses += run(.right, count: column, selecting: selecting, normalizing: false)
         }
         return presses
+    }
+
+    /// ↓ and ↑ go by rows in a table, so lane B crosses one line by line as `j` and `k` do, ⌘→ and ⌘← for ⌃E and ⌃A, from
+    /// `from` to the start of the line `toLine`; nil where no table line is crossed or the key model cannot follow the walk.
+    private static func tableWalk(from: Int, to toLine: Int, model: TextModel, context: Context) -> [Chord]? {
+        let fromLine = model.lineStart(of: from)
+        let low = min(fromLine, toLine), high = max(fromLine, toLine)
+        guard context.cells.contains(where: { low <= $0 && $0 <= high }) else { return nil }
+        let lines = model.newlineCount(in: low..<high)
+        let navigation = context.navigation
+        let noKeys = CapabilityProfile(available: [])
+        let chords: [Chord] = toLine > fromLine
+            ? [.paragraphEnd] + navigation.hops(
+                from: fromLine, count: lines, model: model, stops: context.stops, cells: context.cells, profile: noKeys
+            ).enumerated().flatMap { ($0.offset > 0 ? [Chord.paragraphEnd] : []) + $0.element }
+            : [.paragraphStart] + navigation.upward(
+                from: fromLine, count: lines, model: model, stops: context.stops, cells: context.cells,
+                lastRows: context.lastRows, profile: noKeys
+            ).chords
+        let walk = chords.map { $0 == .paragraphEnd ? Chord.lineEnd : $0 == .paragraphStart ? .lineStart : $0 }
+        var keys = context.keys(model.text, at: from)
+        guard walk.allSatisfy({ keys.press($0) }), keys.focus == toLine, !keys.inGap else { return nil }
+        return walk
     }
 
     /// `arrows` as presses; a run inside one grapheme presses nothing.

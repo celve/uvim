@@ -99,10 +99,12 @@ public enum UnreachableLines {
         public let tables: [Table]
         /// Tree paths of the quotes and open sections whose children the stops were judged among, each after its parent's.
         public let containers: [[Int]]
+        /// The editor facts the stops were judged under.
+        public let editor: EditorFacts
 
         public init(
             markers: [Range<Int>], chips: [Chip], carets: [Caret] = [], joins: [Int] = [], controls: [Range<Int>] = [],
-            stops: [Stop] = [], tables: [Table] = [], containers: [[Int]] = []
+            stops: [Stop] = [], tables: [Table] = [], containers: [[Int]] = [], editor: EditorFacts = []
         ) {
             self.markers = markers
             self.chips = chips
@@ -112,6 +114,7 @@ public enum UnreachableLines {
             self.stops = stops
             self.tables = tables
             self.containers = containers
+            self.editor = editor
         }
     }
 
@@ -336,7 +339,8 @@ public enum UnreachableLines {
             }
         }
         return Model(
-            text: String(decoding: kept, as: UTF16.self), breaks: ParagraphBreaks(offsets: offsets, hidden: hidden),
+            text: String(decoding: kept, as: UTF16.self),
+            breaks: ParagraphBreaks(offsets: offsets, hidden: hidden, editor: found.editor),
             folded: dropped.count, drawnBreak: drawnBreak
         )
     }
