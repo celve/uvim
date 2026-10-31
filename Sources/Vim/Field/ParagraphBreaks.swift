@@ -54,9 +54,13 @@ public struct ParagraphBreaks: Equatable, Sendable {
         }
     }
 
-    public init(offsets: [Int] = [], hidden: [Hidden] = []) {
+    /// The editor facts the stops and tables in `hidden` were read under.
+    public let editor: EditorFacts
+
+    public init(offsets: [Int] = [], hidden: [Hidden] = [], editor: EditorFacts = []) {
         self.offsets = offsets
         self.hidden = hidden
+        self.editor = editor
     }
 
     /// Nil when `fieldText` is not `value` with some `\n`s taken out.
@@ -87,6 +91,7 @@ public struct ParagraphBreaks: Equatable, Sendable {
         guard j == field.count else { return nil }
         self.offsets = offsets
         hidden = []
+        editor = []
     }
 }
 
@@ -262,7 +267,7 @@ public extension ParagraphBreaks {
             }
         }
         if keepingCovered, let marker { kept.append(Hidden(at: range.lowerBound, text: marker.text, kind: marker.kind)) }
-        return ParagraphBreaks(offsets: result, hidden: kept + moved)
+        return ParagraphBreaks(offsets: result, hidden: kept + moved, editor: editor)
     }
 
     /// Whether an edit of `range` takes a hidden run with it.

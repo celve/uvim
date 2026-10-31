@@ -1,4 +1,4 @@
-/// Where lane B's keys land, and the Sim's: Cocoa's bindings as measured in `NSTextView`, and Linear's at its stops and tables.
+/// Where lane B's keys land, and the Sim's: Cocoa's bindings as measured in `NSTextView`, and `navigation`'s at stops and tables.
 struct KeyModel {
     var text: String
     var anchor: Int
@@ -20,6 +20,9 @@ struct KeyModel {
     var cells: Set<Int> = []
     var lastRows: Set<Int> = []
 
+    /// What presses do at those stops and tables, as the field's editor facts select it.
+    var navigation = Navigation.structure
+
     /// The stop the caret is at: the start of the line it comes before, and its place among that line's stops, top first.
     var inStop: Stop?
 
@@ -36,7 +39,7 @@ struct KeyModel {
     /// Applies one press; false for a key the model does not know.
     mutating func press(_ chord: Chord) -> Bool {
         let model = TextModel(text)
-        if let pressed = Linear.press(chord, keys: &self, in: model) { return pressed }
+        if let pressed = navigation.press(chord, keys: &self, in: model) { return pressed }
         let shift = chord.modifiers.contains(.shift)
         let collapsed = anchor == focus
         let moved: Int
