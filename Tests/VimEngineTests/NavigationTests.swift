@@ -36,7 +36,10 @@ func testNavigation() {
                  && linearKeys("j", "Para two", blocks) == [.paragraphEnd] + Array(repeating: .right, count: 4)
                  && linearKeys("k", "Item three", blocks) == [.paragraphStart] + Array(repeating: .left, count: 4) + [.paragraphStart],
                  "j and k press once more per rule and gap cursor")
-    precondition(linearKeys("j", "Para one", blocks, profile: noLineKeys) == [.down, .down, .lineStart])
+    precondition(linearKeys("j", "Para one", blocks, profile: noLineKeys) == [.down, .down]
+                 && linearKeys("j", "Para two", blocks, profile: noLineKeys) == Array(repeating: .down, count: 4)
+                 && linearKeys("2j", "Para zero", blocks, profile: noLineKeys).prefix(3) == [.down, .down, .lineStart],
+                 "past a rule ↓ lands at the line's start, where ⌘← would select the rule")
     precondition(linearKeys("k", "Para one", tables) == [.paragraphStart, .up, .paragraphStart]
                  && tiptapLanding(linearKeys("k", "Para one", tables), from: "Para one", tables) == at("Btwo", tables)
                  && tiptapLanding(linearKeys("2k", "Para one", tables), from: "Para one", tables) == at("Bone", tables),
@@ -58,6 +61,17 @@ func testNavigation() {
                  && structure.upIntoTable == .lastLine && linear.upIntoTable == .lastRow)
     var ruleKeys = KeyModel(text: "a\nb", anchor: 1, focus: 1, stops: [2: [.rule]])
     precondition(ruleKeys.press(.right) && ruleKeys.inGap && !ruleKeys.press(.paragraphStart), "⌃A on a rule is each editor's")
+    // prosemirror-view selects a rule beside a textblock's edge on ⌘ or ⌥ arrows, and moves between rules past a gap cursor.
+    var edgeKeys = KeyModel(text: "a\nb\nc", anchor: 2, focus: 2, stops: [2: [.rule], 4: [.rule, .ruleGap, .rule]])
+    precondition(edgeKeys.press(.lineStart) && edgeKeys.inStop == .init(line: 2, index: 0)
+                 && edgeKeys.press(.lineStart) && edgeKeys.selection == 1..<1 && !edgeKeys.inGap, "⌘← at a line's start selects the rule")
+    precondition(edgeKeys.press(.lineEnd) && edgeKeys.inStop == .init(line: 2, index: 0) && edgeKeys.press(.wordRight)
+                 && edgeKeys.selection == 2..<2 && edgeKeys.press(.lineEnd) && edgeKeys.selection == 3..<3
+                 && edgeKeys.press(.lineEnd) && edgeKeys.inStop == .init(line: 4, index: 0)
+                 && edgeKeys.press(.lineEnd) && edgeKeys.inStop == .init(line: 4, index: 2) && edgeKeys.press(.wordLeft)
+                 && edgeKeys.inStop == .init(line: 4, index: 0), "from a rule they pass the gap cursor to the next rule")
+    edgeKeys = KeyModel(text: "ab\ncd", anchor: 4, focus: 4, stops: [3: [.rule]])
+    precondition(edgeKeys.press(.lineStart) && edgeKeys.selection == 3..<3 && !edgeKeys.inGap, "off the edge ⌘← stays Cocoa's")
     var cellKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 4, focus: 4, cells: [2, 5], lastRows: [2])
     precondition(!cellKeys.press(.wordRight), "Tiptap's ⌥→ lands on the next cell's first word end, or the next row's start")
     cellKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 8, focus: 8, cells: [2, 5], lastRows: [2])

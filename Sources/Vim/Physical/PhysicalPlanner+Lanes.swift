@@ -74,8 +74,15 @@ extension PhysicalPlanner {
         let stops = context.stops.filter { min(fromLine, toLine) < $0.key && $0.key <= max(fromLine, toLine) }
             .values.reduce(0) { $0 + $1.filter { navigation.visits($0, way) }.count }
         presses.append(.press(toLine > fromLine ? .down : .up, count: lines + stops))
-        presses.append(.press(.lineStart, count: 1))
-        if context.normalizes(toLine) { presses += outside }
+        // Past a rule ↓ lands at the textblock's start, where ⌘← or ⇧← would leave it for the rule above.
+        var landing = context.keys(model.text, at: from)
+        let vertical: Chord = toLine > fromLine ? .down : .up
+        let placed = context.stops[toLine]?.last == .rule
+            && (0..<(lines + stops)).allSatisfy { _ in landing.press(vertical) } && landing.focus == toLine && !landing.inGap
+        if !placed {
+            presses.append(.press(.lineStart, count: 1))
+            if context.normalizes(toLine) { presses += outside }
+        }
         let column = model.graphemes(in: toLine..<to)
         if column > 0 {
             presses += run(.right, count: column, selecting: selecting, normalizing: false)

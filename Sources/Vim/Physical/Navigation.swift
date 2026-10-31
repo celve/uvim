@@ -13,6 +13,8 @@ struct Navigation: Equatable, Sendable {
         case back(KeyModel.Way)
         /// The previous stop ↑ visits, else under a table its way in, else the start of the line above's last row.
         case backUp
+        /// The next rule, or the previous, past any gap cursor between; else the line's start, or the line above's end.
+        case rule(forward: Bool)
         case lineStart
         case stay
         case unknown
@@ -53,6 +55,10 @@ struct Navigation: Equatable, Sendable {
             let ownKeys = kind != .rule && kind != .ruleGap
             for chord in lineKeys { rows[chord] = ownKeys ? .stay : .unknown }
             if kind.isGap { rows[.selectRight] = .onwardLast }
+            // ProseMirror takes ⌘ and ⌥ arrows from a rule or gap cursor to the next selectable node, the next rule.
+            if !ownKeys {
+                for chord in Self.edgeKeys { rows[chord] = .rule(forward: chord == .lineEnd || chord == .wordRight) }
+            }
             leaves[kind] = rows
             otherwise[kind] = ownKeys ? .fromLineAbove : .unknown
         }
@@ -66,6 +72,9 @@ struct Navigation: Equatable, Sendable {
         cellWordRight = true
         upIntoTable = .lastRow
     }
+
+    /// The modified arrows ProseMirror handles as plain ones at a textblock's edge, selecting a rule beside it.
+    static let edgeKeys: [Chord] = [.lineStart, .lineEnd, .wordLeft, .wordRight]
 
     /// The structure's alone, and Linear's, the facts every stop kind was measured under.
     static let structure = Navigation([])
@@ -130,6 +139,15 @@ struct Navigation: Equatable, Sendable {
             let start = model.lineStart(of: focus)
             guard start > 0, keys.row(of: focus, in: model).start == start else { return nil }
             return last(start, .up)
+        case .lineStart, .wordLeft:
+            // At a textblock's edge ProseMirror selects a rule beside it, where Cocoa's bindings would stay or cross a word.
+            let kinds = Self.stops(before: focus, keys: keys)
+            guard focus > 0, model.lineStart(of: focus) == focus, kinds.last == .rule else { return nil }
+            return KeyModel.Stop(line: focus, index: kinds.count - 1)
+        case .lineEnd, .wordRight:
+            guard focus < model.length, model.lineBreak(of: focus) == focus,
+                  Self.stops(before: focus + 1, keys: keys).first == .rule else { return nil }
+            return KeyModel.Stop(line: focus + 1, index: 0)
         default:
             return nil
         }
@@ -169,6 +187,13 @@ struct Navigation: Equatable, Sendable {
             } else {
                 landing = keys.row(of: at.line - 1, in: model).start
             }
+        case .rule(let forward):
+            if let index = forward ? kinds.indices.first(where: { $0 > at.index && kinds[$0] == .rule })
+                : kinds.indices.last(where: { $0 < at.index && kinds[$0] == .rule }) {
+                keys.inStop = KeyModel.Stop(line: at.line, index: index)
+                return true
+            }
+            landing = forward ? at.line : at.line - 1
         case .lineStart:
             landing = at.line
         case .stay:
