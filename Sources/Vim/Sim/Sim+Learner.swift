@@ -32,14 +32,17 @@ public extension Sim {
             }
         }
 
-        public var model: ReadModel { resolved?.readModel ?? ReadModel(answer: chromium ? .textContent : .value) }
+        /// The offsets the Sim's engine starts a field with children at, as `EngineAdapter.startingOffsets` gives uvim's.
+        public var start: OffsetsAnswer { chromium ? .textContent : .value }
+
+        public var model: ReadModel { resolved?.readModel ?? ReadModel(answer: start) }
     }
 }
 
 extension Sim {
     /// The fake field's reads, which the learner observes here.
     mutating func read() -> (reads: FieldSnapshot.Reads, observed: Learning.Observation) {
-        let (current, source) = learner.map { $0.model.reading(chromium: $0.chromium, children: hasChildren) }
+        let (current, source) = learner.map { $0.model.reading(start: $0.start, children: hasChildren) }
             ?? (readModel, .start)
         let plain = readSelection
         var sampled = false
@@ -194,7 +197,7 @@ extension Sim {
     mutating func resolveBeliefs() {
         guard var learner else { return }
         let resolved = learner.store.resolve(
-            rungs: [learner.rung], rung: learner.rung, versions: learner.versions, chromium: learner.chromium,
+            rungs: [learner.rung], rung: learner.rung, versions: learner.versions, start: learner.start,
             children: hasChildren, userPinsOffsets: learner.config[.readCaret]?.override != nil
         )
         learner.resolved = resolved

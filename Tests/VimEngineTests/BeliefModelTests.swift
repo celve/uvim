@@ -5,7 +5,7 @@ let supportsTextContent = Evidence.offsets(.supports(.textContent), .plainIsText
 
 func resolving(_ store: BeliefStore, starting: OffsetsAnswer = .value, versions: Versions = learnVersions,
                pins: Bool = false, children: Bool = true) -> ResolvedBeliefs {
-    store.resolve(rungs: diaPageField.rungs, rung: learnRung, versions: versions, chromium: starting == .textContent,
+    store.resolve(rungs: diaPageField.rungs, rung: learnRung, versions: versions, start: starting,
                   children: children, userPinsOffsets: pins)
 }
 
@@ -188,9 +188,9 @@ func testBeliefModel() {
                  && textareaBeside.readModel.learned == .untrusted)
     precondition(textareaBeside.traceLines.last?.hasSuffix(" not-this-field") == true)
     precondition(CapabilityResolver.resolve(probed: axProfile, config: [:], beliefs: textareaBeside).profile.has(.readCaret))
-    precondition(ReadModel(answer: .value, learned: .textContent).reading(chromium: true, children: false) == (.value, .plain))
-    precondition(ReadModel(answer: .value, learned: .textContent).reading(chromium: false, children: true) == (.textContent, .learned))
-    precondition(ReadModel(answer: .value, pinned: true).reading(chromium: true, children: true) == (.textContent, .user))
+    precondition(ReadModel(answer: .value, learned: .textContent).reading(start: .textContent, children: false) == (.value, .plain))
+    precondition(ReadModel(answer: .value, learned: .textContent).reading(start: .value, children: true) == (.textContent, .learned))
+    precondition(ReadModel(answer: .value, pinned: true).reading(start: .textContent, children: true) == (.textContent, .user))
 
     let migrated = BeliefStore(demotions: [(learnRung, "1.49.1", "writeSelection"), (learnRung, "1.49.1", "noSuchAtom")])
     precondition(migrated.beliefs.count == 1 && migrated.beliefs[0].judgedUnder == .value && migrated.beliefs[0].provenance.tag == "migrated")

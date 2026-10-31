@@ -41,7 +41,7 @@ enum Diag {
         if let beliefs = binding.beliefs {
             line += " offsets=\(beliefs.readModel.traceName)"
         }
-        if binding.isChromium {
+        if binding.surface.engine == .chromium {
             line += " chromium=1"
         }
         if let editor = binding.surface.editor {

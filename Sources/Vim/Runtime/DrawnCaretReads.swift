@@ -11,16 +11,20 @@ extension Snapshotter {
     }
 
     /// The `AXValue` units a caret drawn at a collapsed read adds, which a settle leaves out of the length.
-    static func drawnLength(at marked: AX.MarkedSelection) -> Int {
-        guard marked.isCollapsed, let drawn = drawnCaret(at: marked.range.lowerBound, in: marked.element) else { return 0 }
+    static func drawnLength(at marked: AX.MarkedSelection, adapter: any EngineAdapter) -> Int {
+        guard marked.isCollapsed, let drawn = drawnCaret(at: marked.range.lowerBound, in: marked.element, adapter: adapter) else {
+            return 0
+        }
         return DrawnCaret.length(drawn.place)
     }
 
     /// A read whose marker sits on the drawn caret, whose own side would name the next paragraph.
-    static func drawnCaret(onMarkerOf marked: AX.MarkedSelection, upper: Bool) -> UnreachableLines.Caret? {
+    static func drawnCaret(
+        onMarkerOf marked: AX.MarkedSelection, upper: Bool, adapter: any EngineAdapter
+    ) -> UnreachableLines.Caret? {
         guard marked.isCollapsed, let node = marked.node(upper: upper),
               AX.attributes([kAXSubroleAttribute], of: node).string(0) == "AXEmptyGroup" else { return nil }
-        return drawnCaret(at: marked.range.lowerBound, in: marked.element)
+        return drawnCaret(at: marked.range.lowerBound, in: marked.element, adapter: adapter)
     }
 
     /// Keys leave the caret outside a code span's start with its marker on the paragraph at its length.
@@ -89,8 +93,10 @@ extension Snapshotter {
     }
 
     /// The drawn caret at plain `offset`, confirmed as discovery confirms one; nil where there is none or a read fails.
-    static func drawnCaret(at offset: Int, in element: AXUIElement) -> UnreachableLines.Caret? {
-        guard let markers = AX.markerText(of: element), let tree = FieldTree(element, markers: markers) else { return nil }
+    static func drawnCaret(at offset: Int, in element: AXUIElement, adapter: any EngineAdapter) -> UnreachableLines.Caret? {
+        guard let markers = AX.markerText(of: element), let tree = FieldTree(element, markers: markers, adapter: adapter) else {
+            return nil
+        }
         var scan = UnreachableScan<AXUIElement>(budget: 256, block: tree.block, offset: tree.offset)
         return scan.run(blocks: tree.blocks, candidates: UnreachableLines.Candidates(markers: [], chips: [], carets: [offset]))?
             .carets.first

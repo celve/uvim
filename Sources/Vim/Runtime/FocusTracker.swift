@@ -57,8 +57,6 @@ public final class FocusTracker {
 
         /// Nil for forced bindings, which learn nothing.
         public let beliefs: ResolvedBeliefs?
-
-        public let isChromium: Bool
     }
 
     /// Fired on every change, including transitions to nil. The transition
@@ -187,7 +185,7 @@ public final class FocusTracker {
             editor: gate.editor,
             engine: gate.engine
         )
-        let resolved = FieldProber.resolve(bound.element, surface: surface, versions: identity.versions, chromium: gate.isChromium)
+        let resolved = FieldProber.resolve(bound.element, surface: surface, versions: identity.versions)
         publish(Binding(
             element: bound.element,
             pid: bound.pid,
@@ -205,8 +203,7 @@ public final class FocusTracker {
             surface: surface,
             versions: identity.versions,
             capabilityReport: resolved.report,
-            beliefs: resolved.beliefs,
-            isChromium: gate.isChromium
+            beliefs: resolved.beliefs
         ))
     }
 
@@ -242,7 +239,7 @@ public final class FocusTracker {
             editor: gate.editor,
             engine: gate.engine
         )
-        let resolved = FieldProber.resolve(element, surface: surface, versions: identity.versions, chromium: gate.isChromium)
+        let resolved = FieldProber.resolve(element, surface: surface, versions: identity.versions)
         let candidate = Binding(
             element: element,
             pid: current.pid,
@@ -255,8 +252,7 @@ public final class FocusTracker {
             surface: surface,
             versions: identity.versions,
             capabilityReport: resolved.report,
-            beliefs: resolved.beliefs,
-            isChromium: gate.isChromium
+            beliefs: resolved.beliefs
         )
         guard transition(from: current, to: candidate) == .sameDocument else { return nil }
         publish(candidate)
@@ -319,7 +315,7 @@ public final class FocusTracker {
             && NSRunningApplication(processIdentifier: pid)?.activationPolicy == .accessory
         let identity = Self.appIdentity(for: pid)
         let (surface, walk) = Self.surface(for: element, gate: gate, bundleID: identity.bundleID)
-        let resolved = FieldProber.resolve(element, surface: surface, versions: identity.versions, chromium: gate.isChromium)
+        let resolved = FieldProber.resolve(element, surface: surface, versions: identity.versions)
         publish(Binding(
             element: element,
             pid: pid,
@@ -332,8 +328,7 @@ public final class FocusTracker {
             surface: surface,
             versions: identity.versions,
             capabilityReport: resolved.report,
-            beliefs: resolved.beliefs,
-            isChromium: gate.isChromium
+            beliefs: resolved.beliefs
         ))
         // After the publish, so it carries its own binding's epoch, not the outgoing one.
         if let walk { Diag.origin(epoch, role: gate.role, walk: walk) }
@@ -452,8 +447,7 @@ public final class FocusTracker {
             surface: Surface(bundleID: bundleID),
             versions: Versions(),
             capabilityReport: nil,
-            beliefs: nil,
-            isChromium: false
+            beliefs: nil
         ))
     }
 

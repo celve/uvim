@@ -30,7 +30,7 @@ public enum FieldProber {
 
     /// Config and beliefs key on the field's surface, not its app: a browser's search box and a page `<input>` differ.
     public static func resolve(
-        _ element: AXUIElement, surface: Surface, versions: Versions, chromium: Bool
+        _ element: AXUIElement, surface: Surface, versions: Versions
     ) -> (profile: CapabilityProfile, report: CapabilityReport, beliefs: ResolvedBeliefs, enclosing: AXUIElement?) {
         let probed = probe(element)
         let current = Beliefs.shared.current()
@@ -45,7 +45,7 @@ public enum FieldProber {
             return (capability, ConfigChoice(override: override, seededOff: resolution.isSeededOff))
         })
         let beliefs = contents.store.resolve(
-            rungs: surface.rungs, rung: surface.roleRung, versions: versions, chromium: chromium,
+            rungs: surface.rungs, rung: surface.roleRung, versions: versions, start: surface.adapter.startingOffsets,
             children: Snapshotter.hasParagraphs(element), userPinsOffsets: choices[.readCaret]?.override != nil
         )
         let resolved = CapabilityResolver.resolve(
@@ -67,12 +67,11 @@ public enum FieldProber {
         /// Web content, so worth the parent walk that finds its origin. Rides
         /// the same round trip; native fields skip the walk entirely.
         public let isWebElement: Bool
-        public let isChromium: Bool
+        /// The field's engine, whose adapter every later read of the field goes through.
+        public let engine: Surface.Engine
         /// Read from the same round trip's DOM classes, once per bind.
         public let editor: String?
         public var engageable: Bool { isTextual && !isSecure && isEnabled }
-
-        public var engine: Surface.Engine { isChromium ? .chromium : isWebElement ? .webkit : .appkit }
     }
 
     /// Whether uvim should engage at all. Conservative on purpose: only
@@ -92,7 +91,7 @@ public enum FieldProber {
             role: attributes.role,
             identifier: attributes.identifier,
             isWebElement: attributes.isWebElement,
-            isChromium: attributes.isChromium,
+            engine: attributes.isChromium ? .chromium : attributes.isWebElement ? .webkit : .appkit,
             editor: Surface.editor(classes: attributes.classes)
         )
     }
@@ -120,18 +119,18 @@ public enum Snapshotter {
         capabilities: CapabilityProfile,
         anchor: Int?,
         cursor: Range<Int>?,
-        chromium: Bool = false,
+        adapter: any EngineAdapter = AppKitAdapter(),
         model: ReadModel = ReadModel(answer: .value),
         sampling: OffsetsSampling = OffsetsSampling(),
         known: FieldDocument.Memo? = nil
     ) -> Reading {
         func stable(_ known: FieldDocument.Memo?) -> Reading {
-            var reading = read(of: element, capabilities: capabilities, anchor: anchor, cursor: cursor, chromium: chromium,
+            var reading = read(of: element, capabilities: capabilities, anchor: anchor, cursor: cursor, adapter: adapter,
                                model: model, sampling: sampling, known: known)
             for _ in 0..<2 {
                 // Linear draws and removes carets beside code spans while a read runs, which leaves its parts disagreeing.
                 guard reading.snapshot.breaks != nil, AX.value(of: element) != reading.value else { break }
-                reading = read(of: element, capabilities: capabilities, anchor: anchor, cursor: cursor, chromium: chromium,
+                reading = read(of: element, capabilities: capabilities, anchor: anchor, cursor: cursor, adapter: adapter,
                                model: model, sampling: sampling, known: known)
             }
             return reading
@@ -144,15 +143,14 @@ public enum Snapshotter {
         capabilities: CapabilityProfile,
         anchor: Int?,
         cursor: Range<Int>?,
-        chromium: Bool,
+        adapter: any EngineAdapter,
         model: ReadModel,
         sampling: OffsetsSampling,
         known: FieldDocument.Memo?
     ) -> Reading {
-        // A web field's roots are read whole: a paragraph made a quote keeps the text and the count, and only its identity is new.
-        let roots = chromium ? AX.children(of: element) : nil
+        let roots = adapter.roots(of: element)
         let blocks = roots.flatMap { $0.isEmpty ? nil : $0.count } ?? AX.childCount(of: element)
-        let (current, source) = model.reading(chromium: chromium, children: blocks.map { $0 > 0 } ?? true)
+        let (current, source) = model.reading(start: adapter.startingOffsets, children: blocks.map { $0 > 0 } ?? true)
         // Observation keeps running under `untrusted`, whose withheld caret is still read.
         let caret = capabilities.has(.readCaret) || model.learned == .untrusted
         // Under `value` only a sample fetches the marker range, once the batch shows it can tell.
@@ -167,13 +165,13 @@ public enum Snapshotter {
         ]
         if readsMarkers { names.append(kAXSelectedTextMarkerRangeAttribute) }   // 5
         let classes = names.count
-        if chromium { names.append("AXDOMClassList") }
+        if adapter.readsFieldClasses { names.append("AXDOMClassList") }
         let reads = AX.attributes(names, of: element)
         let value = reads.string(0)
         let plain = reads.range(1).map { $0.location..<($0.location + $0.length) }
         // A placeholder, or any text the page generates, is none of the field's while it is all the field shows (LIN-1930).
-        let generated = chromium && value?.isEmpty == false
-            && roots.map { showsOnlyGeneratedText(element, roots: $0, value: value) } == true
+        let generated = value?.isEmpty == false
+            && roots.map { adapter.showsOnlyGeneratedText(element, roots: $0, value: value) } == true
         let sampled = !generated && caret && current == .value && source.observes && sampling.samples(text: value, plain: plain)
         var marked = !generated && (readsMarkers || sampled)
             ? markedSelection(of: element, selected: reads.textMarkerRange(5)) : nil
@@ -182,7 +180,7 @@ public enum Snapshotter {
            range.upperBound > (AX.markerText(of: element).map { FieldReads.withoutAttachments($0).utf16.count } ?? .max) {
             marked = nil
         }
-        let side = marked.map { sides(of: $0) }
+        let side = marked.map { sides(of: $0, adapter: adapter) }
         let raw = FieldReads(text: value, plain: plain, selectedText: reads.string(4))
         var snapshotReads = generated
             ? FieldSnapshot.Reads(
@@ -191,7 +189,7 @@ public enum Snapshotter {
             : FieldSnapshot.Reads(
                 field: raw, length: reads.int(2), webContent: reads.string(3) != nil, blocks: blocks, marked: marked?.range
             )
-        let classList = chromium ? reads.strings(classes) ?? [] : []
+        let classList = adapter.readsFieldClasses ? reads.strings(classes) ?? [] : []
         snapshotReads.proseMirror = classList.contains(Linear.editorClass)
         // A quote's or open section's children decide stops too, and one changing kind keeps the roots (LIN-1780).
         func witness(_ found: UnreachableLines.Found?) -> Int? {
@@ -211,7 +209,7 @@ public enum Snapshotter {
             case .emptyParagraph:
                 snapshotReads.inEmptyParagraph = marked?.inEmptyParagraph ?? false
             case .document(let request, let why):
-                let walked = FieldDocumentReads.walk(in: element, request)
+                let walked = FieldDocumentReads.walk(in: element, request, adapter: adapter)
                 // The build checks the memo against these reads, which the next snapshot takes by the walk's containers.
                 if snapshotReads.proseMirror { snapshotReads.roots = witness(walked.document.found) }
                 memo = FieldDocument.Memo(
@@ -247,20 +245,22 @@ public enum Snapshotter {
     }
 
     /// Each end's side, read once per end, and once for a caret, whose ends share a marker.
-    private static func sides(of marked: AX.MarkedSelection) -> (ParagraphBreaks.End) -> ParagraphBreaks.Side? {
+    private static func sides(
+        of marked: AX.MarkedSelection, adapter: any EngineAdapter
+    ) -> (ParagraphBreaks.End) -> ParagraphBreaks.Side? {
         var read: [ParagraphBreaks.End: ParagraphBreaks.Side?] = [:]
         return { end in
             let key = marked.isCollapsed ? .lower : end
             if let known = read[key] { return known }
-            let side = paragraphSide(of: marked, upper: end == .upper)
+            let side = paragraphSide(of: marked, upper: end == .upper, adapter: adapter)
             read[key] = side
             return side
         }
     }
 
     /// Where typing at a boundary end would land; nil when a read fails.
-    static func paragraphSide(of marked: AX.MarkedSelection, upper: Bool) -> ParagraphBreaks.Side? {
-        if let drawn = drawnCaret(onMarkerOf: marked, upper: upper) { return DrawnCaret.side(drawn.place) }
+    static func paragraphSide(of marked: AX.MarkedSelection, upper: Bool, adapter: any EngineAdapter) -> ParagraphBreaks.Side? {
+        if let drawn = drawnCaret(onMarkerOf: marked, upper: upper, adapter: adapter) { return DrawnCaret.side(drawn.place) }
         switch marked.side(upper: upper) {
         case .end?: return .end
         case nil: return nil

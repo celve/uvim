@@ -33,7 +33,7 @@ func committedAt(
 }
 
 func brokenAt(_ surface: Surface, _ store: BeliefStore, app: String = "7.0", offsets: OffsetsAnswer = .value) -> ResolvedBeliefs {
-    store.resolve(rungs: surface.rungs, rung: surface.roleRung, versions: Versions(app: app), chromium: offsets == .textContent,
+    store.resolve(rungs: surface.rungs, rung: surface.roleRung, versions: Versions(app: app), start: offsets,
                   children: true, userPinsOffsets: false)
 }
 

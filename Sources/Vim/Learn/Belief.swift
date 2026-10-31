@@ -213,11 +213,11 @@ public struct ReadModel: Equatable, Sendable {
         self.newEngine = newEngine
     }
 
-    /// One snapshot's answer, since a field gains children as it fills.
-    public func reading(chromium: Bool, children: Bool) -> (answer: OffsetsAnswer, source: OffsetsSource) {
+    /// One snapshot's answer, since a field gains children as it fills; `start` is the engine's before anything is learned.
+    public func reading(start: OffsetsAnswer, children: Bool) -> (answer: OffsetsAnswer, source: OffsetsSource) {
         guard children else { return (.value, .plain) }
         if let learned { return (learned, .learned) }
-        return (chromium ? .textContent : .value, pinned ? .user : .start)
+        return (start, pinned ? .user : .start)
     }
 }
 
@@ -232,13 +232,13 @@ public struct ResolvedBeliefs: Equatable, Sendable {
 public extension BeliefStore {
     /// Verdicts apply across the ladder, as curation does; the read model only at `rung`.
     func resolve(
-        rungs: [String], rung: String?, versions: Versions, chromium: Bool, children: Bool, userPinsOffsets: Bool
+        rungs: [String], rung: String?, versions: Versions, start: OffsetsAnswer, children: Bool, userPinsOffsets: Bool
     ) -> ResolvedBeliefs {
         let stored = rung.flatMap { offsetsBelief(at: $0) }
         let newEngine = stored.map { $0.engineKey != versions.engineKey } ?? false
         var model = ReadModel(answer: .value, pinned: userPinsOffsets, belief: stored, newEngine: newEngine)
         if !userPinsOffsets, !newEngine, stored?.anchor != true { model.learned = stored?.offsetsAnswer }
-        (model.answer, model.source) = model.reading(chromium: chromium, children: children)
+        (model.answer, model.source) = model.reading(start: start, children: children)
         let app = versions.app ?? ""
         var broken: Set<Capability> = []
         var inForce: [Belief] = []

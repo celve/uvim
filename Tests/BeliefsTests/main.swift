@@ -25,8 +25,8 @@ let rung = surface.roleRung!
 let versions = Versions(app: "1.2")
 
 func resolved(_ contents: Beliefs.Contents, chromium: Bool = false, at field: Surface = surface, app: String = "1.2") -> ResolvedBeliefs {
-    contents.store.resolve(rungs: field.rungs, rung: field.roleRung, versions: Versions(app: app), chromium: chromium, children: true,
-                           userPinsOffsets: false)
+    contents.store.resolve(rungs: field.rungs, rung: field.roleRung, versions: Versions(app: app), start: chromium ? .textContent : .value,
+                           children: true, userPinsOffsets: false)
 }
 
 func entry(

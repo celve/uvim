@@ -113,7 +113,7 @@ func committing(_ store: inout BeliefStore, _ capability: Capability, at rung: S
 }
 
 func broken(_ store: BeliefStore, rung: String = learnRung, versions: Versions = learnVersions) -> Set<Capability> {
-    store.resolve(rungs: [rung], rung: rung, versions: versions, chromium: false, children: true, userPinsOffsets: false).broken
+    store.resolve(rungs: [rung], rung: rung, versions: versions, start: .value, children: true, userPinsOffsets: false).broken
 }
 
 func traced(
