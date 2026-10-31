@@ -1,26 +1,22 @@
 /// Confirms in a Chromium field's tree which lines start with list markers, and how long, and which are chips, with their
 /// paragraphs (LIN-1652).
 public struct UnreachableScan<Node> {
-    /// Nil when a read fails for any reason but the attribute's absence. One read.
-    private let block: (Node) -> EmptyBlockScan<Node>.Block?
-    /// A node's plain offset from the field's start, at its start or its end; nil on a failed read. Two reads.
-    private let offset: (Node, _ end: Bool) -> Int?
-    private let budget: Int
-    public private(set) var reads = 0
+    private let tree: TreeReads<Node>
+    public var reads: Int { tree.reads }
     /// The scan failed by running out of reads, not on a read.
-    public private(set) var exhausted = false
+    public var exhausted: Bool { tree.exhausted }
 
-    /// Reads by tree path, so candidates in one list or paragraph share them.
-    private var blocks: [[Int]: EmptyBlockScan<Node>.Block] = [:]
-    private var starts: [[Int]: Int] = [:]
-    private var ends: [[Int]: Int] = [:]
-
+    /// `block` is nil when a read fails for any reason but the attribute's absence, one read; `offset` a node's plain offset
+    /// from the field's start, at its start or its end, nil on a failed read, two reads.
     public init(
         budget: Int, block: @escaping (Node) -> EmptyBlockScan<Node>.Block?, offset: @escaping (Node, _ end: Bool) -> Int?
     ) {
-        self.budget = budget
-        self.block = block
-        self.offset = offset
+        tree = TreeReads(budget: budget, block: block, offset: offset)
+    }
+
+    /// Reading through a walk's `tree`, where the empty paragraphs' reads are already kept (LIN-2388).
+    init(tree: TreeReads<Node>) {
+        self.tree = tree
     }
 
     /// Nil on any failed read or past the budget.
@@ -84,7 +80,7 @@ public struct UnreachableScan<Node> {
             let here = path + [hit.index]
             let node = siblings[hit.index]
             guard let read = read(node, at: here) else { return nil }
-            if hit.start == candidate.lowerBound, read.subrole == "AXApplicationGroup" {
+            if hit.start == candidate.lowerBound, read.isChip {
                 guard let parent else { return .neither }
                 guard let chipEnd = end(of: node, at: here), let paragraphEnd = end(of: parent.node, at: path) else { return nil }
                 // Chromium puts a space after a chip on the chip's line.
@@ -95,8 +91,8 @@ public struct UnreachableScan<Node> {
                 guard let marker = marker(of: read.children, at: here) else { return nil }
                 if let end = marker, end > candidate.lowerBound { return .marker(end: end) }
             }
-            if read.role == "AXStaticText" || read.children.isEmpty { return .neither }
-            inList = read.role == "AXList"
+            if read.isLeaf { return .neither }
+            inList = read.isList
             parent = (node, hit.start)
             siblings = read.children
             path = here
@@ -110,17 +106,17 @@ public struct UnreachableScan<Node> {
         var last: Int?
         for (index, child) in children.enumerated() {
             guard let read = read(child, at: path + [index]) else { return nil }
-            if index == 0, read.role == "AXListMarker" || read.role == "AXGroup" && !read.children.isEmpty {
+            if index == 0, read.isListMarker || read.role == "AXGroup" && !read.children.isEmpty {
                 if read.role == "AXGroup" {
                     for (inner, node) in read.children.enumerated() {
                         guard let text = self.read(node, at: path + [0, inner]) else { return nil }
-                        guard text.role == "AXStaticText", text.generated else { return .some(nil) }
+                        guard text.isGeneratedText else { return .some(nil) }
                     }
                 }
                 guard let end = end(of: child, at: path + [index]) else { return nil }
                 return end
             }
-            guard read.role == "AXStaticText", read.generated else { break }
+            guard read.isGeneratedText else { break }
             last = index
         }
         guard let last else { return .some(nil) }
@@ -174,7 +170,7 @@ public struct UnreachableScan<Node> {
                 if let place { return .some(UnreachableLines.Caret(offset: p, place: place)) }
                 continue
             }
-            guard read.role != "AXStaticText", !read.children.isEmpty else { continue }
+            guard !read.isLeaf else { continue }
             guard let start = start(of: siblings[index], at: here) else { return nil }
             let ancestor = Ancestor(read: read, start: start, path: here, siblings: siblings)
             guard let found = caret(at: p, in: read.children, path: here, ancestors: ancestors + [ancestor]) else { return nil }
@@ -213,30 +209,15 @@ public struct UnreachableScan<Node> {
         return .some(atStart ? .start : atEnd ? .end : .middle)
     }
 
-    mutating func start(of node: Node, at path: [Int]) -> Int? {
-        if let known = starts[path] { return known }
-        guard spend(2), let start = offset(node, false) else { return nil }
-        starts[path] = start
-        return start
+    func start(of node: Node, at path: [Int]) -> Int? {
+        tree.start(of: node, at: path)
     }
 
-    mutating func end(of node: Node, at path: [Int]) -> Int? {
-        if let known = ends[path] { return known }
-        guard spend(2), let end = offset(node, true) else { return nil }
-        ends[path] = end
-        return end
+    func end(of node: Node, at path: [Int]) -> Int? {
+        tree.end(of: node, at: path)
     }
 
-    mutating func read(_ node: Node, at path: [Int]) -> EmptyBlockScan<Node>.Block? {
-        if let known = blocks[path] { return known }
-        guard spend(1), let read = block(node) else { return nil }
-        blocks[path] = read
-        return read
-    }
-
-    private mutating func spend(_ count: Int) -> Bool {
-        reads += count
-        exhausted = reads > budget
-        return !exhausted
+    func read(_ node: Node, at path: [Int]) -> EmptyBlockScan<Node>.Block? {
+        tree.read(node, at: path)
     }
 }

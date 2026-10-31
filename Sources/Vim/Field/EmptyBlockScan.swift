@@ -24,19 +24,20 @@ public struct EmptyBlockScan<Node> {
         }
     }
 
-    /// Nil when a read fails for any reason but the attribute's absence. One read.
-    private let block: (Node) -> Block?
-    /// A node's plain offset from the field's start, at its start or its end; nil on a failed read. Two reads.
-    private let offset: (Node, _ end: Bool) -> Int?
-    private let budget: Int
-    public private(set) var reads = 0
+    private let tree: TreeReads<Node>
+    public var reads: Int { tree.reads }
     /// The scan failed by running out of reads, not on a read.
-    public private(set) var exhausted = false
+    public var exhausted: Bool { tree.exhausted }
 
+    /// `block` is nil when a read fails for any reason but the attribute's absence, one read; `offset` a node's plain offset
+    /// from the field's start, at its start or its end, nil on a failed read, two reads.
     public init(budget: Int, block: @escaping (Node) -> Block?, offset: @escaping (Node, _ end: Bool) -> Int?) {
-        self.budget = budget
-        self.block = block
-        self.offset = offset
+        tree = TreeReads(budget: budget, block: block, offset: offset)
+    }
+
+    /// Reading through a walk's `tree`, which the scan shares with the runs' (LIN-2388).
+    init(tree: TreeReads<Node>) {
+        self.tree = tree
     }
 
     private enum Verdict {
@@ -50,15 +51,12 @@ public struct EmptyBlockScan<Node> {
     public mutating func run(blocks: [Node], plain: [UInt16]) -> [Int]? {
         let candidates = plain.indices.filter { plain[$0] == 10 }
         guard !candidates.isEmpty else { return [] }
-        guard reads + blocks.count <= budget else {
-            exhausted = true
-            return nil
-        }
+        guard tree.affords(blocks.count) else { return nil }
         var found: [Int] = []
-        for node in blocks {
-            guard spend(1), let read = block(node) else { return nil }
-            guard read.subrole == "AXEmptyGroup", read.children.isEmpty else { continue }
-            guard spend(2), let start = offset(node, false) else { return nil }
+        for (index, node) in blocks.enumerated() {
+            guard let read = tree.read(node, at: [index]) else { return nil }
+            guard read.isEmptyBlock else { continue }
+            guard let start = tree.start(of: node, at: [index]) else { return nil }
             if plain.indices.contains(start), plain[start] == 10 { found.append(start) }
         }
         // The rest are soft breaks or blocks nested in a quote, a table or a list.
@@ -78,6 +76,7 @@ public struct EmptyBlockScan<Node> {
     /// Descends through the children holding plain offset `b`, found by binary search on their starts.
     private mutating func classify(_ b: Int, in blocks: [Node]) -> Verdict? {
         var siblings = blocks
+        var path: [Int] = []
         var parent: String?
         for _ in 0..<16 {
             var low = 0
@@ -85,7 +84,7 @@ public struct EmptyBlockScan<Node> {
             var hit: (index: Int, start: Int)?
             while low <= high {
                 let middle = (low + high) / 2
-                guard spend(2), let start = offset(siblings[middle], false) else { return nil }
+                guard let start = tree.start(of: siblings[middle], at: path + [middle]) else { return nil }
                 if start <= b {
                     hit = (middle, start)
                     low = middle + 1
@@ -95,31 +94,27 @@ public struct EmptyBlockScan<Node> {
             }
             guard let hit else { return .text(end: b + 1) }
             let node = siblings[hit.index]
-            guard spend(1), let read = block(node) else { return nil }
-            if read.subrole == "AXEmptyGroup", read.children.isEmpty {
+            let here = path + [hit.index]
+            guard let read = tree.read(node, at: here) else { return nil }
+            if read.isEmptyBlock {
                 guard hit.start == b else { return .text(end: b + 1) }
                 // A caret drawn at a code span's end is followed by the `<br>` of the paragraph it ends (LIN-1683).
                 if DrawnCaret.isCaret(parent: parent, previous: nil, next: nil) { return .text(end: b + 1) }
                 guard hit.index > 0 else { return .line }
-                guard spend(1), let previous = block(siblings[hit.index - 1]) else { return nil }
+                guard let previous = tree.read(siblings[hit.index - 1], at: path + [hit.index - 1]) else { return nil }
                 // After a chip it is the image Linear puts there while the caret is beside it (LIN-1652).
                 let drawn = DrawnCaret.isCaret(parent: nil, previous: previous.subrole, next: nil)
-                if previous.subrole == "AXApplicationGroup" || drawn { return .text(end: b + 1) }
-                return previous.role == "AXListMarker" ? .item : .line
+                if previous.isChip || drawn { return .text(end: b + 1) }
+                return previous.isListMarker ? .item : .line
             }
-            if read.role == "AXStaticText" || read.children.isEmpty {
-                guard spend(2), let end = offset(node, true) else { return nil }
+            if read.isLeaf {
+                guard let end = tree.end(of: node, at: here) else { return nil }
                 return .text(end: max(end, b + 1))
             }
             siblings = read.children
+            path = here
             parent = read.subrole
         }
         return nil
-    }
-
-    private mutating func spend(_ count: Int) -> Bool {
-        reads += count
-        exhausted = reads > budget
-        return !exhausted
     }
 }

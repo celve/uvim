@@ -58,9 +58,8 @@ extension Sim {
         } else if emptyParagraphs {
             let value = chromium.shown.value
             let text = chromium.shown.markers + (endsInTextlessLeaf ? "\u{FFFC}" : "")
-            var memo: EmptyParagraphs.Memo?
-            var unreachable: UnreachableLines.Memo?
-            let aligned = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
+            var memo: FieldDocument.Memo?
+            let aligned = FieldSnapshot.Step.run(taking: { take($0, into: &reads, memo: &memo) }) {
                 MarkerReads.aligning(value: value, range: plain, text: text, sides: reads.sides)
             }
             reads.field = FieldReads(text: value, plain: plain, selectedText: readSelectedText, markers: aligned.reads)
@@ -85,31 +84,41 @@ extension Sim {
     }
 
     /// Answers a step's read from the fake field, as `Snapshotter` does over AX.
-    func take(
-        _ need: FieldSnapshot.Need, into reads: inout FieldSnapshot.Reads, memo: inout EmptyParagraphs.Memo?,
-        unreachable: inout UnreachableLines.Memo?
-    ) {
+    func take(_ need: FieldSnapshot.Need, into reads: inout FieldSnapshot.Reads, memo: inout FieldDocument.Memo?) {
         switch need {
         case .side(let end):
             reads.sides.updateValue(chromium.side(end == .upper ? selection.upperBound : selection.lowerBound), forKey: end)
         case .emptyParagraph:
             reads.inEmptyParagraph = chromium.inEmptyParagraph(selection)
-        case .emptyParagraphs(let value, let markers, let why):
-            let found = findsEmptyParagraphs ? chromium.shown.found : nil
-            memo = EmptyParagraphs.Memo(value: value, markers: markers, blocks: blocks, found: found, origin: .walked(why))
-        case .unreachable(let value, let markers, let candidates, let why):
+        case .document(let request, let why):
             let shown = chromium
-            let found = findsUnreachable ? UnreachableLines.Found(
-                markers: shown.listMarkers.filter { marker in candidates.markers.contains { $0.lowerBound == marker.lowerBound } },
-                chips: shown.chips.filter { chip in
-                    candidates.chips.contains { $0.lowerBound == chip.range.lowerBound && chip.range.upperBound <= $0.upperBound }
-                },
-                carets: shown.drawnCaret.map { candidates.carets.contains($0.offset) ? [$0] : [] } ?? [],
-                joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables
-            ) : nil
-            unreachable = UnreachableLines.Memo(
-                value: value, markers: markers, blocks: blocks, roots: roots, found: found, origin: .walked(why)
-            )
+            guard shown.lines != nil else {
+                // Plain paragraphs are a tree Chrome 153 draws, walked as the runtime walks it.
+                let fails = !findsEmptyParagraphs
+                let recorder = Discovery.Recorder<ChromiumParagraphs.Node>(
+                    budget: FieldDocument.readBudget, block: { fails ? nil : $0.read }, offset: { $1 ? $0.end : $0.start }
+                )
+                let tree = TreeReads(budget: FieldDocument.readBudget, block: recorder.block, offset: recorder.offset)
+                let document = FieldDocument.walk(request, roots: { recorder.roots(shown.tree) }, tree: tree)
+                memo = FieldDocument.Memo(
+                    request: request, blocks: blocks, roots: roots, document: document, reads: recorder.reads, origin: .walked(why)
+                )
+                return
+            }
+            // Linear's blocks are what `ListLine` says its tree yields, not a tree.
+            let document = FieldDocument.build(request, emptyParagraphs: { _ in
+                (findsEmptyParagraphs ? shown.shown.found : nil, false)
+            }, runs: { candidates in
+                (findsUnreachable ? UnreachableLines.Found(
+                    markers: shown.listMarkers.filter { marker in candidates.markers.contains { $0.lowerBound == marker.lowerBound } },
+                    chips: shown.chips.filter { chip in
+                        candidates.chips.contains { $0.lowerBound == chip.range.lowerBound && chip.range.upperBound <= $0.upperBound }
+                    },
+                    carets: shown.drawnCaret.map { candidates.carets.contains($0.offset) ? [$0] : [] } ?? [],
+                    joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables
+                ) : nil, false)
+            })
+            memo = FieldDocument.Memo(request: request, blocks: blocks, roots: roots, document: document, origin: .walked(why))
         }
     }
 

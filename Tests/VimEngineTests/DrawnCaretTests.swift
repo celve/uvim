@@ -102,29 +102,22 @@ let codeStates: [CodeState] = [
 ]
 
 func codeBuild(_ state: CodeState, side: ParagraphBreaks.Side) -> FieldSnapshot {
-    let plain = MarkerText.plain(state.raw)
-    let aligned = ParagraphBreaks(value: state.value, fieldText: plain)!
+    let aligned = ParagraphBreaks(value: state.value, fieldText: MarkerText.plain(state.raw))!
     var reads = FieldSnapshot.Reads(
         field: FieldReads(text: state.value, plain: state.caret..<state.caret, markers: MarkerReads(
             breaks: aligned, value: aligned.valueRange(state.caret..<state.caret) { _ in side }
         )),
         length: state.value.utf16.count, webContent: true, blocks: 7, marked: state.caret..<state.caret, markerText: state.raw
     )
-    var memo: EmptyParagraphs.Memo?
-    var unreachable: UnreachableLines.Memo?
+    var memo: FieldDocument.Memo?
     return FieldSnapshot.Step.run(taking: { need in
         switch need {
         case .side(let end): reads.sides.updateValue(side, forKey: end)
         case .emptyParagraph: reads.inEmptyParagraph = true
-        case .emptyParagraphs(let value, let raw, _):
-            memo = EmptyParagraphs.Memo(value: value, markers: raw, blocks: reads.blocks, found: scanned(state.tree, plain))
-        case .unreachable(let value, let raw, let candidates, _):
-            unreachable = UnreachableLines.Memo(value: value, markers: raw, blocks: reads.blocks,
-                                                found: unreachableScanned(state.tree, candidates))
+        case .document(let request, _): memo = documentWalk(request, state.tree, roots: nil)
         }
     }) {
-        FieldSnapshot.build(reads, capabilities: keyProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo,
-                            unreachable: unreachable)
+        FieldSnapshot.build(reads, capabilities: keyProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo)
     }.snapshot
 }
 
@@ -365,11 +358,9 @@ func testDrawnCarets() {
                      "yy", "p", "J", "~", "v3h", "2h", "vb"] {
             var host = listCodeSim(writeKeys, caret: caret, spans: listCodeSpans)
             var (reads, observed) = host.read()
-            var memo: EmptyParagraphs.Memo?
-            var unreachable: UnreachableLines.Memo?
-            let snapshot = FieldSnapshot.Step.run(taking: { host.take($0, into: &reads, memo: &memo, unreachable: &unreachable) }) {
-                FieldSnapshot.build(reads, capabilities: writeKeys, answer: observed.after, anchor: nil, cursor: nil, memo: memo,
-                                    unreachable: unreachable)
+            var memo: FieldDocument.Memo?
+            let snapshot = FieldSnapshot.Step.run(taking: { host.take($0, into: &reads, memo: &memo) }) {
+                FieldSnapshot.build(reads, capabilities: writeKeys, answer: observed.after, anchor: nil, cursor: nil, memo: memo)
             }.snapshot
             let steps = PhysicalPlanner.plan(LogicalPlanner.plan(RawCommand(keys), state: host.state), snapshot: snapshot).steps
             var written = true

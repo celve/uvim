@@ -225,21 +225,25 @@ enum Diag {
         }
     }
 
-    /// A text's empty-paragraph discovery; `failed` leaves the field on `AXValue`'s lines, and the origin says if it walked.
-    static func emptyParagraphs(_ epoch: UInt64, _ seq: UInt64, _ memo: EmptyParagraphs.Memo) {
-        let found = memo.found.map { "found=\($0.count)" } ?? (memo.exhausted ? "failed=budget" : "failed=read")
+    /// A text's document walk: what each part found, or why it failed, which leaves the field on `AXValue`'s lines.
+    static func document(_ epoch: UInt64, _ seq: UInt64, _ memo: FieldDocument.Memo) {
+        let document = memo.document
+        func failed(_ part: FieldDocument.Parts) -> String { document.exhausted.contains(part) ? "budget" : "read" }
+        let empty = document.emptyParagraphs.map { "empty=\($0.count)" } ?? "empty-failed=\(failed(.emptyParagraphs))"
+        let found = !memo.request.folds ? "" : document.found.map { " markers=\($0.markers.count) chips=\($0.chips.count)" }
+            ?? " runs-failed=\(failed(.found))"
+        let runs = Dictionary(grouping: document.runs) { run -> String in
+            switch run.kind {
+            case .text: "text"
+            case .generated: "generated"
+            case .atom: "atom"
+            case .leaf: "leaf"
+            case .stop: "stop"
+            }
+        }.map { "\($0.key)=\($0.value.count)" }.sorted().joined(separator: ",")
         gate.debug("""
-            e\(epoch, privacy: .public).c\(seq, privacy: .public) empty-paragraphs \(found, privacy: .public) \
-            \(memo.origin.traceField, privacy: .public)
-            """)
-    }
-
-    static func unreachable(_ epoch: UInt64, _ seq: UInt64, _ memo: UnreachableLines.Memo) {
-        let found = memo.found.map { "markers=\($0.markers.count) chips=\($0.chips.count)" }
-            ?? (memo.exhausted ? "failed=budget" : "failed=read")
-        gate.debug("""
-            e\(epoch, privacy: .public).c\(seq, privacy: .public) unreachable \(found, privacy: .public) \
-            \(memo.origin.traceField, privacy: .public)
+            e\(epoch, privacy: .public).c\(seq, privacy: .public) document \(empty, privacy: .public)\(found, privacy: .public) \
+            runs=\(runs, privacy: .public) reads=\(document.reads, privacy: .public) \(memo.origin.traceField, privacy: .public)
             """)
     }
 

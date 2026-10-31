@@ -87,7 +87,7 @@ public enum Linear {
         var afterList = false
         for (index, root) in roots.enumerated() {
             guard let read = scan.read(root, at: [index]) else { return nil }
-            let list = read.role == "AXList"
+            let list = read.isList
             if list, afterList {
                 guard let start = scan.start(of: root, at: [index]) else { return nil }
                 joins.append(start)
@@ -139,7 +139,7 @@ public enum Linear {
         of node: Node, _ read: EmptyBlockScan<Node>.Block, at path: [Int], level: Int, into blocks: inout Blocks,
         scan: inout UnreachableScan<Node>
     ) -> BlockKind? {
-        if read.role == "AXList" { return read.classes.contains(listClass) ? .list : .other }
+        if read.isList { return read.classes.contains(listClass) ? .list : .other }
         if read.role == "AXSplitter" { return blocks.linear ? .rule : .other }
         if read.classes.contains(tableClass) {
             guard let table = table(node, read, at: path, scan: &scan) else { return nil }

@@ -107,10 +107,8 @@ public enum Snapshotter {
         public let sampled: Bool
         public let markers: Bool
         public let reads: FieldReads
-        /// This text's empty-paragraph discovery, to hand back next time; nil where none applies.
-        public let emptyParagraphs: EmptyParagraphs.Memo?
-        /// This text's list-marker and chip discovery, the same way.
-        public let unreachable: UnreachableLines.Memo?
+        /// This text's document walk, to hand back next time; nil where none applies.
+        public let document: FieldDocument.Memo?
         /// `AXValue` as read, which a later read compares with to tell the field changed.
         public let value: String?
         /// The `AXValue` units left out as text the page generates (LIN-1930).
@@ -125,23 +123,20 @@ public enum Snapshotter {
         chromium: Bool = false,
         model: ReadModel = ReadModel(answer: .value),
         sampling: OffsetsSampling = OffsetsSampling(),
-        known: EmptyParagraphs.Memo? = nil,
-        knownUnreachable: UnreachableLines.Memo? = nil
+        known: FieldDocument.Memo? = nil
     ) -> Reading {
-        func stable(_ known: EmptyParagraphs.Memo?, _ knownUnreachable: UnreachableLines.Memo?) -> Reading {
+        func stable(_ known: FieldDocument.Memo?) -> Reading {
             var reading = read(of: element, capabilities: capabilities, anchor: anchor, cursor: cursor, chromium: chromium,
-                               model: model, sampling: sampling, known: known, knownUnreachable: knownUnreachable)
+                               model: model, sampling: sampling, known: known)
             for _ in 0..<2 {
                 // Linear draws and removes carets beside code spans while a read runs, which leaves its parts disagreeing.
                 guard reading.snapshot.breaks != nil, AX.value(of: element) != reading.value else { break }
                 reading = read(of: element, capabilities: capabilities, anchor: anchor, cursor: cursor, chromium: chromium,
-                               model: model, sampling: sampling, known: known, knownUnreachable: knownUnreachable)
+                               model: model, sampling: sampling, known: known)
             }
             return reading
         }
-        return settled(stable(known, knownUnreachable), in: element) {
-            stable($0.emptyParagraphs ?? known, $0.unreachable ?? knownUnreachable)
-        }
+        return settled(stable(known), in: element) { stable($0.document ?? known) }
     }
 
     private static func read(
@@ -152,8 +147,7 @@ public enum Snapshotter {
         chromium: Bool,
         model: ReadModel,
         sampling: OffsetsSampling,
-        known: EmptyParagraphs.Memo?,
-        knownUnreachable: UnreachableLines.Memo?
+        known: FieldDocument.Memo?
     ) -> Reading {
         // A web field's roots are read whole: a paragraph made a quote keeps the text and the count, and only its identity is new.
         let roots = chromium ? AX.children(of: element) : nil
@@ -208,30 +202,21 @@ public enum Snapshotter {
             }
         }
         // Only where stops are read do the blocks' kinds decide discovery; elsewhere the memo holds as it did.
-        if snapshotReads.proseMirror { snapshotReads.roots = witness(knownUnreachable?.found) }
+        if snapshotReads.proseMirror { snapshotReads.roots = witness(known?.document.found) }
         var memo = known
-        var unreachable = knownUnreachable
         func take(_ need: FieldSnapshot.Need) {
             switch need {
             case .side(let end):
                 snapshotReads.sides.updateValue(side?(end), forKey: end)
             case .emptyParagraph:
                 snapshotReads.inEmptyParagraph = marked?.inEmptyParagraph ?? false
-            case .emptyParagraphs(let value, let markers, let why):
-                let walked = EmptyParagraphDiscovery.found(in: element, markers: markers, budget: EmptyParagraphs.readBudget)
-                memo = EmptyParagraphs.Memo(
-                    value: value, markers: markers, blocks: blocks, found: walked.found, exhausted: walked.exhausted,
-                    reads: walked.reads, origin: .walked(why)
-                )
-            case .unreachable(let value, let markers, let candidates, let why):
-                let walked = UnreachableDiscovery.found(
-                    in: element, markers: markers, candidates: candidates, budget: UnreachableLines.readBudget
-                )
+            case .document(let request, let why):
+                let walked = FieldDocumentReads.walk(in: element, request)
                 // The build checks the memo against these reads, which the next snapshot takes by the walk's containers.
-                if snapshotReads.proseMirror { snapshotReads.roots = witness(walked.found) }
-                unreachable = UnreachableLines.Memo(
-                    value: value, markers: markers, blocks: blocks, roots: snapshotReads.roots, found: walked.found,
-                    exhausted: walked.exhausted, candidates: candidates, reads: walked.reads, origin: .walked(why)
+                if snapshotReads.proseMirror { snapshotReads.roots = witness(walked.document.found) }
+                memo = FieldDocument.Memo(
+                    request: request, blocks: blocks, roots: snapshotReads.roots, document: walked.document, reads: walked.reads,
+                    origin: .walked(why)
                 )
             }
         }
@@ -246,13 +231,12 @@ public enum Snapshotter {
         let observed = Learning.observe(snapshotReads.field, before: current, source: source, newEngine: model.newEngine)
         let built = FieldSnapshot.Step.run(taking: take) {
             FieldSnapshot.build(
-                snapshotReads, capabilities: capabilities, answer: observed.after, anchor: anchor, cursor: cursor, memo: memo,
-                unreachable: unreachable
+                snapshotReads, capabilities: capabilities, answer: observed.after, anchor: anchor, cursor: cursor, memo: memo
             )
         }
         return Reading(
             snapshot: built.snapshot, observed: observed, sampled: sampled, markers: marked != nil, reads: snapshotReads.field,
-            emptyParagraphs: built.memo, unreachable: built.unreachable, value: value,
+            document: built.memo, value: value,
             generated: generated ? value?.utf16.count ?? 0 : 0
         )
     }

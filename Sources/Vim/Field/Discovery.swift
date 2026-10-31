@@ -1,4 +1,4 @@
-/// What carries `EmptyParagraphs`' and `UnreachableLines`' discoveries across typed text instead of a new walk (LIN-1874).
+/// What carries the document walk across typed text instead of a new walk (LIN-1874).
 public enum Discovery {
     /// One run of text typed or deleted between two texts, in plain offsets.
     public struct Run: Equatable, Sendable {

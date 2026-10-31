@@ -6,22 +6,21 @@ func runLines(_ old: (value: String, markers: String), _ new: (value: String, ma
     return (edit.run, Discovery.Lines(value: old.value, markers: old.markers, shown: edit.shown)!)
 }
 
-/// The runtime's walks over a fake tree, keeping what they read.
-func emptyWalk(_ value: String, _ raw: String, _ tree: [FakeNode], budget: Int = EmptyParagraphs.readBudget,
-               why: Discovery.Rewalk = .first) -> EmptyParagraphs.Memo {
-    let recorder = Discovery.Recorder<FakeNode>(budget: budget, block: \.block, offset: { node, end in end ? node.end : node.start })
-    var scan = EmptyBlockScan(budget: budget, block: recorder.block, offset: recorder.offset)
-    let found = scan.run(blocks: recorder.roots(tree), plain: Array(MarkerText.plain(raw).utf16))
-    return EmptyParagraphs.Memo(value: value, markers: raw, blocks: tree.count, found: found, exhausted: scan.exhausted,
-                                reads: recorder.reads, origin: .walked(why))
+/// What a snapshot asks the walk for, with `AXValue` aligned to the marker text.
+func documentRequest(_ value: String, _ raw: String, caret: Int? = 0, proseMirror: Bool = true, folds: Bool = true)
+    -> FieldDocument.Request {
+    // A text the marker text does not line up with, as a refused edit's, keeps no breaks.
+    FieldDocument.Request(value: value, markers: raw, aligned: ParagraphBreaks(value: value, fieldText: MarkerText.plain(raw)) ?? ParagraphBreaks(),
+                          caret: caret, proseMirror: proseMirror, folds: folds)
 }
-func unreachableWalk(_ value: String, _ raw: String, _ tree: [FakeNode], _ candidates: UnreachableLines.Candidates, roots: Int?,
-                     budget: Int = UnreachableLines.readBudget, why: Discovery.Rewalk = .first) -> UnreachableLines.Memo {
+/// The runtime's walk over a fake tree, keeping what it read.
+func documentWalk(_ request: FieldDocument.Request, _ tree: [FakeNode], roots: Int?, budget: Int = FieldDocument.readBudget,
+                  why: Discovery.Rewalk = .first) -> FieldDocument.Memo {
     let recorder = Discovery.Recorder<FakeNode>(budget: budget, block: \.block, offset: { node, end in end ? node.end : node.start })
-    var scan = UnreachableScan(budget: budget, block: recorder.block, offset: recorder.offset)
-    let found = scan.run(blocks: recorder.roots(tree), candidates: candidates)
-    return UnreachableLines.Memo(value: value, markers: raw, blocks: tree.count, roots: roots, found: found,
-                                 exhausted: scan.exhausted, candidates: candidates, reads: recorder.reads, origin: .walked(why))
+    let reads = TreeReads(budget: budget, block: recorder.block, offset: recorder.offset)
+    let document = FieldDocument.walk(request, roots: { recorder.roots(tree) }, tree: reads)
+    return FieldDocument.Memo(request: request, blocks: tree.count, roots: roots, document: document, reads: recorder.reads,
+                              origin: .walked(why))
 }
 /// `spec` with `count` units typed (or deleted, below zero) into the text node at `path`: it and its ancestors change
 /// length, and every node after it moves.
@@ -37,9 +36,9 @@ func typed(_ spec: String, _ count: Int, into path: String) -> String {
 }
 /// A Chromium build over a fake tree, walking it where a memo does not carry; `walks` says why each walk ran.
 func treeBuild(
-    _ value: String, _ raw: String, _ tree: [FakeNode], memo known: EmptyParagraphs.Memo? = nil,
-    unreachable knownUnreachable: UnreachableLines.Memo? = nil, caret: Int = 0, proseMirror: Bool = true
-) -> (snapshot: FieldSnapshot, memo: EmptyParagraphs.Memo?, unreachable: UnreachableLines.Memo?, walks: [Discovery.Rewalk]) {
+    _ value: String, _ raw: String, _ tree: [FakeNode], memo known: FieldDocument.Memo? = nil, caret: Int = 0,
+    proseMirror: Bool = true
+) -> (snapshot: FieldSnapshot, memo: FieldDocument.Memo?, walks: [Discovery.Rewalk]) {
     let aligned = ParagraphBreaks(value: value, fieldText: MarkerText.plain(raw))!
     var reads = FieldSnapshot.Reads(
         field: FieldReads(text: value, plain: caret..<caret, markers: MarkerReads(
@@ -50,24 +49,19 @@ func treeBuild(
     reads.proseMirror = proseMirror
     reads.roots = proseMirror ? tree.count : nil
     var memo = known
-    var unreachable = knownUnreachable
     var walks: [Discovery.Rewalk] = []
     let built = FieldSnapshot.Step.run(taking: { need in
         switch need {
         case .side(let end): reads.sides.updateValue(.start(skipping: 0), forKey: end)
         case .emptyParagraph: reads.inEmptyParagraph = false
-        case .emptyParagraphs(let value, let raw, let why):
+        case .document(let request, let why):
             walks.append(why)
-            memo = emptyWalk(value, raw, tree, why: why)
-        case .unreachable(let value, let raw, let candidates, let why):
-            walks.append(why)
-            unreachable = unreachableWalk(value, raw, tree, candidates, roots: reads.roots, why: why)
+            memo = documentWalk(request, tree, roots: reads.roots, why: why)
         }
     }) {
-        FieldSnapshot.build(reads, capabilities: keyProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo,
-                            unreachable: unreachable)
+        FieldSnapshot.build(reads, capabilities: keyProfile, answer: .textContent, anchor: nil, cursor: nil, memo: memo)
     }
-    return (built.snapshot, built.memo, built.unreachable, walks)
+    return (built.snapshot, built.memo, walks)
 }
 func linedCandidates(_ value: String, _ plain: String) -> UnreachableLines.Candidates {
     UnreachableLines.candidates(text: value, breaks: ParagraphBreaks(value: value, fieldText: MarkerText.plain(plain))!, raw: plain)
@@ -79,11 +73,11 @@ func carriedEdit(
 ) -> [Discovery.Rewalk]? {
     let old = treeBuild(before.value, before.raw, fakeTree(before.spec, linear: linear), caret: carets.0, proseMirror: proseMirror)
     let tree = fakeTree(after.spec, linear: linear)
-    let carried = treeBuild(after.value, after.raw, tree, memo: old.memo, unreachable: old.unreachable, caret: carets.1,
-                            proseMirror: proseMirror)
+    let carried = treeBuild(after.value, after.raw, tree, memo: old.memo, caret: carets.1, proseMirror: proseMirror)
     let walked = treeBuild(after.value, after.raw, tree, caret: carets.1, proseMirror: proseMirror)
-    guard carried.snapshot == walked.snapshot, carried.memo?.found == walked.memo?.found,
-          carried.memo?.exhausted == walked.memo?.exhausted, carried.unreachable?.found == walked.unreachable?.found
+    guard carried.snapshot == walked.snapshot, carried.memo?.document.emptyParagraphs == walked.memo?.document.emptyParagraphs,
+          carried.memo?.document.exhausted == walked.memo?.document.exhausted,
+          carried.memo?.document.found == walked.memo?.document.found
     else { return nil }
     return carried.walks
 }
@@ -101,17 +95,21 @@ func blankTree(_ paragraphs: [String]) -> [FakeNode] {
         return text.isEmpty ? blank(at) : paragraph(at, at + text.utf16.count)
     }
 }
-let blankMemo = emptyWalk(blankValue, blankMarkers, blankTree(blankParagraphs))
+func blankRequest(_ paragraphs: [String]) -> FieldDocument.Request {
+    let shown = EmptyParagraphs.chromium(paragraphs)
+    return documentRequest(shown.value, shown.markers, caret: nil, proseMirror: false, folds: false)
+}
+let blankMemo = documentWalk(blankRequest(blankParagraphs), blankTree(blankParagraphs), roots: nil)
 func blankCarried(
-    _ edit: (inout [String]) -> Void, memo: EmptyParagraphs.Memo = blankMemo
-) -> Result<EmptyParagraphs.Memo, Discovery.Rewalk> {
+    _ edit: (inout [String]) -> Void, memo: FieldDocument.Memo = blankMemo
+) -> Result<FieldDocument.Memo, Discovery.Rewalk> {
     var paragraphs = blankParagraphs
     edit(&paragraphs)
-    let shown = EmptyParagraphs.chromium(paragraphs)
-    let carried = memo.carried(value: shown.value, markers: shown.markers, blocks: paragraphs.count)
+    let carried = memo.carried(blankRequest(paragraphs), blocks: paragraphs.count, roots: nil)
     if case .success(let kept) = carried {
-        let walked = emptyWalk(shown.value, shown.markers, blankTree(paragraphs), budget: memo.reads?.budget ?? 0)
-        precondition(kept.found == walked.found && kept.exhausted == walked.exhausted, "\(paragraphs)")
+        let walked = documentWalk(blankRequest(paragraphs), blankTree(paragraphs), roots: nil, budget: memo.reads?.budget ?? 0)
+        precondition(kept.document.emptyParagraphs == walked.document.emptyParagraphs
+                     && kept.document.exhausted == walked.document.exhausted, "\(paragraphs)")
     }
     return carried
 }
@@ -203,74 +201,74 @@ func testCarriedDiscovery() {
     // Chromium's own list: the page makes a paragraph an item with one run of marker text and no new block.
     let native = (value: "Top\n\u{2022} First\nMiddle\nPlain", raw: "Top\u{2022} FirstMiddlePlain",
                   spec: "0/G/0/3 0.0/T/0/3 1/L/3/10 1.0/G/3/10 1.0.0/M/3/5 1.0.1/T/5/10 2/G/10/16 2.0/T/10/16 3/G/16/21 3.0/T/16/21")
-    let nativeMemo = unreachableWalk(native.value, native.raw, fakeTree(native.spec, linear: false),
-                                     linedCandidates(native.value, native.raw), roots: nil)
-    precondition(nativeMemo.found?.markers == [3..<5])
+    let nativeMemo = documentWalk(documentRequest(native.value, native.raw, caret: nil, proseMirror: false),
+                                  fakeTree(native.spec, linear: false), roots: nil)
+    precondition(nativeMemo.document.found?.markers == [3..<5])
+    func nativeRequest(_ value: String, _ raw: String, proseMirror: Bool = false) -> FieldDocument.Request {
+        documentRequest(value, raw, caret: nil, proseMirror: proseMirror)
+    }
     for (name, value, plain) in [("listed", "Top\n\u{2022} First\nMiddle\n\u{2022} Plain", "Top\u{2022} FirstMiddle\u{2022} Plain"),
                                  ("typed like one", "Top\n\u{2022} First\nMi. ddle\nPlain", "Top\u{2022} FirstMi. ddlePlain")] {
-        precondition(nativeMemo.carried(value: value, markers: plain, blocks: 4, candidates: linedCandidates(value, plain))
-                     == .failure(.candidates), "a paragraph \(name) gives a walk a line the last one never checked")
+        precondition(nativeMemo.carried(nativeRequest(value, plain), blocks: 4, roots: nil) == .failure(.candidates),
+                     "a paragraph \(name) gives a walk a line the last one never checked")
     }
-    let typedNumber = unreachableWalk("Top\n1. Buy", "Top1. Buy", fakeTree("0/G/0/3 0.0/T/0/3 1/G/3/9 1.0/T/3/9", linear: false),
-                                      linedCandidates("Top\n1. Buy", "Top1. Buy"), roots: nil)
-    precondition(typedNumber.found?.markers == [] && typedNumber.carried(
-        value: "Top\n\u{2022} 1. Buy", markers: "Top\u{2022} 1. Buy", blocks: 2,
-        candidates: linedCandidates("Top\n\u{2022} 1. Buy", "Top\u{2022} 1. Buy")
+    let typedNumber = documentWalk(nativeRequest("Top\n1. Buy", "Top1. Buy"),
+                                   fakeTree("0/G/0/3 0.0/T/0/3 1/G/3/9 1.0/T/3/9", linear: false), roots: nil)
+    precondition(typedNumber.document.found?.markers == [] && typedNumber.carried(
+        nativeRequest("Top\n\u{2022} 1. Buy", "Top\u{2022} 1. Buy"), blocks: 2, roots: nil
     ) == .failure(.candidates), "and a line that already looked like an item, listed, is one line with another marker")
     precondition(carriedEdit(native, edited(native.value, native.raw, native.spec, "0.0", "Top", "Topx"), proseMirror: false,
                              linear: false) == [], "typing before the list still carries")
     let nativeTyped = (value: native.value.replacing("Top", with: "Topx"), raw: native.raw.replacing("Top", with: "Topx"))
-    precondition(nativeMemo.carried(value: nativeTyped.value, markers: nativeTyped.raw, blocks: 4, proseMirror: true,
-                                    candidates: linedCandidates(nativeTyped.value, nativeTyped.raw)) == .failure(.roots)
-                 && UnreachableLines.Memo(value: native.value, markers: native.raw, blocks: nil, found: nativeMemo.found)
-                     .carried(value: nativeTyped.value, markers: nativeTyped.raw, blocks: nil,
-                              candidates: linedCandidates(nativeTyped.value, nativeTyped.raw)) == .failure(.blocks),
+    let typedRequest = nativeRequest(nativeTyped.value, nativeTyped.raw)
+    precondition(nativeMemo.carried(nativeRequest(nativeTyped.value, nativeTyped.raw, proseMirror: true), blocks: 4, roots: nil)
+                     == .failure(.roots)
+                 && FieldDocument.Memo(request: nativeMemo.request, blocks: nil, document: nativeMemo.document)
+                     .carried(typedRequest, blocks: nil, roots: nil) == .failure(.blocks),
                  "a count unread both times, or a ProseMirror field's roots unread both times, prove nothing unchanged")
-    precondition(UnreachableLines.Memo(value: native.value, markers: native.raw, blocks: 4, found: nativeMemo.found)
-                     .carried(value: nativeTyped.value, markers: nativeTyped.raw, blocks: 4,
-                              candidates: linedCandidates(nativeTyped.value, nativeTyped.raw)) == .failure(.unread),
-                 "a result whose reads were not kept, the Sim's, walks")
-    let twoRoots = unreachableWalk("\u{2022} one\nTwo", "\u{2022} oneTwo",
-                                   fakeTree("0/L/0/5 0.0/G/0/5 0.0.0/M/0/2 0.0.1/T/2/5 1/G/5/8 1.0/T/5/8", linear: false),
-                                   linedCandidates("\u{2022} one\nTwo", "\u{2022} oneTwo"), roots: nil)
-    precondition(UnreachableLines.Memo(value: twoRoots.value, markers: twoRoots.markers, blocks: 1, found: twoRoots.found,
-                                       candidates: twoRoots.candidates, reads: twoRoots.reads)
-                     .carried(value: "\u{2022} one\nTwox", markers: "\u{2022} oneTwox", blocks: 1,
-                              candidates: linedCandidates("\u{2022} one\nTwox", "\u{2022} oneTwox")) == .failure(.unread)
-                 && twoRoots.carried(value: "\u{2022} one\nTwox", markers: "\u{2022} oneTwox", blocks: 2,
-                                     candidates: linedCandidates("\u{2022} one\nTwox", "\u{2022} oneTwox")).map(\.found?.markers)
-                     == .success([0..<2]), "reads of a tree with other root blocks than the count")
+    precondition(FieldDocument.Memo(request: nativeMemo.request, blocks: 4, document: nativeMemo.document)
+                     .carried(typedRequest, blocks: 4, roots: nil) == .failure(.unread),
+                 "a result whose reads were not kept walks")
+    let twoRoots = documentWalk(nativeRequest("\u{2022} one\nTwo", "\u{2022} oneTwo"),
+                                fakeTree("0/L/0/5 0.0/G/0/5 0.0.0/M/0/2 0.0.1/T/2/5 1/G/5/8 1.0/T/5/8", linear: false), roots: nil)
+    let twoTyped = nativeRequest("\u{2022} one\nTwox", "\u{2022} oneTwox")
+    precondition(FieldDocument.Memo(request: twoRoots.request, blocks: 1, document: twoRoots.document, reads: twoRoots.reads)
+                     .carried(twoTyped, blocks: 1, roots: nil) == .failure(.unread)
+                 && twoRoots.carried(twoTyped, blocks: 2, roots: nil).map(\.document.found?.markers) == .success([0..<2]),
+                 "reads of a tree with other root blocks than the count")
 
-    precondition(blankMemo.found == [43] && blankCarried { _ in } == .success(blankMemo))
+    precondition(blankMemo.document.emptyParagraphs == [43] && blankCarried { _ in } == .success(blankMemo))
     let blankShifted = try! blankCarried { $0[0] = "Headingxy one" }.get()
-    precondition(blankShifted.found == [45] && blankCarried { $0[3] = "Second" }.map(\.found) == .success([43]))
+    precondition(blankShifted.document.emptyParagraphs == [45]
+                 && blankCarried { $0[3] = "Second" }.map(\.document.emptyParagraphs) == .success([43]))
     precondition(blankShifted.origin == .shifted(Discovery.Run(from: blankMarkers, to: "Headingxy one" + blankMarkers.dropFirst(11))!))
     precondition(blankCarried { $0[1] += "x" } == .failure(.boundary), "typed where its <br> starts")
     precondition(blankCarried { $0[2] = "x" } == .failure(.edit) && blankCarried { $0[0] = "Hx"; $0[6] = "Ly" } == .failure(.edit),
                  "typed in the blank line, or in two places")
     precondition(blankCarried { $0.insert("New", at: 1) } == .failure(.blocks))
-    precondition(EmptyParagraphs.Memo(value: "ab\nc", markers: "ab\nc", blocks: nil, found: [2])
-                 .carried(value: "axb\nc", markers: "axb\nc", blocks: nil) == .failure(.blocks))
-    let failedBlank = EmptyParagraphs.Memo(value: blankValue, markers: blankMarkers, blocks: blankParagraphs.count, found: nil)
+    precondition(FieldDocument.Memo(request: documentRequest("ab\nc", "ab\nc", proseMirror: false, folds: false), blocks: nil,
+                                    document: FieldDocument(markers: "ab\nc", emptyParagraphs: [2], found: nil))
+                 .carried(documentRequest("axb\nc", "axb\nc", proseMirror: false, folds: false), blocks: nil, roots: nil) == .failure(.blocks))
+    let failedBlank = FieldDocument.Memo(request: blankRequest(blankParagraphs), blocks: blankParagraphs.count,
+                                         document: FieldDocument(markers: blankMarkers, emptyParagraphs: nil, found: nil))
     precondition(blankCarried({ $0[0] = "Headingxy one" }, memo: failedBlank) == .failure(.failed), "a failed read is read again")
     for budget in [3, 8] {
-        let exhausted = emptyWalk(blankValue, blankMarkers, blankTree(blankParagraphs), budget: budget)
-        precondition(exhausted.found == nil && exhausted.exhausted, "\(budget)")
-        precondition(try! blankCarried({ $0[0] = "Headingxy one" }, memo: exhausted).get().exhausted,
+        let exhausted = documentWalk(blankRequest(blankParagraphs), blankTree(blankParagraphs), roots: nil, budget: budget)
+        precondition(exhausted.document.emptyParagraphs == nil && exhausted.document.exhausted == .emptyParagraphs, "\(budget)")
+        precondition(try! blankCarried({ $0[0] = "Headingxy one" }, memo: exhausted).get().document.exhausted == .emptyParagraphs,
                      "a walk past its budget, replayed, runs out again: \(budget)")
     }
     let blankTypedMarkers = EmptyParagraphs.chromium(blankParagraphs.dropLast() + ["Last paragraph herexy."]).markers
-    precondition(blankMemo.carried(value: blankValue + "y", markers: blankTypedMarkers, blocks: blankParagraphs.count)
-                 == .failure(.value))
+    precondition(blankMemo.carried(documentRequest(blankValue + "y", blankTypedMarkers, caret: nil, proseMirror: false, folds: false),
+                                   blocks: blankParagraphs.count, roots: nil) == .failure(.value))
 
     // Enter in a list adds an item but no root block, and the marker text gains only "•z": AXValue's new lines refuse it.
     let dia7Before = treeBuild(dia7Value, dia7Raw, dia7Tree)
     let newItemRaw = dia7Raw.replacing("Plain itemClosing", with: "Plain item\u{2022}zClosing")
     let newItemValue = dia7Value.replacing("Plain item\nClosing", with: "Plain item\n\u{2022}\nz\nClosing")
     precondition(Discovery.Run(from: dia7Raw, to: newItemRaw)?.inserted == 2
-                 && dia7Before.unreachable?.carried(value: newItemValue, markers: newItemRaw, blocks: dia7Tree.count, roots: dia7Tree.count,
-                                                    candidates: dia7Before.unreachable!.candidates) == .failure(.value)
-                 && dia7Before.memo?.carried(value: newItemValue, markers: newItemRaw, blocks: dia7Tree.count) == .failure(.value))
+                 && dia7Before.memo?.carried(documentRequest(newItemValue, newItemRaw), blocks: dia7Tree.count, roots: dia7Tree.count)
+                     == .failure(.value))
 
     precondition(ChromiumParagraphs(text: "a \u{2060} b\nc \u{2060}\n\u{2060} d", lines: [Sim.ListLine(), Sim.ListLine(), Sim.ListLine()]).shown
                  == ("a \n\u{2060}\u{00A0}LIN-1 chip\n b\nc \n\u{2060}\u{00A0}LIN-1 chip\n\u{2060}\u{00A0}LIN-1 chip\n d",

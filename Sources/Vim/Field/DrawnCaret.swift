@@ -4,7 +4,7 @@ public enum DrawnCaret {
 
     /// A group with no children and no text: an empty paragraph's block, or a drawn caret.
     public static func isEmptyGroup(subrole: String?, children: Int) -> Bool {
-        subrole == "AXEmptyGroup" && children == 0
+        FieldRules.isEmptyBlock(subrole: subrole, children: children)
     }
 
     /// An empty group is a drawn caret when its parent or a sibling next to it is a code span's group.
