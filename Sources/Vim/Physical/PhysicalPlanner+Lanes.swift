@@ -96,20 +96,38 @@ extension PhysicalPlanner {
         let fromLine = model.lineStart(of: from)
         let low = min(fromLine, toLine), high = max(fromLine, toLine)
         guard context.cells.contains(where: { low <= $0 && $0 <= high }) else { return nil }
-        let lines = model.newlineCount(in: low..<high)
         let navigation = context.navigation
         let noKeys = CapabilityProfile(available: [])
-        let chords: [Chord] = toLine > fromLine
-            ? [.paragraphEnd] + navigation.hops(
-                from: fromLine, count: lines, model: model, stops: context.stops, cells: context.cells, profile: noKeys
-            ).enumerated().flatMap { ($0.offset > 0 ? [Chord.paragraphEnd] : []) + $0.element }
-            : [.paragraphStart] + navigation.upward(
-                from: fromLine, count: lines, model: model, stops: context.stops, cells: context.cells,
-                lastRows: context.lastRows, profile: noKeys
-            ).chords
-        let walk = chords.map { $0 == .paragraphEnd ? Chord.lineEnd : $0 == .paragraphStart ? .lineStart : $0 }
+        func lineKeys(_ chords: [Chord]) -> [Chord] {
+            chords.map { $0 == .paragraphEnd ? Chord.lineEnd : $0 == .paragraphStart ? .lineStart : $0 }
+        }
         var keys = context.keys(model.text, at: from)
-        guard walk.allSatisfy({ keys.press($0) }), keys.focus == toLine, !keys.inGap else { return nil }
+        var walk: [Chord] = []
+        if toLine < fromLine {
+            walk = lineKeys([.paragraphStart] + navigation.upward(
+                from: fromLine, count: model.newlineCount(in: low..<high), model: model, stops: context.stops,
+                cells: context.cells, lastRows: context.lastRows, profile: noKeys
+            ).chords)
+            guard walk.allSatisfy({ keys.press($0) }) else { return nil }
+        }
+        var line = fromLine
+        while line < toLine {
+            let next = model.lineBreak(of: line) + 1
+            if context.cells.contains(line), !context.cells.contains(next) {
+                // Chromium's own → out of a table's last cell can land before the table (LIN-2389), where ↓ leaves it below.
+                let crossed = (context.stops[next] ?? []).filter { navigation.visits($0, .down) }.count
+                walk += Array(repeating: .down, count: crossed + 1) + (context.stops[next]?.last == .rule ? [] : [.lineStart])
+                keys = context.keys(model.text, at: next)
+            } else {
+                let hop = lineKeys([.paragraphEnd] + (navigation.hops(
+                    from: line, count: 1, model: model, stops: context.stops, cells: context.cells, profile: noKeys
+                ).first ?? []))
+                walk += hop
+                guard hop.allSatisfy({ keys.press($0) }), keys.focus == next, !keys.inGap else { return nil }
+            }
+            line = next
+        }
+        guard keys.focus == toLine, !keys.inGap else { return nil }
         return walk
     }
 

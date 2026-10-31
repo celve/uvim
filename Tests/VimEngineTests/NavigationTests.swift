@@ -49,6 +49,9 @@ func testNavigation() {
                  && linearKeys("k", "Para one", tables, profile: noLineKeys) == [.lineStart, .up, .lineStart]
                  && linearKeys("j", "Para zero", tables, profile: noLineKeys) == [.lineEnd, .right],
                  "lane B crosses a table line by line, where ↓ and ↑ go by rows")
+    precondition(linearKeys("j", "Btwo", tables, profile: noLineKeys) == [.down, .lineStart]
+                 && linearKeys("2j", "Bone", tables, profile: noLineKeys) == [.lineEnd, .right, .down, .lineStart],
+                 "it leaves a table's last cell by ↓, where Chromium's → can land before the table")
     precondition(linearKeys("j", "Cell one", tablesModel, profile: noLineKeys) == [.lineEnd, .right], "in Linear's tables too")
 
     // The rows Linear's facts override, and nothing else.
