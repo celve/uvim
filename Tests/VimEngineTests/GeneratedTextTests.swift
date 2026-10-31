@@ -15,7 +15,7 @@ final class ShownNode {
     }
 
     var read: GeneratedTextScan<ShownNode>.Read? {
-        fails ? nil : .init(role: role, id: id, value: value, children: children)
+        fails ? nil : .init(role: role, generated: id.map { $0 < 0 } == true, value: value, children: children)
     }
 }
 func shownScan(_ roots: [ShownNode], budget: Int = GeneratedText.readBudget) -> (texts: [String]?, reads: Int) {

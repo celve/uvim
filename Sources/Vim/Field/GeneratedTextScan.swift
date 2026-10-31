@@ -1,20 +1,20 @@
-/// The text a page generates in a field, which Chromium gives a negative node id as no DOM node backs it (LIN-1930).
+/// The text a page generates in a field, which the engine's adapter marks as no DOM node backs it (LIN-1930).
 public struct GeneratedTextScan<Node> {
-    /// One node's role, `ChromeAXNodeId`, value and children, read together.
+    /// One node's role, value and children, and whether the page generates it, read together.
     public struct Read {
         public let role: String?
-        public let id: Int?
+        public let generated: Bool
         public let value: String?
         public let children: [Node]
 
-        public init(role: String?, id: Int?, value: String? = nil, children: [Node] = []) {
+        public init(role: String?, generated: Bool, value: String? = nil, children: [Node] = []) {
             self.role = role
-            self.id = id
+            self.generated = generated
             self.value = value
             self.children = children
         }
 
-        var isGeneratedText: Bool { FieldRules.isGeneratedText(role: role, generated: id.map { $0 < 0 } == true) }
+        var isGeneratedText: Bool { FieldRules.isGeneratedText(role: role, generated: generated) }
     }
 
     /// Nil on a failed read.

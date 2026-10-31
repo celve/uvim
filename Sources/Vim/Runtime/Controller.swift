@@ -536,7 +536,7 @@ extension Controller {
                 capabilities: binding.capabilities,
                 anchor: anchor,
                 cursor: controller.state.field.cursor,
-                chromium: binding.isChromium,
+                adapter: binding.surface.adapter,
                 model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
                 sampling: controller.sampling,
                 known: controller.document
@@ -565,7 +565,8 @@ extension Controller {
         mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?) {
             epoch = controller.tracker.epoch
             let executed = controller.executor.execute(
-                plan, on: binding.element, state: &controller.state, paragraphs: paragraphs, generated: generated
+                plan, on: binding.element, state: &controller.state, adapter: binding.surface.adapter, paragraphs: paragraphs,
+                generated: generated
             )
             evidence = controller.executor.lastRun
             return (executed, evidence.abortedAt)
@@ -606,7 +607,7 @@ extension Controller {
         }
 
         func side(of marked: AX.MarkedSelection) -> ParagraphBreaks.Side? {
-            Snapshotter.paragraphSide(of: marked, upper: false)
+            Snapshotter.paragraphSide(of: marked, upper: false, adapter: binding.surface.adapter)
         }
 
         func value() -> String? {
@@ -615,7 +616,9 @@ extension Controller {
 
         @discardableResult
         func runAside(_ plan: PhysicalPlan, paragraphs: Bool) -> Bool {
-            controller.executor.execute(plan, on: binding.element, state: &controller.state, paragraphs: paragraphs)
+            controller.executor.execute(
+                plan, on: binding.element, state: &controller.state, adapter: binding.surface.adapter, paragraphs: paragraphs
+            )
         }
 
         /// Whether the selection reads as a caret within 100 ms: Chromium shows a write or key milliseconds after it is sent,
@@ -706,7 +709,7 @@ extension Controller {
         func snapshotAside() -> FieldSnapshot {
             Snapshotter.snapshot(
                 of: binding.element, capabilities: binding.capabilities, anchor: nil, cursor: controller.state.field.cursor,
-                chromium: binding.isChromium, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
+                adapter: binding.surface.adapter, model: binding.beliefs?.readModel ?? ReadModel(answer: .value),
                 sampling: controller.sampling, known: controller.document
             ).snapshot
         }
@@ -717,7 +720,8 @@ extension Controller {
 
         func runLanding(_ plan: PhysicalPlan, paragraphs: Bool) -> (ran: Bool, departure: KeyDestination.Departure?) {
             let ran = controller.executor.execute(
-                plan, on: binding.element, state: &controller.state, paragraphs: paragraphs, keys: PhysicalPlanner.undoKeys
+                plan, on: binding.element, state: &controller.state, adapter: binding.surface.adapter, paragraphs: paragraphs,
+                keys: PhysicalPlanner.undoKeys
             )
             return (ran, controller.executor.lastRun.departure)
         }

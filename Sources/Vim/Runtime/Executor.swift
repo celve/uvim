@@ -75,10 +75,12 @@ public final class Executor {
     /// whether every step ran.
     @discardableResult
     public func execute(
-        _ plan: PhysicalPlan, on element: AXUIElement, state: inout VimState, paragraphs: Bool = false, generated: Bool = false,
-        keys: Int? = nil
+        _ plan: PhysicalPlan, on element: AXUIElement, state: inout VimState, adapter: any EngineAdapter = AppKitAdapter(),
+        paragraphs: Bool = false, generated: Bool = false, keys: Int? = nil
     ) -> Bool {
-        var host = Host(executor: self, element: element, state: state, paragraphs: paragraphs, steps: plan.steps)
+        var host = Host(
+            executor: self, element: element, state: state, adapter: adapter, paragraphs: paragraphs, steps: plan.steps
+        )
         let run = StepRunner.run(plan.steps, generated: generated, keys: keys, host: &host)
         state = host.state
         captures = run.captures
@@ -125,7 +127,8 @@ public final class Executor {
     /// answered nil, and fetching it every poll would marshal the entire
     /// document dozens of times per settle.
     nonisolated static func settle(
-        _ expectation: Expectation, on element: AXUIElement, paragraphs: Bool, presses: Int = 0, generated: Bool = false
+        _ expectation: Expectation, on element: AXUIElement, adapter: any EngineAdapter, paragraphs: Bool, presses: Int = 0,
+        generated: Bool = false
     ) -> SettleOutcome {
         var names: [String] = []
         var selectionSlot: Int?
@@ -187,16 +190,16 @@ public final class Executor {
             if !expectation.converged(selection: selection, length: length, selectedText: text, side: nil), paragraphs,
                selectionSlot != nil, let marked = Snapshotter.markedSelection(of: element) {
                 selection = marked.range
-                side = expectation.edge == nil ? nil : Snapshotter.paragraphSide(of: marked, upper: true)
+                side = expectation.edge == nil ? nil : Snapshotter.paragraphSide(of: marked, upper: true, adapter: adapter)
                 // The caret Linear draws at a code span's edge is lines of its own, which no expected length counts.
                 if let expected = expectation.length, let observed = length, (1...2).contains(observed - expected) {
-                    checkedLength = observed - Snapshotter.drawnLength(at: marked)
+                    checkedLength = observed - Snapshotter.drawnLength(at: marked, adapter: adapter)
                 }
             }
             // A field showing only text its page generates, as an empty editor shows its placeholder, holds none (LIN-1930).
             if expectation.passes(
                 selection: selection, length: checkedLength, selectedText: text, side: side, answered: answered,
-                generated: generated, showsOnlyGeneratedText: { Snapshotter.showsOnlyGeneratedText(element) }
+                generated: generated, showsOnlyGeneratedText: { adapter.showsOnlyGeneratedText(element, roots: nil, value: nil) }
             ) {
                 return outcome(true)
             }
@@ -261,6 +264,7 @@ extension Executor {
     @MainActor struct Host: @MainActor StepHost {
         unowned let executor: Executor
         let element: AXUIElement
+        let adapter: any EngineAdapter
         /// The field selects in text content (Chromium rich text).
         let paragraphs: Bool
         var state: VimState
@@ -279,9 +283,13 @@ extension Executor {
         /// The caret the paste began at, when it read as one.
         private var pastedFrom: (range: Range<Int>, side: ParagraphBreaks.Side?)?
 
-        init(executor: Executor, element: AXUIElement, state: VimState, paragraphs: Bool, steps: [PhysicalStep]) {
+        init(
+            executor: Executor, element: AXUIElement, state: VimState, adapter: any EngineAdapter, paragraphs: Bool,
+            steps: [PhysicalStep]
+        ) {
             self.executor = executor
             self.element = element
+            self.adapter = adapter
             self.state = state
             self.paragraphs = paragraphs
             let outside: [PhysicalStep] = [.press(.selectLeft, count: 1), .press(.right, count: 1)]
@@ -336,7 +344,7 @@ extension Executor {
                 pastedAt = index
                 pasteWaits = paragraphs
                 pastedFrom = paragraphs ? Snapshotter.markedSelection(of: element).flatMap {
-                    $0.isCollapsed ? ($0.range, Snapshotter.paragraphSide(of: $0, upper: true)) : nil
+                    $0.isCollapsed ? ($0.range, Snapshotter.paragraphSide(of: $0, upper: true, adapter: adapter)) : nil
                 } : nil
             } else {
                 // Registers +/* and pasteboard markers paste what the user has there, not a register still on loan.
@@ -358,13 +366,15 @@ extension Executor {
         mutating func settle(_ expectation: Expectation, at index: Int, generated: Bool) -> SettleOutcome {
             awaitPaste(expectation, at: index)
             var outcome = Executor.settle(
-                expectation, on: element, paragraphs: paragraphs, presses: pressed, generated: generated
+                expectation, on: element, adapter: adapter, paragraphs: paragraphs, presses: pressed, generated: generated
             )
             pressed = 0
             if outcome.converged, afterNormalizing.contains(index) {
                 // Read again once the ⇧← → are in, so the next command never reads the selection between them.
                 Thread.sleep(forTimeInterval: 0.015)
-                outcome = Executor.settle(expectation, on: element, paragraphs: paragraphs, generated: generated)
+                outcome = Executor.settle(
+                    expectation, on: element, adapter: adapter, paragraphs: paragraphs, generated: generated
+                )
             }
             confirmPaste(outcome, expectation, at: index)
             return outcome
@@ -396,9 +406,8 @@ extension Executor {
             NSSound.beep()
         }
 
-        /// Only Chromium's tree tells the page's generated text from the field's.
         func generates(_ run: Range<Int>) -> Bool {
-            paragraphs && Snapshotter.generates(run, in: element)
+            paragraphs && adapter.generates(run, in: element)
         }
 
         /// Reads `AX.until`'s deadline refused fail a settle without saying anything of this field.
@@ -415,7 +424,8 @@ extension Executor {
             while Date() < deadline {
                 // A caret Linear draws beside code reads as a selection, or elsewhere, for a moment, which is no landing.
                 if let from = pastedFrom, let marked = Snapshotter.markedSelection(of: element), marked.isCollapsed,
-                   marked.range != from.range || Snapshotter.paragraphSide(of: marked, upper: true) != from.side {
+                   marked.range != from.range
+                    || Snapshotter.paragraphSide(of: marked, upper: true, adapter: adapter) != from.side {
                     moved += 1
                     if moved == 2 { return }
                 } else {

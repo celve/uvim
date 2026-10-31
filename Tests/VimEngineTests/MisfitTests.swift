@@ -139,7 +139,7 @@ func testMisfits() {
     var generated = Set(quillTree[0].children.map { ObjectIdentifier($0.children[0].children[0]) })
     func generates(_ run: Range<Int>, in roots: [FakeNode], budget: Int = GeneratedText.runBudget) -> Bool {
         var scan = GeneratedTextScan<FakeNode>(budget: budget) { node in
-            node.fails ? nil : .init(role: node.role, id: generated.contains(ObjectIdentifier(node)) ? -1000000002 : 9, children: node.children)
+            node.fails ? nil : .init(role: node.role, generated: generated.contains(ObjectIdentifier(node)), children: node.children)
         }
         return scan.generates(run, in: roots, offset: { node, end in end ? node.end : node.start })
     }
