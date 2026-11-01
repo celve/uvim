@@ -129,6 +129,7 @@ extension Sim {
             stops: shown.keyStops,
             cells: shown.cells,
             lastRows: shown.lastRows,
+            navigation: .linear,
             inStop: inListGap
         )
         guard keys.press(chord) else { return false }

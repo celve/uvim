@@ -1,8 +1,6 @@
-/// Linear's entry, the only editor whose blocks uvim measured: how its blocks show in the tree and which have stops beside them.
+/// Linear's entry, with ProseMirror's rules and tables (softlash/LIN-2048): how its blocks show in the tree and which have stops
+/// beside them.
 public enum Linear {
-    /// ProseMirror's class on its editor; its gap cursor, Linear's stop, is a plugin another editor may not have.
-    public static let editorClass = "ProseMirror"
-
     /// Linear's own DOM class on a list, which no other editor's list carries.
     public static let listClass = "list-node"
 
@@ -13,7 +11,7 @@ public enum Linear {
     public static let tableClass = "tableContainer"
     public static let sectionClass = "collapsible-section"
 
-    /// Linear's classes on its root blocks; a rule's `AXSplitter` has none, so only a root with one shows a rule is Linear's.
+    /// Linear's classes on its root blocks, which make a field's blocks Linear's.
     public static let rootClasses: Set<String> = [listClass, blockClass, tableClass, sectionClass, "text-node", "heading-node"]
 
     /// Linear's class on the group that holds a code block's language label and buttons, before its code.
@@ -48,9 +46,11 @@ public enum Linear {
         var closedStart: Bool { closedEnd || self == .section(open: false) }
     }
 
-    /// The stop between two adjacent blocks, of the kinds measured beside each other; a rule meets none but a rule's or a table's.
-    static func stop(between previous: BlockKind, and next: BlockKind) -> Stop? {
+    /// The stop between two adjacent blocks, of the kinds measured beside each other; a rule meets none but a rule's or, in
+    /// Linear, a table's, and only Linear stops between other blocks.
+    static func stop(between previous: BlockKind, and next: BlockKind, linear: Bool) -> Stop? {
         switch (previous, next) {
+        case _ where !linear: previous == .rule && next == .rule ? Stop.ruleGap : nil
         case (.table, .rule): .backGap
         case (.rule, .rule): .ruleGap
         case (.rule, .table): .boxedGap
@@ -77,7 +77,7 @@ public enum Linear {
         var stops: [UnreachableLines.Stop] = []
         var tables: [UnreachableLines.Table] = []
         var containers: [[Int]] = []
-        /// A root carries one of Linear's classes, without which a rule is not known to be Linear's.
+        /// A root carries one of Linear's classes, without which only ProseMirror's own stops are made.
         var linear = false
     }
 
@@ -114,7 +114,7 @@ public enum Linear {
                   let kind = kind(of: node, read, at: here, level: level, into: &blocks, scan: &scan) else {
                 return false
             }
-            if let previous, let stop = stop(between: previous, and: kind) {
+            if let previous, let stop = stop(between: previous, and: kind, linear: blocks.linear) {
                 guard let start = scan.start(of: node, at: here) else { return false }
                 if stop == .gap { blocks.joins.append(start) } else { blocks.stops.append(.init(at: start, kind: stop)) }
             }
@@ -140,8 +140,8 @@ public enum Linear {
         scan: inout UnreachableScan<Node>
     ) -> BlockKind? {
         if read.isList { return read.classes.contains(listClass) ? .list : .other }
-        if read.role == "AXSplitter" { return blocks.linear ? .rule : .other }
-        if read.classes.contains(tableClass) {
+        if read.role == "AXSplitter" { return .rule }
+        if read.classes.contains(tableClass) || read.role == "AXTable" {
             guard let table = table(node, read, at: path, scan: &scan) else { return nil }
             blocks.tables.append(table)
             return .table
@@ -162,25 +162,32 @@ public enum Linear {
         return .code
     }
 
-    /// A table's plain range and where its last row starts, the last `AXRow` under its wrapper's `AXTable`; nil past the budget.
+    /// A table's plain range and where its last row starts, the last `AXRow` of its `AXTable`: the root itself, or the grid
+    /// under Linear's wrapper. Nil past the budget.
     private static func table<Node>(
         _ node: Node, _ read: EmptyBlockScan<Node>.Block, at path: [Int], scan: inout UnreachableScan<Node>
     ) -> UnreachableLines.Table? {
         guard let lower = scan.start(of: node, at: path), let upper = scan.end(of: node, at: path) else { return nil }
-        var lastRow: Int?
-        if let wrapper = read.children.first {
+        var grid: (read: EmptyBlockScan<Node>.Block, path: [Int])?
+        if read.role == "AXTable" {
+            grid = (read, path)
+        } else if let wrapper = read.children.first {
             guard let wrapped = scan.read(wrapper, at: path + [0]) else { return nil }
-            if let grid = wrapped.children.first {
-                guard let table = scan.read(grid, at: path + [0, 0]) else { return nil }
-                // The rows come before the columns and the header.
-                for index in table.children.indices.reversed() where table.role == "AXTable" {
-                    let rowPath = path + [0, 0, index]
-                    guard let row = scan.read(table.children[index], at: rowPath) else { return nil }
-                    guard row.role == "AXRow" else { continue }
-                    guard let start = scan.start(of: table.children[index], at: rowPath) else { return nil }
-                    lastRow = start
-                    break
-                }
+            if let inner = wrapped.children.first {
+                guard let table = scan.read(inner, at: path + [0, 0]) else { return nil }
+                grid = (table, path + [0, 0])
+            }
+        }
+        var lastRow: Int?
+        if let grid, grid.read.role == "AXTable" {
+            // The rows come before the columns and the header.
+            for index in grid.read.children.indices.reversed() {
+                let rowPath = grid.path + [index]
+                guard let row = scan.read(grid.read.children[index], at: rowPath) else { return nil }
+                guard row.role == "AXRow" else { continue }
+                guard let start = scan.start(of: grid.read.children[index], at: rowPath) else { return nil }
+                lastRow = start
+                break
             }
         }
         return UnreachableLines.Table(range: lower..<upper, lastRow: lastRow)

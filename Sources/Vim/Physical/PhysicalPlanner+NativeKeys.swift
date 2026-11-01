@@ -16,15 +16,16 @@ extension PhysicalPlanner {
         let cells = context.cells
         let lastRows = context.lastRows
         let shape = context
-        // Linear's stops and tables take keys of their own; any other field's line takes → down, or ← and ⌃A up.
-        let linear = !stops.isEmpty || !cells.isEmpty
+        let navigation = context.navigation
+        // Stops and tables take keys of their own; any other field's line takes → down, or ← and ⌃A up.
+        let structured = !stops.isEmpty || !cells.isEmpty
         func hops(_ count: Int) -> [[Chord]] {
-            linear ? Linear.hops(from: line, count: count, model: model, stops: stops, cells: cells, profile: profile)
+            structured ? navigation.hops(from: line, count: count, model: model, stops: stops, cells: cells, profile: profile)
                 : Array(repeating: [.right], count: count)
         }
         func upward(_ count: Int) -> (chords: [Chord], endsLeft: Bool) {
-            linear ? Linear.upward(from: line, count: count, model: model, stops: stops, cells: cells, lastRows: lastRows,
-                                   profile: profile)
+            structured ? navigation.upward(from: line, count: count, model: model, stops: stops, cells: cells,
+                                           lastRows: lastRows, profile: profile)
                 : (repeated([.left, .paragraphStart], count), count > 0)
         }
         // The way to the target's line, and for `j`/`k` an optional one to its end; the column is counted from where each lands.

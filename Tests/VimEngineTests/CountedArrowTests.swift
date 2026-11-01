@@ -420,10 +420,12 @@ func testCountedArrows() {
     let listsThenBlocks = fakeTree("0/L/0/2 0.0/G/0/2 1/L/2/4 1.0/G/2/4 2/B/4/8 2.0/N/4/6 2.1/D/6/8 3/Q/8/10 3.0/G/8/10")
     let rootsOnly = UnreachableLines.Candidates(markers: [], chips: [], roots: true, stops: true)
     precondition(unreachableScanned(listsThenBlocks, rootsOnly)
-                 == UnreachableLines.Found(markers: [], chips: [], joins: [2, 4, 8], controls: [4..<6], containers: [[3]]))
+                 == UnreachableLines.Found(markers: [], chips: [], joins: [2, 4, 8], controls: [4..<6], containers: [[3]],
+                                           editor: [.proseMirror, .linear]))
     // The roots and the second list's start are 6 reads, the code block's two children and three more starts 8, the quote's child 1.
     precondition((6...14).allSatisfy { budget in
-        unreachableScanned(listsThenBlocks, rootsOnly, budget: budget) == UnreachableLines.Found(markers: [], chips: [], joins: [2])
+        unreachableScanned(listsThenBlocks, rootsOnly, budget: budget)
+            == UnreachableLines.Found(markers: [], chips: [], joins: [2], editor: .proseMirror)
     } && unreachableScanned(listsThenBlocks, rootsOnly, budget: 15)?.joins == [2, 4, 8], "the lists' stops are read first, as on main")
     let othersFound = unreachableScanned(fakeTree(blocksSpec, linear: false), blocksCandidates)!
     precondition(othersFound.joins.isEmpty && othersFound.controls.isEmpty && othersFound.markers.count == 3,
@@ -441,7 +443,8 @@ func testCountedArrows() {
                  "another editor's text, or a single line, asks nothing")
     precondition(unreachableScanned(twoQuotes, quoteCandidates)?.joins == [3]
                  && unreachableScanned(fakeTree(twoQuotesSpec, linear: false), quoteCandidates)?.joins == [])
-    precondition(folded("one\ntwo", "onetwo", twoQuotes).breaks == ParagraphBreaks(offsets: [3], hidden: [.init(at: 4, text: "", kind: .stop(.gap))])
+    precondition(folded("one\ntwo", "onetwo", twoQuotes).breaks
+                 == ParagraphBreaks(offsets: [3], hidden: [.init(at: 4, text: "", kind: .stop(.gap))], editor: [.proseMirror, .linear])
                  && UnreachableLines.fold(text: "a\nb", breaks: ParagraphBreaks(offsets: [1]), raw: "ab",
                                           found: .init(markers: [], chips: [], joins: [1])).breaks.gaps == [2],
                  "a stop that was read is kept though nothing folds")
@@ -471,7 +474,7 @@ func testCountedArrows() {
     0/L/0/2 0.0/G/0/2 1/B/2/4 1.0/G/2/4 1.0.0/T/2/4 2/L/4/6 2.0/G/4/6 3/B/6/8 3.0/D/6/8 4/L/8/10 4.0/G/8/10 5/B/10/14 5.0/G/10/12
     5.0.0/T/10/12 5.1/E/12/13 6/L/14/16 6.0/G/14/16 7/B/16/20 7.0/G/16/18 7.0.0/T/16/18 7.1/D/18/20
     """)
-    precondition(unreachableScanned(section, rootsOnly) == UnreachableLines.Found(markers: [], chips: []),
+    precondition(unreachableScanned(section, rootsOnly) == UnreachableLines.Found(markers: [], chips: [], editor: [.proseMirror, .linear]),
                  "a collapsible section, open or not, and code with no controls before it are not closed, and their text stays")
     // softlash/LIN-1726 evidence/tree-empty-code.jsonl: `D` leaves the label, the two images, and an empty group where the code was.
     let emptiedCode = fakeTree("""

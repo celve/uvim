@@ -188,14 +188,15 @@ func testLinearStops() {
                  && UnreachableLines.witness(roots: openTree, containers: [], children: \.children, identity: ObjectIdentifier.init)
                     == openTree.reduce(into: Hasher()) { $0.combine(ObjectIdentifier($1)) }.finalize())
 
-    // An `AXSplitter` is a rule only where the roots show Linear's classes.
+    // An `AXSplitter` is a rule in any ProseMirror editor, with a gap cursor between two (softlash/LIN-2048).
     let ruledSpec = "0/G/0/5 0.0/T/0/5 1/R/5/5 2/G/5/10 2.0/T/5/10 3/R/10/10 4/R/10/10 5/G/10/15 5.0/T/10/15"
     let ruleCandidates = UnreachableLines.Candidates(markers: [], chips: [], stops: true)
     precondition(unreachableScanned(fakeTree(ruledSpec), ruleCandidates)?.stops.map(\.kind) == [.rule, .rule, .ruleGap, .rule]
-                 && unreachableScanned(fakeTree(ruledSpec, linear: false), ruleCandidates)?.stops == [])
+                 && unreachableScanned(fakeTree(ruledSpec, linear: false), ruleCandidates)?.stops.map(\.kind)
+                    == [.rule, .rule, .ruleGap, .rule])
 
     // The keys between and around rules, stops and tables, as measured in Linear.
-    var ruleKeys = KeyModel(text: "a\nb\nc", anchor: 1, focus: 1, stops: [2: [.rule], 4: [.rule, .ruleGap, .rule]])
+    var ruleKeys = KeyModel(text: "a\nb\nc", anchor: 1, focus: 1, stops: [2: [.rule], 4: [.rule, .ruleGap, .rule]], navigation: .linear)
     precondition(ruleKeys.press(.right) && ruleKeys.inGap && ruleKeys.press(.right) && ruleKeys.selection == 2..<2 && !ruleKeys.inGap)
     precondition(ruleKeys.press(.left) && ruleKeys.inGap && ruleKeys.press(.paragraphStart) && ruleKeys.selection == 2..<2,
                  "⌃A on a selected rule goes below it")
@@ -211,11 +212,11 @@ func testLinearStops() {
     backKeys = KeyModel(text: "a\nb", anchor: 1, focus: 1, stops: [2: [.backGap, .rule]])
     precondition(backKeys.press(.right) && backKeys.press(.right) && backKeys.selection == 2..<2, "→ skips the stop before a rule")
     // "p", a one-row table of two cells, "q".
-    var tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 4, focus: 4, cells: [2, 5], lastRows: [2])
+    var tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 4, focus: 4, cells: [2, 5], lastRows: [2], navigation: .linear)
     precondition(tableKeys.press(.wordRight) && tableKeys.selection == 5..<5 && tableKeys.press(.paragraphEnd)
                  && tableKeys.press(.wordRight) && tableKeys.selection == 8..<8, "⌥→ from a cell's end to the next line's start")
     precondition(tableKeys.press(.left) && tableKeys.selection == 1..<1, "← from the line below skips the table")
-    tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 8, focus: 8, cells: [2, 5], lastRows: [2])
+    tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 8, focus: 8, cells: [2, 5], lastRows: [2], navigation: .linear)
     precondition(tableKeys.press(.up) && tableKeys.selection == 2..<2, "↑ enters the last row's first cell")
     precondition(!tableKeys.press(.down) && !tableKeys.press(.up), "rows are not laid out")
     tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 4, focus: 4, stops: [8: [.boxedGap]], cells: [2, 5], lastRows: [2])

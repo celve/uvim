@@ -136,11 +136,14 @@ extension PhysicalPlanner {
         var cells: Set<Int> { breaks?.cells ?? [] }
         var lastRows: Set<Int> { breaks?.lastRows ?? [] }
 
-        /// Linear's keys over `text` from `position`, with this field's chips, stops and tables.
+        /// What presses do at this field's stops and tables, as its editor facts select it.
+        var navigation: Navigation { Navigation.of(breaks?.editor ?? []) }
+
+        /// The keys over `text` from `position`, with this field's chips, stops and tables.
         func keys(_ text: String, at position: Int) -> KeyModel {
             KeyModel(
                 text: text, anchor: position, focus: position, atoms: atoms, gaps: gaps, stops: stops, cells: cells,
-                lastRows: lastRows
+                lastRows: lastRows, navigation: navigation
             )
         }
 

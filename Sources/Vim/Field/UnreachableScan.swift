@@ -46,7 +46,8 @@ public struct UnreachableScan<Node> {
         return UnreachableLines.Found(
             markers: markers, chips: chips, carets: carets, joins: Array(Set((lists ?? []) + (blocks?.joins ?? []))).sorted(),
             controls: blocks?.controls ?? [], stops: blocks?.stops ?? [], tables: blocks?.tables ?? [],
-            containers: blocks?.containers ?? []
+            containers: blocks?.containers ?? [],
+            editor: candidates.stops ? blocks?.linear == true ? [.proseMirror, .linear] : .proseMirror : []
         )
     }
 

@@ -118,7 +118,8 @@ extension Sim {
                         candidates.chips.contains { $0.lowerBound == chip.range.lowerBound && chip.range.upperBound <= $0.upperBound }
                     },
                     carets: shown.drawnCaret.map { candidates.carets.contains($0.offset) ? [$0] : [] } ?? [],
-                    joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables
+                    joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables,
+                    editor: [.proseMirror, .linear]
                 ) : nil, false)
             })
             memo = FieldDocument.Memo(request: request, blocks: blocks, roots: roots, document: document, origin: .walked(why))

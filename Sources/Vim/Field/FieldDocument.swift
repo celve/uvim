@@ -9,6 +9,8 @@ public struct FieldDocument: Equatable, Sendable {
     public let candidates: UnreachableLines.Candidates
     /// Tree paths of the quotes and open sections whose children the stops were judged among, which the memo's witness reads.
     public let containers: [[Int]]
+    /// The editor facts its stops and tables were read under, which select the field's `Navigation`.
+    public let editor: EditorFacts
     /// The parts that could not tell what they read for: a read failed, the budget ran out, or they were not asked.
     public let unknown: Parts
     /// Which of those ran out of reads, rather than failing one.
@@ -96,6 +98,7 @@ public struct FieldDocument: Equatable, Sendable {
         blocks = (emptyParagraphs ?? []).map(Block.emptyParagraph) + (found?.tables ?? []).map(Block.table)
         self.candidates = candidates
         containers = found?.containers ?? []
+        editor = found?.editor ?? []
         var unknown: Parts = []
         if emptyParagraphs == nil { unknown.insert(.emptyParagraphs) }
         if found == nil { unknown.insert(.found) }
@@ -128,7 +131,7 @@ public struct FieldDocument: Equatable, Sendable {
         let tables = blocks.compactMap { if case .table(let table) = $0 { table } else { nil } }
         return UnreachableLines.Found(
             markers: markers, chips: chips, carets: carets, joins: joins, controls: controls, stops: stops, tables: tables,
-            containers: containers
+            containers: containers, editor: editor
         )
     }
 
