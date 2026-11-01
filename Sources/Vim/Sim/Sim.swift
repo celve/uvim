@@ -173,6 +173,12 @@ public struct Sim {
     /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
     public var pullsBackFromLineEnds = false
 
+    /// ProseMirror's ⌃A and ⌃E act from the caret it took in at the last read, not one a key the browser moves left since.
+    public var lineKeysFromLastRead = false
+
+    /// The caret ProseMirror holds behind the field's, while `lineKeysFromLastRead`.
+    var editorCaret: Int?
+
     /// → from a caret at a line's end does nothing, as the live fault host's `right-at-line-end` (LIN-2104).
     public var holdsRightAtLineEnds = false
 
@@ -610,12 +616,26 @@ extension Sim: StepHost {
             heldHistory.append(chord)
         } else if undoesLate, [.undo, .redo].contains(chord) {
             lateHistory.append(chord)
-        } else if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
-                    || !press(reboundChords[chord] ?? chord) {
-            unsupportedSteps += 1
-            pressUnsupported = true
+        } else if lineKeysFromLastRead, Self.editorLineKeys.contains(chord), let held = editorCaret {
+            // The command sets the line edge of the caret it held, which reaches the page only where that differs from it.
+            var keys = KeyModel(text: text, anchor: held, focus: held)
+            if keys.press(chord), keys.selection != held..<held {
+                selection = keys.selection
+                editorCaret = nil
+            }
+        } else {
+            let (before, stop) = (selection, inListGap)
+            if !(emulatesKeys || Self.countedKeys.contains(chord) || [.undo, .redo].contains(chord))
+                || !press(reboundChords[chord] ?? chord) {
+                unsupportedSteps += 1
+                pressUnsupported = true
+            } else if lineKeysFromLastRead, !Self.editorLineKeys.contains(chord) {
+                editorCaret = stop == nil && inListGap == nil && before.isEmpty ? editorCaret ?? before.lowerBound : nil
+            }
         }
     }
+
+    static let editorLineKeys: Set<Chord> = [.paragraphStart, .paragraphEnd]
 
     mutating func endPress(_ chord: Chord) {
         if !undoesLate || ![.undo, .redo].contains(chord) { landLateHistory() }
@@ -651,6 +671,7 @@ extension Sim: StepHost {
 
     mutating func settle(_ expectation: Expectation, at index: Int, generated: Bool) -> Read {
         landLateHistory()
+        editorCaret = nil
         let (passed, observed, length, misfit) = settles(expectation, generated: generated)
         return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText, misfit: misfit)
     }
