@@ -120,7 +120,7 @@ extension Sim {
                     },
                     carets: shown.drawnCaret.map { candidates.carets.contains($0.offset) ? [$0] : [] } ?? [],
                     joins: shown.joins, controls: shown.controls, stops: shown.stops, tables: shown.tables,
-                    editor: [.proseMirror, .linear]
+                    editor: editor
                 ) : nil, false)
             })
             memo = FieldDocument.Memo(request: request, blocks: blocks, roots: roots, document: document, origin: .walked(why))

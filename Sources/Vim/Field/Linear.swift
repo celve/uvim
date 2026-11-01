@@ -31,6 +31,8 @@ public enum Linear {
         case ruleGap
         /// The stop between a table and a rule after it, which only ← and ↑ visit.
         case backGap
+        /// One more → (or ←) than the tree shows before the line, as a settle saw it land (LIN-2050).
+        case learned(rightward: Bool)
 
         /// A stop → ↓ and ↑ all visit between two blocks, which `KeyModel`'s gaps stand for.
         public var isGap: Bool { self == .gap || self == .boxedGap }

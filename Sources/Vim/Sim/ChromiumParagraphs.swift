@@ -15,6 +15,8 @@ public extension Sim {
         public var ruled: Int
         /// The stops before the line other than `stop`'s, top first, as discovery reads them beside rules, tables and sections.
         public var before: [Linear.Stop]
+        /// Stops above those that no tree read shows, as ProseMirror's gap cursor beside a table (LIN-2050), top first.
+        public var unseen: [Linear.Stop] = []
         /// The line is a table cell's, and starts the table's last row.
         public var cell: Bool
         public var lastRow: Bool
@@ -164,7 +166,7 @@ struct ChromiumParagraphs {
             }
             stops += line.before.map { UnreachableLines.Stop(at: plain, kind: $0) }
             let own = line.stop ? [Linear.joinStop(leaves: line.leaves)] : []
-            if !(own + line.before).isEmpty { keyStops[start] = own + line.before }
+            if !(line.unseen + own + line.before).isEmpty { keyStops[start] = line.unseen + own + line.before }
             // A run of cell lines is a table, which ends where the line after it starts.
             if line.cell {
                 cells.insert(start)

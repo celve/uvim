@@ -34,7 +34,8 @@ extension Sim {
         defer { landLateHistory() }
         let run = StepRunner.run(steps, generated: generated, keys: keys, host: &self)
         attribution = run.attribution
-        softMisses += run.misses.filter { !$0.failed }.count
+        lastLearned = run.learned
+        softMisses += run.misses.filter { !$0.failed && !$0.retried }.count
         if run.departure == nil, let miss = run.misses.last, miss.failed {
             settleFailures += 1
             if !miss.soft, miss.misfit == nil, let key = miss.expectation.blamed(observed: miss.read.selection) { blamed.append(key) }
@@ -129,7 +130,7 @@ extension Sim {
             stops: shown.keyStops,
             cells: shown.cells,
             lastRows: shown.lastRows,
-            navigation: .linear,
+            navigation: Navigation.of(editor),
             inStop: inListGap
         )
         guard keys.press(chord) else { return false }

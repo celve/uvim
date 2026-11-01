@@ -15,6 +15,8 @@ struct StepRunner<Host: StepHost> {
         let writeError: Int32?
         /// The generated text it failed across, which the model counted as the field's.
         let misfit: Range<Int>?
+        /// The arrow was pressed once more after it, from a stop the field hid.
+        var retried = false
     }
 
     private(set) var attribution = RunAttribution()
@@ -24,6 +26,8 @@ struct StepRunner<Host: StepHost> {
     private(set) var departure: KeyDestination.Departure?
     private(set) var misses: [Miss] = []
     private(set) var captures: [CaptureSlot: String] = [:]
+    /// Probed settles that passed once their arrow was pressed again, each a stop the plan lacked.
+    private(set) var learned: [Expectation.StopProbe] = []
 
     /// The field may show only generated text: the snapshot read it so, or a settle expected it empty (LIN-1930).
     private var generated: Bool
@@ -161,7 +165,18 @@ struct StepRunner<Host: StepHost> {
     private mutating func settle(
         _ expectation: Expectation, soft: Bool, at index: Int, host: inout Host
     ) -> (passed: Bool, read: Host.Read?) {
-        let read = host.settle(expectation, at: index, generated: generated)
+        var read = host.settle(expectation, at: index, generated: generated)
+        // The arrow landed on a stop the field hides: once more, and only once (LIN-1686, LIN-2050).
+        if !read.passed, read.hidden, !soft, let stop = expectation.stop {
+            misses.append(Miss(
+                index: index, expectation: expectation, soft: soft, failed: false, read: read, writeError: nil, misfit: nil,
+                retried: true
+            ))
+            if pressAgain(stop.chord, host: &host) {
+                read = host.settle(expectation, at: index, generated: generated)
+                if read.passed { learned.append(stop) }
+            }
+        }
         generated = !read.passed || expectation.metByEmptyField
         if read.passed {
             if !soft, let slot = expectation.keeps, let caret = read.selection?.lowerBound { kept[slot] = caret }
@@ -188,6 +203,19 @@ struct StepRunner<Host: StepHost> {
     private mutating func stays(fresh: Bool, host: inout Host) -> Bool {
         if departure == nil { departure = host.departure(fresh: fresh) }
         return departure == nil
+    }
+
+    /// One more press of `chord`, under every check a planned press of it meets.
+    private mutating func pressAgain(_ chord: Chord, host: inout Host) -> Bool {
+        let step = PhysicalStep.press(chord, count: 1)
+        guard host.beginPress(chord), staysBeforeKey(of: step, host: &host), keysLeft != 0, !host.keysPastDeadline else {
+            return false
+        }
+        keysLeft = keysLeft.map { $0 - 1 }
+        postedKeys = true
+        host.sendKey(chord)
+        host.endPress(chord)
+        return true
     }
 
     private mutating func staysBeforeKey(of step: PhysicalStep, host: inout Host) -> Bool {
@@ -247,4 +275,6 @@ protocol SettleRead {
     var selectedText: String? { get }
     /// What `Expectation.misfit` made of the read the verdict failed.
     var misfit: Range<Int>? { get }
+    /// A probed settle ended with the field holding a hidden node or gap selection.
+    var hidden: Bool { get }
 }
