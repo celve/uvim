@@ -36,6 +36,9 @@ public final class Executor {
         /// Hard and soft: a soft one rings nothing and aborts nothing, so it was invisible.
         public internal(set) var settleFailures: [SettleFailure] = []
 
+        /// Stops the run's arrows met that its plan lacked, each passed by one more press.
+        public internal(set) var learnedStops: [Expectation.StopProbe] = []
+
         public init() {}
     }
 
@@ -54,6 +57,8 @@ public final class Executor {
         public let writeError: Int32?
         /// The generated text it failed across, which the model counted as the field's.
         public let misfit: Range<Int>?
+        /// The field hid a node or gap selection, and the arrow was pressed once more.
+        public var retried = false
     }
 
     public private(set) var lastRun = RunEvidence()
@@ -93,9 +98,10 @@ public final class Executor {
                 hard: miss.failed, index: miss.index, expectation: miss.expectation,
                 observedSelection: miss.read.observedSelection, observedLength: miss.read.observedLength,
                 observedSelectedText: miss.read.observedSelectedText, answered: miss.read.answered, polls: miss.read.polls,
-                milliseconds: miss.read.milliseconds, writeError: miss.writeError, misfit: miss.misfit
+                milliseconds: miss.read.milliseconds, writeError: miss.writeError, misfit: miss.misfit, retried: miss.retried
             )
         }
+        evidence.learnedStops = run.learned
         lastRun = evidence
         return run.abortedAt == nil
     }
@@ -116,6 +122,8 @@ public final class Executor {
         let polls: Int
         let milliseconds: Int
         var misfit: Range<Int>?
+        /// The field held `ProseMirror-hideselection` at the last poll of a probed settle.
+        var hidden = false
     }
 
     /// Bounded convergence poll against the planner's prediction.
@@ -145,6 +153,11 @@ public final class Executor {
         if expectation.selectedText != nil {
             textSlot = names.count
             names.append(kAXSelectedTextAttribute)
+        }
+        var classSlot: Int?
+        if expectation.stop != nil, adapter.readsFieldClasses {
+            classSlot = names.count
+            names.append("AXDOMClassList")
         }
         // An expectation that predicts nothing is already met — and must not
         // spend a round trip discovering that.
@@ -176,12 +189,14 @@ public final class Executor {
             let answered = (selectionSlot == nil || selection != nil)
                 && (lengthSlot == nil || length != nil)
                 && (textSlot == nil || text != nil)
+            // A late key keeps polling; a stop keeps the class to the deadline.
+            let hidden = classSlot.flatMap { reads.strings($0) }?.contains(Executor.hiddenSelectionClass) ?? false
             func outcome(_ converged: Bool) -> SettleOutcome {
                 SettleOutcome(
                     converged: converged,
                     observedSelection: selection, observedLength: length, observedSelectedText: text,
                     answered: answered, polls: polls,
-                    milliseconds: Int(Date().timeIntervalSince(start) * 1000)
+                    milliseconds: Int(Date().timeIntervalSince(start) * 1000), hidden: hidden
                 )
             }
             var side: ParagraphBreaks.Side?
@@ -197,7 +212,7 @@ public final class Executor {
                 }
             }
             // A field showing only text its page generates, as an empty editor shows its placeholder, holds none (LIN-1930).
-            if expectation.passes(
+            if !hidden, expectation.passes(
                 selection: selection, length: checkedLength, selectedText: text, side: side, answered: answered,
                 generated: generated, showsOnlyGeneratedText: { adapter.showsOnlyGeneratedText(element, roots: nil, value: nil) }
             ) {
@@ -205,13 +220,18 @@ public final class Executor {
             }
             guard Date() < deadline, !AX.pastDeadline else {
                 var failed = outcome(false)
-                failed.misfit = expectation.misfit(selection: selection, length: checkedLength, selectedText: text, side: side)
+                if !hidden {
+                    failed.misfit = expectation.misfit(selection: selection, length: checkedLength, selectedText: text, side: side)
+                }
                 return failed
             }
             // In the rich-text fields measured, a missed poll cost the host ~0.5 ms of CPU on average (LIN-1727).
             Thread.sleep(forTimeInterval: 0.003)
         }
     }
+
+    /// ProseMirror's class on the field while a node or gap selection holds, which AX reads as a caret (softlash/LIN-2048).
+    nonisolated static let hiddenSelectionClass = "ProseMirror-hideselection"
 
     // MARK: - Chord lowering (symbolic → hardware)
 

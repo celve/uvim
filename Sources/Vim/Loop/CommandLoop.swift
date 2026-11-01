@@ -92,8 +92,12 @@ protocol CommandHost {
     mutating func snapshot(anchor: Int?) -> CommandLoop<Self>.Reading
     /// The optional routes to plan without.
     func missedRoutes(under offsets: OffsetsAnswer) -> Set<Route>
-    /// Runs a command's plan: whether every step ran, and where it stopped.
-    mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?)
+    /// Stops this field's arrows met beyond its tree's, which the plans after them press once more for.
+    var learnedStops: LearnedStops { get set }
+    /// Runs a command's plan: whether every step ran, where it stopped, and the stops its arrows met that it lacked.
+    mutating func execute(
+        _ plan: PhysicalPlan, paragraphs: Bool, generated: Bool
+    ) -> (executed: Bool, abortedAt: Int?, learned: [Expectation.StopProbe])
     /// Records the command and learns from its run, once the loop is done with it.
     mutating func record(
         _ completed: RawMonitor.Completed, logical: LogicalPlan, planned: PhysicalPlanner.Planning, from before: VimState.Mode,
@@ -182,11 +186,13 @@ extension CommandLoop {
         let snapshot = reading.snapshot
         let paragraphs = snapshot.breaks != nil
         let planned = PhysicalPlanner.planning(
-            logical, snapshot: snapshot, missed: host.missedRoutes(under: reading.observed.after), visual: visual
+            logical, snapshot: snapshot, missed: host.missedRoutes(under: reading.observed.after), visual: visual,
+            learned: host.learnedStops
         )
         let physical = planned.plan
         let before = host.state.field.mode
         let ran = host.execute(physical, paragraphs: paragraphs, generated: reading.generated)
+        host.learnedStops.learn(ran.learned, in: snapshot.text)
         // After the cleanup and the bookkeeping, on both paths, so the republish a lesson causes happens as `run` unwinds.
         defer {
             host.record(completed, logical: logical, planned: planned, from: before, reading: reading, executed: ran.executed)

@@ -242,6 +242,23 @@ public struct Expectation: Equatable, Sendable {
     /// The exact caret touches a generated paragraph break and has no `edge` to say which paragraph's it is.
     public var onBreak = false
 
+    /// The arrow that crossed one line boundary just before, where a ProseMirror stop the tree does not show may hold the caret.
+    public var stop: StopProbe?
+
+    public struct StopProbe: Equatable, Sendable {
+        public let chord: Chord
+        /// The model offset of the line a stop it lands on comes before.
+        public let line: Int
+
+        public init(chord: Chord, line: Int) {
+            self.chord = chord
+            self.line = line
+        }
+
+        /// The stop `chord` is one more press of, once it lands on one.
+        public var learned: Linear.Stop { .learned(rightward: chord == .right) }
+    }
+
     /// Field text no caret reaches, such as a list marker the page draws.
     public struct Equivalence: Equatable, Sendable {
         public let run: Range<Int>

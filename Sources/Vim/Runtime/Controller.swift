@@ -68,6 +68,8 @@ public final class Controller {
 
     /// The last snapshot's, to convert the drawn cursor at unbind.
     private var fieldBreaks: ParagraphBreaks?
+    /// The bound field's stops its arrows met beyond its tree's (LIN-2050).
+    private var learnedStops = LearnedStops()
 
     /// When the app last got a letter in Insert mode, in uptime nanoseconds: an input method shows it pending only later.
     private var letterAt: UInt64?
@@ -323,6 +325,7 @@ public final class Controller {
             loop.pendingUndo = nil
             sampling = OffsetsSampling()
             document = nil
+            learnedStops = LearnedStops()
         }
         binding = new
         Diag.bind(tracker.epoch, transition, new)
@@ -562,14 +565,21 @@ extension Controller {
             controller.missedRoutes(on: binding, under: offsets)
         }
 
-        mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?) {
+        var learnedStops: LearnedStops {
+            get { controller.learnedStops }
+            set { controller.learnedStops = newValue }
+        }
+
+        mutating func execute(
+            _ plan: PhysicalPlan, paragraphs: Bool, generated: Bool
+        ) -> (executed: Bool, abortedAt: Int?, learned: [Expectation.StopProbe]) {
             epoch = controller.tracker.epoch
             let executed = controller.executor.execute(
                 plan, on: binding.element, state: &controller.state, adapter: binding.surface.adapter, paragraphs: paragraphs,
                 generated: generated
             )
             evidence = controller.executor.lastRun
-            return (executed, evidence.abortedAt)
+            return (executed, evidence.abortedAt, evidence.learnedStops)
         }
 
         func record(

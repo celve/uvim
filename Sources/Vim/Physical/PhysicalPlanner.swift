@@ -75,11 +75,13 @@ public enum PhysicalPlanner {
 
     /// `plan` plus what only the planner knows: why it rejected, and the operand; `missed` routes are planned without.
     public static func planning(
-        _ logical: LogicalPlan, snapshot: FieldSnapshot, missed: Set<Route> = [], visual: Bool = false
+        _ logical: LogicalPlan, snapshot: FieldSnapshot, missed: Set<Route> = [], visual: Bool = false,
+        learned: LearnedStops = LearnedStops()
     ) -> Planning {
         let profile = snapshot.capabilities
         var context = Context(snapshot: snapshot)
         context.missed = missed
+        context.learned = learned.stops(in: snapshot.text)
         context.visual = visual
         var steps: [PhysicalStep] = []
         // Writes in a folded field mix with keys at its line edges (LIN-1685).

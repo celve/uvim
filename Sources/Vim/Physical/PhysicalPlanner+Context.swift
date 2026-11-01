@@ -129,8 +129,14 @@ extension PhysicalPlanner {
         /// Starts of lines right after a list, code block or quote's end, where a plain → ↓ from above or ↑ from them stops first.
         var gaps: Set<Int> { breaks?.gaps ?? [] }
 
-        /// Each line's stops, top first: beside Linear's blocks and rules (LIN-1780).
-        var stops: [Int: [Linear.Stop]] { breaks?.stops ?? [:] }
+        /// Each line's stops, top first: beside Linear's blocks and rules (LIN-1780), and above them those learned.
+        var stops: [Int: [Linear.Stop]] { (breaks?.stops ?? [:]).merging(learned) { $1 + $0 } }
+
+        /// Stops this field's arrows met beyond the tree's, in this text (LIN-2050).
+        var learned: [Int: [Linear.Stop]] = [:]
+
+        /// A ProseMirror editor with no entry of its own, where stops beside rules and tables may be ones its tree does not show.
+        var probesStops: Bool { breaks?.editor == .proseMirror && (!stops.isEmpty || !cells.isEmpty) }
 
         /// Table lines, and the first lines of tables' last rows.
         var cells: Set<Int> { breaks?.cells ?? [] }
@@ -332,12 +338,13 @@ extension PhysicalPlanner {
     static func settle(
         _ context: Context, profile: CapabilityProfile, hard: Bool = true,
         blame: Expectation.Blame? = nil, selectedText: String? = nil, route: Route? = nil, landing: Landing? = nil,
-        deleting held: Expectation? = nil
+        deleting held: Expectation? = nil, stop: Expectation.StopProbe? = nil
     ) -> [PhysicalStep] {
         guard profile.has(.readCaret), let selection = context.selection else { return [] }
         var expectation = context.expectation(landing ?? .exact(selection), blame: blame, selectedText: selectedText,
                                               profile: profile)
         expectation.route = route
+        expectation.stop = stop
         expectation.deletes = held?.selection
         expectation.lengthBefore = held?.length
         return [hard ? .settle(expectation) : .softSettle(expectation)]

@@ -182,8 +182,11 @@ extension PhysicalPlanner {
         var model = original.keys(text, at: position)
         let shown = original.model
         var pending: KeyGroup = ([], nil)
-        let groups = original.navigation.lineKeysFromEditor ? settlingLineKeys(groups, from: model) : groups
+        var groups = original.navigation.lineKeysFromEditor ? settlingLineKeys(groups, from: model) : groups
+        if original.probesStops { groups = settlingCrossings(groups, from: model) }
+        var groupStart = model
         for group in groups where !group.chords.isEmpty {
+            if pending.chords.isEmpty { groupStart = model }
             for chord in group.chords {
                 guard model.press(chord) else { return .next }
             }
@@ -202,8 +205,9 @@ extension PhysicalPlanner {
                 checking = .caretWithin(shown.visibleOffset(end)...shown.lineBreak(of: end))
             }
             pending = ([], nil)
+            let stop = merged.blame == nil ? stopProbe(merged.chords, from: groupStart, context: original) : nil
             steps += keys(merged.chords, blaming: merged.blame, to: model.selection, checking: checking, context: &context,
-                          profile: profile, route: group.blame == nil ? route : nil)
+                          profile: profile, route: group.blame == nil ? route : nil, stop: stop)
         }
         guard pending.chords.isEmpty, model.selection == target else { return .next }
         original = context
@@ -228,6 +232,28 @@ extension PhysicalPlanner {
         }
     }
 
+    /// Ends an unblamed group after an arrow run that crossed a line, before the ⌃A or ⌃E that follows, so the run's settle can
+    /// probe for a stop the tree does not show before a line key acts from it (LIN-2050).
+    private static func settlingCrossings(_ groups: [KeyGroup], from keys: KeyModel) -> [KeyGroup] {
+        var keys = keys
+        return groups.flatMap { group -> [KeyGroup] in
+            var parts: [KeyGroup] = [([], group.blame)]
+            var run: (arrow: Chord, line: Int)?
+            for chord in group.chords {
+                let crossed = run.map { !keys.inGap && TextModel(keys.text).lineStart(of: keys.focus) != $0.line } ?? false
+                if group.blame == nil, crossed, [.paragraphStart, .paragraphEnd].contains(chord) { parts.append(([], nil)) }
+                parts[parts.count - 1].chords.append(chord)
+                if chord == .left || chord == .right {
+                    if run?.arrow != chord, !keys.inGap { run = (chord, TextModel(keys.text).lineStart(of: keys.focus)) }
+                } else {
+                    run = nil
+                }
+                guard keys.press(chord) else { return [group] }
+            }
+            return parts
+        }
+    }
+
     private static func repeated(_ chords: [Chord], _ times: Int) -> [Chord] {
         Array(repeatElement(chords, count: max(0, times)).joined())
     }
@@ -236,7 +262,7 @@ extension PhysicalPlanner {
     /// if the field reads as before where it had somewhere to go, or if it landed elsewhere where lines are the model's.
     private static func keys(
         _ chords: [Chord], blaming atom: Capability?, to landing: Range<Int>, checking: Landing? = nil,
-        context: inout Context, profile: CapabilityProfile, route: Route? = nil
+        context: inout Context, profile: CapabilityProfile, route: Route? = nil, stop: Expectation.StopProbe? = nil
     ) -> [PhysicalStep] {
         let before = context.selection
         let model = context.model
@@ -260,7 +286,26 @@ extension PhysicalPlanner {
                 exemptions: exemptions
             )
         }
-        return counted(chords) + settle(context, profile: profile, blame: blame, route: route, landing: checking)
+        return counted(chords) + settle(context, profile: profile, blame: blame, route: route, landing: checking, stop: stop)
+    }
+
+    /// The arrow run ending `chords` where it crosses exactly one line boundary, from a line's end to the next line's start or
+    /// back, which a settle after it probes for a stop the tree does not show (LIN-2050).
+    private static func stopProbe(_ chords: [Chord], from start: KeyModel, context: Context) -> Expectation.StopProbe? {
+        guard context.probesStops, let arrow = chords.last, arrow == .right || arrow == .left else { return nil }
+        let run = chords.reversed().prefix { $0 == arrow }.count
+        var keys = start
+        guard chords.dropLast(run).allSatisfy({ keys.press($0) }), !keys.inGap else { return nil }
+        let from = keys.focus
+        guard chords.suffix(run).allSatisfy({ keys.press($0) }), !keys.inGap, keys.anchor == keys.focus else { return nil }
+        let model = TextModel(keys.text)
+        if arrow == .right, model.lineBreak(of: from) == from, keys.focus == from + 1 {
+            return Expectation.StopProbe(chord: arrow, line: keys.focus)
+        }
+        if arrow == .left, from > 0, model.lineStart(of: from) == from, keys.focus == from - 1 {
+            return Expectation.StopProbe(chord: arrow, line: from)
+        }
+        return nil
     }
 
     /// Whether the keys may rightly leave the caret where it was: they had nowhere to go from it.

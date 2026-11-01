@@ -46,11 +46,16 @@ struct Navigation: Equatable, Sendable {
     init(_ facts: EditorFacts) {
         let all: Set<KeyModel.Way> = [.right, .left, .up, .down]
         visiting = [.gap: [.right, .up, .down], .boxedGap: [.right, .up, .down], .upGap: [.up], .rule: all, .ruleGap: all,
-                    .backGap: [.left, .up]]
+                    .backGap: [.left, .up], .learned(rightward: true): [.right], .learned(rightward: false): [.left]]
         let lineKeys = [Chord.paragraphStart, .paragraphEnd, Chord.paragraphStart.shifted, Chord.paragraphEnd.shifted]
         leaves = [:]
         otherwise = [:]
         for kind in visiting.keys {
+            if case .learned = kind {
+                leaves[kind] = [.right: .onward(.right), .left: .back(.left)]
+                otherwise[kind] = .unknown
+                continue
+            }
             // ↑ through a rule, or the stop between one and a table above it, lands at the line above's end, as ← does.
             var rows: [Chord: Leave] = [.right: .onward(.right), .down: .onward(.down), .left: .back(.left),
                                         .up: kind == .rule || kind == .backGap ? .back(.up) : .backUp]
@@ -150,9 +155,11 @@ struct Navigation: Equatable, Sendable {
             guard focus > 0, model.lineStart(of: focus) == focus, kinds.last == .rule else { return nil }
             return KeyModel.Stop(line: focus, index: kinds.count - 1)
         case .lineEnd, .wordRight:
+            // A learned stop is one plain arrow's, above the rule these select as they would without it.
+            let kinds = Self.stops(before: focus + 1, keys: keys)
             guard focus < model.length, model.lineBreak(of: focus) == focus,
-                  Self.stops(before: focus + 1, keys: keys).first == .rule else { return nil }
-            return KeyModel.Stop(line: focus + 1, index: 0)
+                  let index = kinds.firstIndex(where: { !$0.isLearned }), kinds[index] == .rule else { return nil }
+            return KeyModel.Stop(line: focus + 1, index: index)
         default:
             return nil
         }
@@ -375,5 +382,26 @@ struct Navigation: Equatable, Sendable {
             if starts.count < count { end = model.lineBreak(of: end + 1) }
         }
         return starts
+    }
+}
+
+/// Stops a field's arrows met beyond those its tree shows, each found by a settle and passed by one more press, kept under the
+/// text they were found in so none is placed where it was not seen (LIN-2050).
+public struct LearnedStops: Equatable, Sendable {
+    private var text: String?
+    private var stops: [Int: [Linear.Stop]] = [:]
+
+    public init() {}
+
+    /// Each line's learned stops, top first, where `text` is the text they were found in.
+    public func stops(in text: String?) -> [Int: [Linear.Stop]] {
+        text != nil && text == self.text ? stops : [:]
+    }
+
+    /// Adds the stops `probes` found in `text`, which a run in any other text forgets.
+    public mutating func learn(_ probes: [Expectation.StopProbe], in text: String?) {
+        guard let text else { return }
+        if text != self.text { (self.text, stops) = (text, [:]) }
+        for probe in probes { stops[probe.line, default: []].insert(probe.learned, at: 0) }
     }
 }

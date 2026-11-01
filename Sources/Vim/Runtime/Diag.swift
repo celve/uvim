@@ -119,10 +119,13 @@ enum Diag {
         if generated != 0 {
             line += " generated=\(generated)"
         }
+        if !evidence.learnedStops.isEmpty {
+            line += " learned=" + evidence.learnedStops.map { "\($0.chord == .right ? "→" : "←")\($0.line)" }.joined(separator: ",")
+        }
         if let insertPayload {
             line += recordsText ? " insert=\(insertPayload)" : " insert=(\(insertPayload.utf16.count))"
         }
-        if anomalous {
+        if anomalous || !evidence.learnedStops.isEmpty {
             cmd.log("\(line, privacy: .public)")
         } else {
             cmd.debug("\(line, privacy: .public)")
@@ -170,6 +173,7 @@ enum Diag {
         if let misfit = failure.misfit {
             line += " misfit=\(misfit.lowerBound)..\(misfit.upperBound)"
         }
+        if failure.retried { line += " hidden retried" }
         settle.log("\(line, privacy: .public)")
     }
 

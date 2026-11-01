@@ -98,5 +98,7 @@ func testEditorLineKeys() {
     }
     precondition(steps("k", "Para one", blocks.breaks) == "P!P!P!C" && steps("k", "Para one", nil) == "P!PP!C",
                  "a ← the browser moves is settled before ⌃A, in ProseMirror alone")
-    precondition(steps("k", "Para two", blocks.breaks) == "P!P2P!C", "← into and out of a rule are ProseMirror's own")
+    precondition(steps("k", "Para two", blocks.breaks) == "P!P2!P!C" && stopProbes(webPhysical("k", text: blocks.text,
+                 caret: lineStart(of: "Para two", in: blocks.text), profile: stopsProfile, breaks: blocks.breaks)).count == 1,
+                 "← into and out of a rule are ProseMirror's own, settled only to probe for a stop the tree does not show")
 }

@@ -72,6 +72,16 @@ public struct Sim {
     /// The stop between two blocks the caret is at, before the line after it.
     var inListGap: KeyModel.Stop?
 
+    /// The editor facts its Linear-shaped fields are read under, which select their `Navigation` as discovery reads it.
+    public var editor: EditorFacts = [.proseMirror, .linear]
+
+    /// The field holds `ProseMirror-hideselection` while the caret is at a stop, as Tiptap's does (softlash/LIN-2048).
+    public var hidesSelectionAtStops = false
+
+    /// The stops the field's arrows met beyond its tree's, as the controller keeps them, and those the last run found.
+    public var learnedStops = LearnedStops()
+    public internal(set) var lastLearned: [Expectation.StopProbe] = []
+
     /// What ⌘Z leaves selected of the text it puts back, as measured: all of it in AppKit, through its first line break
     /// in Chrome's textarea, up to that break in Chrome's rich text; `start`, a caret at the text's start, no host measured.
     public enum UndoSelection: Equatable, Sendable { case restored, throughBreak, toBreak, start }
@@ -461,10 +471,12 @@ extension Sim: CommandHost {
         learner.map { $0.strikes.missed(judgedUnder: offsets, app: $0.versions.app) } ?? []
     }
 
-    mutating func execute(_ plan: PhysicalPlan, paragraphs: Bool, generated: Bool) -> (executed: Bool, abortedAt: Int?) {
+    mutating func execute(
+        _ plan: PhysicalPlan, paragraphs: Bool, generated: Bool
+    ) -> (executed: Bool, abortedAt: Int?, learned: [Expectation.StopProbe]) {
         let abortedAt = execute(plan.steps, generated: generated)
         abortedStep = abortedAt.map { plan.steps[$0] }
-        return (abortedAt == nil, abortedAt)
+        return (abortedAt == nil, abortedAt, lastLearned)
     }
 
     mutating func record(
@@ -573,6 +585,7 @@ extension Sim: StepHost {
         let length: Int?
         let selectedText: String?
         let misfit: Range<Int>?
+        var hidden = false
     }
 
     // Each read or write first lands the ⌘Z Chrome runs late, as a key or a commit does not.
@@ -673,7 +686,10 @@ extension Sim: StepHost {
         landLateHistory()
         editorCaret = nil
         let (passed, observed, length, misfit) = settles(expectation, generated: generated)
-        return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText, misfit: misfit)
+        guard expectation.stop != nil, hidesSelectionAtStops, inListGap != nil else {
+            return Read(passed: passed, selection: observed, length: length, selectedText: readSelectedText, misfit: misfit)
+        }
+        return Read(passed: false, selection: observed, length: length, selectedText: readSelectedText, misfit: nil, hidden: true)
     }
 
     /// A read of the tree, not the field, so it lands no late ⌘Z.
