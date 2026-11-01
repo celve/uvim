@@ -231,7 +231,7 @@ public final class Executor {
     }
 
     /// ProseMirror's class on the field while a node or gap selection holds, which AX reads as a caret (softlash/LIN-2048).
-    static let hiddenSelectionClass = "ProseMirror-hideselection"
+    nonisolated static let hiddenSelectionClass = "ProseMirror-hideselection"
 
     // MARK: - Chord lowering (symbolic → hardware)
 
