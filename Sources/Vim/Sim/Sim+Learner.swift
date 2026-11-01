@@ -42,6 +42,7 @@ public extension Sim {
 extension Sim {
     /// The fake field's reads, which the learner observes here.
     mutating func read() -> (reads: FieldSnapshot.Reads, observed: Learning.Observation) {
+        editorCaret = nil
         let (current, source) = learner.map { $0.model.reading(start: $0.start, children: hasChildren) }
             ?? (readModel, .start)
         let plain = readSelection

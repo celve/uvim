@@ -182,6 +182,7 @@ extension PhysicalPlanner {
         var model = original.keys(text, at: position)
         let shown = original.model
         var pending: KeyGroup = ([], nil)
+        let groups = original.navigation.lineKeysFromEditor ? settlingLineKeys(groups, from: model) : groups
         for group in groups where !group.chords.isEmpty {
             for chord in group.chords {
                 guard model.press(chord) else { return .next }
@@ -207,6 +208,24 @@ extension PhysicalPlanner {
         guard pending.chords.isEmpty, model.selection == target else { return .next }
         original = context
         return .steps(steps)
+    }
+
+    /// Ends an unblamed group before each ⌃A or ⌃E right behind a key the browser moves the caret for, so its settle sees the
+    /// caret land before the editor's command acts from it; a key to, from or between stops is the editor's own.
+    private static func settlingLineKeys(_ groups: [KeyGroup], from keys: KeyModel) -> [KeyGroup] {
+        var keys = keys
+        return groups.flatMap { group -> [KeyGroup] in
+            var parts: [KeyGroup] = [([], group.blame)]
+            var browsers = false
+            for chord in group.chords {
+                if group.blame == nil, browsers, [.paragraphStart, .paragraphEnd].contains(chord) { parts.append(([], nil)) }
+                parts[parts.count - 1].chords.append(chord)
+                let fromStop = keys.inStop != nil
+                guard keys.press(chord) else { return [group] }
+                browsers = !fromStop && keys.inStop == nil && chord.key != .character("a") && chord.key != .character("e")
+            }
+            return parts
+        }
     }
 
     private static func repeated(_ chords: [Chord], _ times: Int) -> [Chord] {

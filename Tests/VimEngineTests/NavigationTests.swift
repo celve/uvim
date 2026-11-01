@@ -80,3 +80,23 @@ func testNavigation() {
     cellKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 8, focus: 8, cells: [2, 5], lastRows: [2])
     precondition(cellKeys.press(.up) && cellKeys.selection == 5..<5, "↑ from column 0 below enters the last cell")
 }
+
+// MARK: - ProseMirror's ⌃A and ⌃E act from the caret it holds (LIN-2508)
+
+func testEditorLineKeys() {
+    let doc: [(String, Sim.ListLine)] = [("one", .init()), ("two", .init()), ("three", .init()), ("four", .init())]
+    for (keys, caret, landing) in [("k", 4, 0), ("k", 14, 8), ("3k", 14, 0), ("2j", 0, 8), ("2$", 0, 7)] {
+        var host = blockSim(keyProfile, doc, caret: caret)
+        host.lineKeysFromLastRead = true
+        host.type(keys)
+        precondition(host.caret == landing && host.settleFailures == 0 && host.bells == 0, "\(keys) from \(caret)")
+    }
+    let blocks = folded(tiptapBlocksValue, tiptapBlocksObjects, fakeTree(tiptapBlocksSpec, linear: false))
+    func steps(_ keys: String, _ line: String, _ breaks: ParagraphBreaks?) -> String {
+        webPhysical(keys, text: blocks.text, caret: lineStart(of: line, in: blocks.text), profile: stopsProfile, breaks: breaks)
+            .steps.map(\.traceCode).joined()
+    }
+    precondition(steps("k", "Para one", blocks.breaks) == "P!P!P!C" && steps("k", "Para one", nil) == "P!PP!C",
+                 "a ← the browser moves is settled before ⌃A, in ProseMirror alone")
+    precondition(steps("k", "Para two", blocks.breaks) == "P!P2P!C", "← into and out of a rule are ProseMirror's own")
+}

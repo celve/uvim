@@ -236,6 +236,9 @@ public extension FieldSnapshot {
                 case .done:
                     break
                 }
+            } else {
+                // Nothing to fold, but the walk's editor facts still choose the field's navigation.
+                breaks = ParagraphBreaks(offsets: current.offsets, hidden: current.hidden, editor: found.editor)
             }
         }
         let stampedCursor = (cursor != nil && !cursor!.isEmpty && cursor == selection) ? cursor : nil
