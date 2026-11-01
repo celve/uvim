@@ -155,9 +155,11 @@ struct Navigation: Equatable, Sendable {
             guard focus > 0, model.lineStart(of: focus) == focus, kinds.last == .rule else { return nil }
             return KeyModel.Stop(line: focus, index: kinds.count - 1)
         case .lineEnd, .wordRight:
+            // A learned stop is one plain arrow's, above the rule these select as they would without it.
+            let kinds = Self.stops(before: focus + 1, keys: keys)
             guard focus < model.length, model.lineBreak(of: focus) == focus,
-                  Self.stops(before: focus + 1, keys: keys).first == .rule else { return nil }
-            return KeyModel.Stop(line: focus + 1, index: 0)
+                  let index = kinds.firstIndex(where: { !$0.isLearned }), kinds[index] == .rule else { return nil }
+            return KeyModel.Stop(line: focus + 1, index: index)
         default:
             return nil
         }
@@ -396,9 +398,9 @@ public struct LearnedStops: Equatable, Sendable {
         text != nil && text == self.text ? stops : [:]
     }
 
-    /// Adds the stops `probes` found in `text`, forgetting those found in other text.
+    /// Adds the stops `probes` found in `text`, which a run in any other text forgets.
     public mutating func learn(_ probes: [Expectation.StopProbe], in text: String?) {
-        guard let text, !probes.isEmpty else { return }
+        guard let text else { return }
         if text != self.text { (self.text, stops) = (text, [:]) }
         for probe in probes { stops[probe.line, default: []].insert(probe.learned, at: 0) }
     }

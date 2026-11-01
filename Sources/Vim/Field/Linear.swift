@@ -36,6 +36,8 @@ public enum Linear {
 
         /// A stop → ↓ and ↑ all visit between two blocks, which `KeyModel`'s gaps stand for.
         public var isGap: Bool { self == .gap || self == .boxedGap }
+
+        public var isLearned: Bool { if case .learned = self { true } else { false } }
     }
 
     /// A block as its own classes tell it.

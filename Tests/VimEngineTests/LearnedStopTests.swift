@@ -21,6 +21,25 @@ func gapDoc(unseen: [Linear.Stop] = [.ruleGap]) -> [(String, Sim.ListLine)] {
 }
 
 func testLearnedStops() {
+    // The Sim: the first crossing presses once more and learns, later ones press it up front, an edit forgets.
+    var host = tiptapSim(gapDoc())
+    var plain = Sim(text: host.text, caret: 0, profile: stopsProfile)
+    plain.emulatesKeys = true
+    var retries = 0
+    for (index, key) in "jjjjggjjjjxggjjjjk$kj0kjj".enumerated() {
+        host.type(String(key))
+        plain.type(String(key))
+        precondition(host.caret == plain.caret && host.text == plain.text, "at \(index)")
+        retries += host.lastLearned.count
+    }
+    precondition(host.settleFailures == 0 && host.bells == 0 && host.blamed.isEmpty, "every crossing lands")
+    precondition(retries == 3, "→ before and after the edit, and ← once: \(retries)")
+
+    // A stop one more press does not clear ends the run, unblamed.
+    host = tiptapSim(gapDoc(unseen: [.ruleGap, .ruleGap]))
+    for key in "jjj" { host.type(String(key)) }
+    precondition(host.settleFailures == 1 && host.blamed.isEmpty && host.lastLearned.isEmpty, "one more press, once")
+
     let blocks = folded(tiptapBlocksValue, tiptapBlocksObjects, fakeTree(tiptapBlocksSpec, linear: false))
     let fromParaOne = webPhysical("j", text: blocks.text, caret: lineStart(of: "Para one", in: blocks.text), profile: stopsProfile,
                                   breaks: blocks.breaks)
@@ -43,22 +62,10 @@ func testLearnedStops() {
     precondition(learnedPlan(blocks.text) == chords(fromParaOne) + [.right], "a learned stop is one more →")
     precondition(learnedPlan(blocks.text + " ") == chords(fromParaOne), "and only in the text it was learned in")
 
-    // The Sim: the first crossing presses once more and learns, later ones press it up front, an edit forgets.
-    var host = tiptapSim(gapDoc())
-    var plain = Sim(text: host.text, caret: 0, profile: stopsProfile)
-    plain.emulatesKeys = true
-    var retries = 0
-    for (index, key) in "jjjjggjjjjxggjjjjk$kj0kjj".enumerated() {
-        host.type(String(key))
-        plain.type(String(key))
-        precondition(host.caret == plain.caret && host.text == plain.text, "at \(index)")
-        retries += host.lastLearned.count
-    }
-    precondition(host.settleFailures == 0 && host.bells == 0 && host.blamed.isEmpty, "every crossing lands")
-    precondition(retries == 3, "→ before and after the edit, and ← once: \(retries)")
-
-    // A stop one more press does not clear ends the run, unblamed.
-    host = tiptapSim(gapDoc(unseen: [.ruleGap, .ruleGap]))
-    for key in "jjj" { host.type(String(key)) }
-    precondition(host.settleFailures == 1 && host.blamed.isEmpty && host.lastLearned.isEmpty, "one more press, once")
+    var forgetting = LearnedStops()
+    forgetting.learn([.init(chord: .left, line: 2)], in: "a\nb")
+    forgetting.learn([], in: "a\nbc")
+    precondition(forgetting.stops(in: "a\nb").isEmpty, "a run in other text forgets, and going back does not bring it back")
+    var edge = KeyModel(text: "a\nb", anchor: 1, focus: 1, stops: [2: [.learned(rightward: false), .rule]])
+    precondition(edge.press(.lineEnd) && edge.inStop == .init(line: 2, index: 1), "⌘→ still selects the rule below a learned ← stop")
 }
