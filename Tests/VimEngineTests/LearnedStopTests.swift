@@ -27,6 +27,7 @@ func testLearnedStops() {
     plain.emulatesKeys = true
     var retries = 0
     for (index, key) in "jjjjggjjjjxggjjjjk$kj0kjj".enumerated() {
+        host.lastLearned = []
         host.type(String(key))
         plain.type(String(key))
         precondition(host.caret == plain.caret && host.text == plain.text, "at \(index)")
@@ -34,6 +35,22 @@ func testLearnedStops() {
     }
     precondition(host.settleFailures == 0 && host.bells == 0 && host.blamed.isEmpty, "every crossing lands")
     precondition(retries == 3, "→ before and after the edit, and ← once: \(retries)")
+
+    // A plain k and counts get the probe too: their arrow runs settle before the ⌃A or ⌃E after them.
+    for keys in ["jjjk", "4j3k"] {
+        host = tiptapSim(gapDoc())
+        plain = Sim(text: host.text, caret: 0, profile: stopsProfile)
+        plain.emulatesKeys = true
+        var found = 0
+        for key in keys {
+            host.lastLearned = []
+            host.type(String(key))
+            plain.type(String(key))
+            found += host.lastLearned.count
+        }
+        precondition(host.caret == plain.caret && host.settleFailures == 0 && host.blamed.isEmpty && found == 2
+                     && host.lastLearned.map(\.chord) == [.left], "\(keys): → down, then ← up on the first k")
+    }
 
     // A stop one more press does not clear ends the run, unblamed.
     host = tiptapSim(gapDoc(unseen: [.ruleGap, .ruleGap]))

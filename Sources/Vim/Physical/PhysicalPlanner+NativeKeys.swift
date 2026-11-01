@@ -182,7 +182,8 @@ extension PhysicalPlanner {
         var model = original.keys(text, at: position)
         let shown = original.model
         var pending: KeyGroup = ([], nil)
-        let groups = original.navigation.lineKeysFromEditor ? settlingLineKeys(groups, from: model) : groups
+        var groups = original.navigation.lineKeysFromEditor ? settlingLineKeys(groups, from: model) : groups
+        if original.probesStops { groups = settlingCrossings(groups, from: model) }
         var groupStart = model
         for group in groups where !group.chords.isEmpty {
             if pending.chords.isEmpty { groupStart = model }
@@ -226,6 +227,28 @@ extension PhysicalPlanner {
                 let fromStop = keys.inStop != nil
                 guard keys.press(chord) else { return [group] }
                 browsers = !fromStop && keys.inStop == nil && chord.key != .character("a") && chord.key != .character("e")
+            }
+            return parts
+        }
+    }
+
+    /// Ends an unblamed group after an arrow run that crossed a line, before the ⌃A or ⌃E that follows, so the run's settle can
+    /// probe for a stop the tree does not show before a line key acts from it (LIN-2050).
+    private static func settlingCrossings(_ groups: [KeyGroup], from keys: KeyModel) -> [KeyGroup] {
+        var keys = keys
+        return groups.flatMap { group -> [KeyGroup] in
+            var parts: [KeyGroup] = [([], group.blame)]
+            var run: (arrow: Chord, line: Int)?
+            for chord in group.chords {
+                let crossed = run.map { !keys.inGap && TextModel(keys.text).lineStart(of: keys.focus) != $0.line } ?? false
+                if group.blame == nil, crossed, [.paragraphStart, .paragraphEnd].contains(chord) { parts.append(([], nil)) }
+                parts[parts.count - 1].chords.append(chord)
+                if chord == .left || chord == .right {
+                    if run?.arrow != chord, !keys.inGap { run = (chord, TextModel(keys.text).lineStart(of: keys.focus)) }
+                } else {
+                    run = nil
+                }
+                guard keys.press(chord) else { return [group] }
             }
             return parts
         }
