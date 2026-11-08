@@ -44,6 +44,9 @@ public struct FieldSnapshot: Equatable, Sendable {
     /// The plain offset of the `<br>` after a caret drawn at a paragraph's end, which `breaks` count as gone.
     public let drawnBreak: Int?
 
+    /// The editor facts the field's own classes give, beside those the walk reads into `breaks`.
+    public let editor: EditorFacts
+
     public init(
         capabilities: CapabilityProfile = CapabilityProfile(),
         text: String? = nil,
@@ -60,7 +63,8 @@ public struct FieldSnapshot: Equatable, Sendable {
         foldedLength: Int = 0,
         holdsChips: Bool = false,
         holdsDrawnCaret: Bool = false,
-        drawnBreak: Int? = nil
+        drawnBreak: Int? = nil,
+        editor: EditorFacts = []
     ) {
         self.capabilities = capabilities
         self.text = text
@@ -78,6 +82,7 @@ public struct FieldSnapshot: Equatable, Sendable {
         self.holdsChips = holdsChips
         self.holdsDrawnCaret = holdsDrawnCaret
         self.drawnBreak = drawnBreak
+        self.editor = editor
     }
 
     public var caret: Int? {
@@ -98,6 +103,8 @@ public extension FieldSnapshot {
         public var roots: Int?
         /// The editor is ProseMirror's, whose roots are read for Linear's stops (LIN-1726).
         public var proseMirror = false
+        /// The editor facts the field's DOM classes give.
+        public var editor: EditorFacts = []
         /// The marker selection, in plain marker offsets.
         public var marked: Range<Int>?
         /// The raw marker text, U+FFFCs included; nil where `AXValue` has no line.
@@ -259,7 +266,8 @@ public extension FieldSnapshot {
             foldedLength: foldedLength,
             holdsChips: holdsChips,
             holdsDrawnCaret: holdsDrawnCaret,
-            drawnBreak: drawnBreak
+            drawnBreak: drawnBreak,
+            editor: reads.editor
         )
         return .done((snapshot, memo))
     }

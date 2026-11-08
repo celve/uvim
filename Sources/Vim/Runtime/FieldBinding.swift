@@ -191,6 +191,7 @@ public enum Snapshotter {
             )
         let classList = adapter.readsFieldClasses ? reads.strings(classes) ?? [] : []
         snapshotReads.proseMirror = Surface.editor(classes: classList) == "prosemirror"
+        snapshotReads.editor = EditorFacts(classes: classList)
         // A quote's or open section's children decide stops too, and one changing kind keeps the roots (LIN-1780).
         func witness(_ found: UnreachableLines.Found?) -> Int? {
             roots.flatMap { roots in

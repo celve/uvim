@@ -149,6 +149,7 @@ public extension Surface {
         ("ql-editor", "quill"),
         ("ProseMirror", "prosemirror"),
         ("tiptap", "prosemirror"),
+        ("editor-kit-container", "editor-kit"),
     ]
 
     static func editor(classes: [String]) -> String? {

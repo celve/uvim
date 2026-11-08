@@ -156,6 +156,9 @@ public struct Sim {
 
     public var hasChildren = true
 
+    /// The field's DOM classes, which give its editor facts as the runtime reads them.
+    public var fieldClasses: [String] = []
+
     /// Used only when no learner runs.
     public var readModel: OffsetsAnswer = .value
 
