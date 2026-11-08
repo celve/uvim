@@ -1,6 +1,7 @@
 // MARK: - Lark's composer, editor-kit (LIN-2509)
 
-let editorKitClasses = ["zone-container", "editor-kit-container", "notranslate"]
+/// The composer's classes in LarkSuite 8.4.19 (softlash/LIN-2369 docs/fixtures/raw/lark-empty.jsonl).
+let editorKitClasses = ["zone-container", "editor-kit-container", "innerdocbody", "notranslate", "chrome", "chrome88"]
 
 /// Lark's composer with no selection write: editor-kit's ⌃A and ⌃E, which ⇧ does not make extend, read through its classes.
 func editorKitSim(_ paragraphs: [String], caret: Int, classes: [String] = editorKitClasses) -> Sim {
