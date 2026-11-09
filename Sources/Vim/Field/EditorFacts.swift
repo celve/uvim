@@ -1,3 +1,8 @@
+// The app's Vim framework links Core; `make test` builds Surface into the same module, where there is no Core to import.
+#if canImport(Core)
+import Core
+#endif
+
 /// The editor facts in scope for a field, each from DOM classes: they choose the structure its walk reads and the rows of its
 /// `Navigation` (softlash/LIN-2329 field-model.md §5 L4).
 public struct EditorFacts: OptionSet, Hashable, Sendable {
