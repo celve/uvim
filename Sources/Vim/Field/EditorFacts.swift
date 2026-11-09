@@ -16,4 +16,10 @@ public struct EditorFacts: OptionSet, Hashable, Sendable {
     public init(classes: [String]) {
         self = Surface.editor(classes: classes) == "editor-kit" ? .editorKit : []
     }
+
+    /// Notion's table cells and code blocks, where a selection write reads back as written but the keys after it act from
+    /// elsewhere or not at all (softlash/LIN-2048); a code block's field is told only by its parent's class.
+    public static func keysOnly(editor: String?, classes: [String], parentClasses: [String]) -> Bool {
+        editor == "notion" && (classes.contains("notion-table-cell-text") || parentClasses.contains("notion-code-block"))
+    }
 }

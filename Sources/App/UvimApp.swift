@@ -612,7 +612,10 @@ final class AppModel: ObservableObject {
         switch (entry.status, entry.source) {
         case (.unavailable, .seeded): return "Off by default"
         case (.unavailable, .probed):
-            return Capability.blockScoped.contains(capability) ? "Off: this field is one block of a document" : "Not offered here"
+            if Capability.blockScoped.contains(capability) { return "Off: this field is one block of a document" }
+            // Notion's fields all take selection writes but its tables and code blocks, which the resolver turns off.
+            return capability == .writeSelection && surface.editor == "notion"
+                ? "Off: Notion's tables and code blocks take keys only" : "Not offered here"
         default: break
         }
         guard capability == .readCaret, let readModel else { return nil }
@@ -642,6 +645,7 @@ final class AppModel: ObservableObject {
         switch editor {
         case "quill": return "Quill"
         case "prosemirror": return "ProseMirror"
+        case "notion": return "Notion"
         default: return editor
         }
     }
