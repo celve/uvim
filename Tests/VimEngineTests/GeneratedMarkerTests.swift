@@ -67,6 +67,22 @@ let linearExample4Spec = """
 1.0.0.1/Tg/3/4 1.0.1/G/4/5 1.0.1.0/T/4/5 2/G/5/12 2.0/T/5/12
 """
 
+// Slack 4.53.280 on macm4, recorded 2026-11-08 by softlash/LIN-2369: its bullets are private-use glyphs, U+E506 and U+E507 nested.
+let slackListValue = "\u{E506}one\n\u{E506}two\n\u{E507}nested\n1.num one\n2.num two\nend"
+let slackListRaw = "\u{E506}one\u{E506}two\u{E507}nested1.num one2.num twoend"
+let slackListSpec = """
+0/L/0/15 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/8 0.1.0/G/4/5 0.1.0.0/Tg/4/5 0.1.1/T/5/8
+0.2/G/8/15 0.2.0/G/8/9 0.2.0.0/Tg/8/9 0.2.1/T/9/15 1/L/15/33 1.0/G/15/24 1.0.0/G/15/17 1.0.0.0/Tg/15/16
+1.0.0.1/Tg/16/17 1.0.1/T/17/24 1.1/G/24/33 1.1.0/G/24/26 1.1.0.0/Tg/24/25 1.1.0.1/Tg/25/26 1.1.1/T/26/33 2/G/33/36
+2.0/T/33/36
+"""
+let slackEmptyItemValue = "\u{E506}one\n\u{E506}two\n\u{E506}\n"
+let slackEmptyItemRaw = "\u{E506}one\u{E506}two\u{E506}\n"
+let slackEmptyItemSpec = """
+0/L/0/10 0.0/G/0/4 0.0.0/G/0/1 0.0.0.0/Tg/0/1 0.0.1/T/1/4 0.1/G/4/8 0.1.0/G/4/5 0.1.0.0/Tg/4/5 0.1.1/T/5/8
+0.2/G/8/10 0.2.0/G/8/9 0.2.0.0/Tg/8/9
+"""
+
 func testGeneratedMarkers() {
     // A list item's leading generated text is its marker, as long as the tree has it, whichever editor draws it (LIN-2372).
     let recorded: [(String, String, String, Bool, String)] = [
@@ -78,9 +94,11 @@ func testGeneratedMarkers() {
         ("quillOrdered", quillOrderedValue, quillOrderedRaw, false, "one\ntwo\nthree"),
         ("linearLists", linearListsValue, linearListsRaw, true, "Top paragraph of the marker probe.\nBullet one\nNested bullet\nDouble nested bullet\nBullet two\nMiddle paragraph after the bullets.\nNumbered one\nNested numbered one\nRoman numbered one\nNumbered two\nParagraph before a late start.\nNinth item\nTenth item\nTo-do open\nTo-do done\nLast paragraph."),
         ("linearExample4", linearExample4Value, linearExample4Raw, true, "a\nb\nZq end."),
+        ("slackList", slackListValue, slackListRaw, false, "one\ntwo\nnested\nnum one\nnum two\nend"),
+        ("slackEmptyItem", slackEmptyItemValue, slackEmptyItemRaw, false, "one\ntwo\n"),
     ]
     let specs = [chromiumNativeSpec, quillMixedSpec, quillEmptySpec, quillNestedSpec, quillFirstemptySpec, quillOrderedSpec,
-                 linearListsSpec, linearExample4Spec]
+                 linearListsSpec, linearExample4Spec, slackListSpec, slackEmptyItemSpec]
     for ((name, value, raw, proseMirror, text), spec) in zip(recorded, specs) {
         let model = folded(value, raw, fakeTree(spec, linear: proseMirror), proseMirror: proseMirror)
         precondition(model.text == text && roundTrips(model), "\(name): \(model.text.debugDescription)")
@@ -110,6 +128,9 @@ func testGeneratedMarkers() {
     let typedSymbols = folded("+one\n\u{1F600}two", "+one\u{1F600}two",
                               fakeTree("0/G/0/4 0.0/T/0/4 1/G/4/9 1.0/T/4/9", linear: false), proseMirror: false)
     precondition(typedSymbols.text == "+one\n\u{1F600}two", "and typed, they stay text")
+    let typedPrivate = folded("\u{E506}one\n\u{F8FF}two", "\u{E506}one\u{F8FF}two",
+                              fakeTree("0/G/0/4 0.0/T/0/4 1/G/4/8 1.0/T/4/8", linear: false), proseMirror: false)
+    precondition(typedPrivate.text == "\u{E506}one\n\u{F8FF}two", "as does typed private use")
 
     // As many Quill items as #81's walk confirmed within its budget, each `::before` group read through to its text.
     let items = 190

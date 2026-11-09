@@ -555,6 +555,7 @@ func testUnreachableLines() {
         [("", "\u{2022}"), (" one", "\u{2022}"), ("", "\u{2022}"), ("three", "1."), (" four", "2.")],
         [("", "\u{2022}"), ("", "\u{2022}")],
         [("one", "\u{25B8}"), ("two", "a)"), ("", "\u{25B8}"), ("Last", nil)],
+        [("one", "\u{E506}"), ("two", "\u{E506}"), ("nested", "\u{E507}"), ("num one", "1."), ("", "\u{E506}"), ("end", nil)],
     ]
     for (doc, profile) in quillDocs.flatMap({ doc in [keyProfile, writeKeys].map { (doc, $0) } }) {
         for keys in ["jjjjjjjkkkkkkk", "3j2k4j3j3k", "5ljjjjjjkkkk", "$jjjjjjjkkkkk", "jjjjdd", "jjjjjdd", "jlx", "jjj0x", "jdd",
@@ -578,7 +579,8 @@ func testUnreachableLines() {
     precondition(UnreachableLines.markerShape(Array("\u{2022}one".utf16)) == 1 && UnreachableLines.markerShape(Array("10.ten".utf16)) == 3
                  && UnreachableLines.markerShape(Array("\u{25B8} one".utf16)) == 1 && UnreachableLines.markerShape(Array("a)two".utf16)) == 2)
     precondition(UnreachableLines.markerShape(Array("+1".utf16)) == 1 && UnreachableLines.markerShape(Array("\u{1F600}x".utf16)) == 2
-                 && UnreachableLines.markerShape(Array("\u{00B7}x".utf16)) == 1, "a plus, an emoji, a middle dot")
+                 && UnreachableLines.markerShape(Array("\u{00B7}x".utf16)) == 1 && UnreachableLines.markerShape(Array("\u{E506}x".utf16)) == 1,
+                 "a plus, an emoji, a middle dot, Slack's private-use bullet")
     precondition(["one", "(a)", "#1", "\"q\"", "\u{201C}q", "\u{300C}q", "\u{4E00}\u{3001}"].allSatisfy {
         UnreachableLines.markerShape(Array($0.utf16)) == nil
     }, "text, ASCII's other punctuation, opening quotes and a CJK numeral are no shape")
