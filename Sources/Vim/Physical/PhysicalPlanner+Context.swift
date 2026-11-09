@@ -67,8 +67,11 @@ extension PhysicalPlanner {
         /// ⇧⌃E may extend a folded write's selection to a line's end.
         let lineEndKey: Bool
 
+        let editor: EditorFacts
+
         init(snapshot: FieldSnapshot) {
             text = snapshot.text
+            editor = snapshot.editor
             lineEndKey = snapshot.capabilities.has(.lineEndKey)
             selection = snapshot.selection
             anchor = snapshot.anchor
@@ -143,7 +146,7 @@ extension PhysicalPlanner {
         var lastRows: Set<Int> { breaks?.lastRows ?? [] }
 
         /// What presses do at this field's stops and tables, as its editor facts select it.
-        var navigation: Navigation { Navigation.of(breaks?.editor ?? []) }
+        var navigation: Navigation { Navigation.of((breaks?.editor ?? []).union(editor)) }
 
         /// The keys over `text` from `position`, with this field's chips, stops and tables.
         func keys(_ text: String, at position: Int) -> KeyModel {
@@ -435,7 +438,9 @@ extension PhysicalPlanner {
 
     /// From a caret at `range`'s start to all of it, by ⇧⌃E over each line's rest it holds whole and ⇧→ elsewhere (LIN-1685).
     private static func extending(_ range: Range<Int>, model: TextModel, context: Context) -> [PhysicalStep] {
-        guard context.lineEndKey else { return [.press(.selectRight, count: model.graphemes(in: range))] }
+        guard context.lineEndKey, context.navigation.lineKeysExtend else {
+            return [.press(.selectRight, count: model.graphemes(in: range))]
+        }
         let atoms = context.atoms
         var steps: [PhysicalStep] = []
         func press(_ chord: Chord, _ count: Int) {

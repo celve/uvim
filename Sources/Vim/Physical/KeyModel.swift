@@ -38,6 +38,9 @@ struct KeyModel {
 
     /// Applies one press; false for a key the model does not know.
     mutating func press(_ chord: Chord) -> Bool {
+        if !navigation.lineKeysExtend, [Chord.paragraphStart.shifted, Chord.paragraphEnd.shifted].contains(chord) {
+            return press(Chord(chord.key, chord.modifiers.subtracting(.shift)))
+        }
         let model = TextModel(text)
         if let pressed = navigation.press(chord, keys: &self, in: model) { return pressed }
         let shift = chord.modifiers.contains(.shift)

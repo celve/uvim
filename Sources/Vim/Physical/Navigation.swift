@@ -41,6 +41,8 @@ struct Navigation: Equatable, Sendable {
     /// ⌃A and ⌃E are the editor's commands, which act from the selection it holds; it takes in a caret the browser's own key
     /// moved only at `selectionchange`, which a key posted right behind can beat (prosemirror-commands' macBaseKeymap, Tiptap).
     var lineKeysFromEditor: Bool
+    /// ⇧⌃A and ⇧⌃E extend a selection; where ⌃A and ⌃E ignore ⇧ they leave a caret, as ⌃A and ⌃E do (editor-kit).
+    var lineKeysExtend: Bool
 
     /// The structure's rows, and the facts' over them.
     init(_ facts: EditorFacts) {
@@ -73,6 +75,7 @@ struct Navigation: Equatable, Sendable {
         cellWordRight = false
         upIntoTable = .lastLine
         lineKeysFromEditor = facts.contains(.proseMirror)
+        lineKeysExtend = !facts.contains(.editorKit)
         guard facts.contains(.linear) else { return }
         // ⌃A on a selected rule goes to the line below it.
         leaves[.rule]?[.paragraphStart] = .lineStart
@@ -85,14 +88,16 @@ struct Navigation: Equatable, Sendable {
     /// The modified arrows ProseMirror handles as plain ones at a textblock's edge, selecting a rule beside it.
     static let edgeKeys: [Chord] = [.lineStart, .lineEnd, .wordLeft, .wordRight]
 
-    /// The structure's alone, ProseMirror's, and Linear's, the facts every stop kind was measured under.
+    /// The structure's alone, ProseMirror's, Linear's and editor-kit's, the facts every row was measured under.
     static let structure = Navigation([])
     static let proseMirror = Navigation([.proseMirror])
     static let linear = Navigation([.proseMirror, .linear])
+    static let editorKit = Navigation([.editorKit])
 
-    /// One of those three, which are all the facts select today.
+    /// One of those four, which are all the facts select today.
     static func of(_ facts: EditorFacts) -> Navigation {
-        facts.contains(.linear) ? linear : facts.contains(.proseMirror) ? proseMirror : structure
+        facts.contains(.linear) ? linear : facts.contains(.proseMirror) ? proseMirror
+            : facts.contains(.editorKit) ? editorKit : structure
     }
 
     /// Which plain arrows stop at a stop.

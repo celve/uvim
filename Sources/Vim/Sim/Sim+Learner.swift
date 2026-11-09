@@ -73,6 +73,7 @@ extension Sim {
             sampled = current == .value && source.observes && learner?.sampling.samples(text: text, plain: plain) == true
             if markers && (current != .value || sampled) { reads.field.markers = markerReads }
         }
+        reads.editor = EditorFacts(classes: fieldClasses)
         let field = reads.field
         var observed = Learning.Observation(before: current, source: source)
         if var learner {
