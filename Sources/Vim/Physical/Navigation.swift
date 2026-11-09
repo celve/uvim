@@ -37,6 +37,9 @@ struct Navigation: Equatable, Sendable {
     var otherwise: [Linear.Stop: Leave]
     /// ⌥→ at a cell's end lands on the next line's start, past any stop after the table; elsewhere the model cannot tell.
     var cellWordRight: Bool
+    /// → from the end of any cell in a table's last row leaves the table; elsewhere only the last cell's does
+    /// (prosemirror-tables' `arrow`, Tiptap).
+    var rowLeavesRight: Bool
     var upIntoTable: TableEntry
     /// ⌃A and ⌃E are the editor's commands, which act from the selection it holds; it takes in a caret the browser's own key
     /// moved only at `selectionchange`, which a key posted right behind can beat (prosemirror-commands' macBaseKeymap, Tiptap).
@@ -73,6 +76,7 @@ struct Navigation: Equatable, Sendable {
             otherwise[kind] = ownKeys ? .fromLineAbove : .unknown
         }
         cellWordRight = false
+        rowLeavesRight = false
         upIntoTable = .lastLine
         lineKeysFromEditor = facts.contains(.proseMirror)
         lineKeysExtend = !facts.contains(.editorKit)
@@ -82,6 +86,7 @@ struct Navigation: Equatable, Sendable {
         for chord in lineKeys { leaves[.ruleGap]?[chord] = .stay }
         otherwise[.ruleGap] = .fromLineAbove
         cellWordRight = true
+        rowLeavesRight = true
         upIntoTable = .lastRow
     }
 
@@ -243,9 +248,10 @@ struct Navigation: Equatable, Sendable {
         case .wordRight where cells.contains(line) && focus == model.lineBreak(of: focus) && focus < model.length:
             return cellWordRight ? focus + 1 : .some(nil)
         case .right where cells.contains(line) && focus == model.lineBreak(of: focus) && focus < model.length:
-            // Where a closed block follows a table, → from a last-row cell's end leaves the table for the stop between them.
+            // Where a closed block follows a table, → from a leaving cell's end leaves the table for the stop between them.
             guard let after = Self.lineAfterTable(from: line, keys: keys, in: model),
-                  Self.lastRow(of: line, keys: keys, in: model).map({ $0 <= line }) == true,
+                  rowLeavesRight ? Self.lastRow(of: line, keys: keys, in: model).map({ $0 <= line }) == true
+                      : after == model.lineBreak(of: focus) + 1,
                   Self.stops(before: after, keys: keys).contains(where: { visits($0, .right) }) else { return nil }
             return .some(nil)
         case .left where line == focus && Self.isBelowTable(line, keys: keys, in: model):
