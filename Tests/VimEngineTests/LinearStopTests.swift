@@ -219,7 +219,8 @@ func testLinearStops() {
     tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 8, focus: 8, cells: [2, 5], lastRows: [2], navigation: .linear)
     precondition(tableKeys.press(.up) && tableKeys.selection == 2..<2, "↑ enters the last row's first cell")
     precondition(!tableKeys.press(.down) && !tableKeys.press(.up), "rows are not laid out")
-    tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 4, focus: 4, stops: [8: [.boxedGap]], cells: [2, 5], lastRows: [2])
+    tableKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 4, focus: 4, stops: [8: [.boxedGap]], cells: [2, 5], lastRows: [2],
+                         navigation: .linear)
     precondition(!tableKeys.press(.right), "→ from a last-row cell leaves for the stop below")
     var offColumn = KeyModel(text: "p\nc1\nc2\nq", anchor: 9, focus: 9, cells: [2, 5], lastRows: [2])
     precondition(!offColumn.press(.up), "↑ from past column 0 lands where the caret's x falls")

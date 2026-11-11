@@ -60,7 +60,7 @@ func testNavigation() {
                  && structure.otherwise[.rule] == .unknown && linear.otherwise[.rule] == .unknown)
     precondition(structure.leaves[.rule]?[.paragraphStart] == .unknown && linear.leaves[.rule]?[.paragraphStart] == .lineStart
                  && structure.leaves[.ruleGap]?[.paragraphEnd] == .unknown && linear.leaves[.ruleGap]?[.paragraphEnd] == .stay
-                 && !structure.cellWordRight && linear.cellWordRight
+                 && !structure.cellWordRight && linear.cellWordRight && !structure.rowLeavesRight && linear.rowLeavesRight
                  && structure.upIntoTable == .lastLine && linear.upIntoTable == .lastRow)
     var ruleKeys = KeyModel(text: "a\nb", anchor: 1, focus: 1, stops: [2: [.rule]])
     precondition(ruleKeys.press(.right) && ruleKeys.inGap && !ruleKeys.press(.paragraphStart), "⌃A on a rule is each editor's")
@@ -79,6 +79,32 @@ func testNavigation() {
     precondition(!cellKeys.press(.wordRight), "Tiptap's ⌥→ lands on the next cell's first word end, or the next row's start")
     cellKeys = KeyModel(text: "p\nc1\nc2\nq", anchor: 8, focus: 8, cells: [2, 5], lastRows: [2])
     precondition(cellKeys.press(.up) && cellKeys.selection == 5..<5, "↑ from column 0 below enters the last cell")
+
+    // A two-column table above a rule (LIN-2525): j from the last row's first cell goes to the cell beside it, at its column.
+    var ruled = Sim.ListLine(ruled: 1, before: [.rule])
+    ruled.unseen = [.ruleGap]
+    let rowDoc: [(String, Sim.ListLine)] = [("Top", .init()), ("Aone", .init(cell: true)), ("Atwo", .init(cell: true)),
+                                            ("Bone", .init(lastRow: true)), ("Btwo", .init(cell: true)), ("Five", ruled), ("Six", .init())]
+    for (keys, profile) in [("jjjj", stopsProfile), ("jjjlj", stopsProfile), ("jjjjj", stopsProfile), ("jjjljjk", stopsProfile),
+                            ("jjjlj", noLineKeys)] {
+        var host = tiptapSim(rowDoc, profile)
+        var plain = Sim(text: host.text, caret: 0, profile: profile)
+        plain.emulatesKeys = true
+        for key in keys {
+            host.type(String(key))
+            plain.type(String(key))
+        }
+        precondition(host.caret == plain.caret && host.settleFailures == 0 && host.bells == 0, "\(keys)")
+    }
+    let rowText = rowDoc.map(\.0).joined(separator: "\n")
+    let bone = lineStart(of: "Bone", in: rowText), btwo = lineStart(of: "Btwo", in: rowText)
+    for (navigation, leaves) in [(Navigation.proseMirror, false), (.linear, true)] {
+        var rowKeys = KeyModel(text: rowText, anchor: btwo - 1, focus: btwo - 1, stops: [lineStart(of: "Five", in: rowText): [.rule]],
+                               cells: Set(["Aone", "Atwo", "Bone", "Btwo"].map { lineStart(of: $0, in: rowText) }),
+                               lastRows: [bone], navigation: navigation)
+        precondition(rowKeys.press(.right) == !leaves && (leaves || rowKeys.selection == btwo..<btwo),
+                     "→ out of a last-row cell goes to the next cell in Tiptap, out of the table in Linear")
+    }
 }
 
 // MARK: - ProseMirror's ⌃A and ⌃E act from the caret it holds (LIN-2508)
