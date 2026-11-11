@@ -351,7 +351,7 @@ public enum UnreachableLines {
     static func editorKitTail(_ text: String, generated: Set<Int>) -> Range<Int> {
         let units = Array(text.utf16)
         let line: [UInt16] = [10, 0x200B]
-        guard units.count >= 6, units.suffix(4).elementsEqual(line + line), generated.contains(units.count - 4),
+        guard units.count >= 5, units.suffix(4).elementsEqual(line + line), generated.contains(units.count - 4),
               generated.contains(units.count - 2) else { return 0..<0 }
         return (units.count - 4)..<units.count
     }

@@ -72,6 +72,7 @@ func testEditorKitTail() {
     precondition(kit.text == "a\(zw)" && kit.folded == 4 && kit.breaks.offsets.isEmpty)
     precondition(fold("a\(zw)\(tail)", [2, 4], []).folded == 0 && fold("a\(zw)\n\(zw)", [2], .editorKit).folded == 0)
     precondition(fold("a\(zw)\(tail)", [2], .editorKit).folded == 0, "a typed break is no paragraph's")
+    precondition(fold("\(zw)\(tail)", [1, 3], .editorKit).text == zw, "an emptied composer keeps its line")
     let writes = adding([.writeSelection], to: keyProfile)
     for profile in [keyProfile, writes] {
         for (lines, caret, keys, after) in [
@@ -83,6 +84,8 @@ func testEditorKitTail() {
             (["one", "two", "three"], 2, "jdG", "one\(zw)"),
             (["hello world", "second line"], 14, "ddu", "hello world\(zw)\nsecond line\(zw)"),
             (["hello", ""], 2, "Gdd", "hello\(zw)"),
+            (["hello world", "second line"], 2, "2ddG", zw),
+            (["hello world"], 2, "ddp", "\nhello world\(zw)"),
         ] {
             var lark = larkTailSim(lines, caret: caret, profile: profile)
             lark.type(keys)
