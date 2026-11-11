@@ -200,8 +200,8 @@ public enum UnreachableLines {
         return leaves
     }
 
-    /// `raw` is the marker text, whose U+FFFCs place the leaves.
-    public static func fold(text: String, breaks: ParagraphBreaks, raw: String, found: Found) -> Model {
+    /// `raw` is the marker text, whose U+FFFCs place the leaves; `editor` the facts the field's own classes give.
+    public static func fold(text: String, breaks: ParagraphBreaks, raw: String, found: Found, editor: EditorFacts = []) -> Model {
         let generated = Set(breaks.offsets)
         var leaves = leafCounts(raw)
         let leafStarts = leaves
@@ -299,6 +299,7 @@ public enum UnreachableLines {
                 textSinceBreak = false
             }
         }
+        if editor.contains(.editorKit) { dropped.formUnion(editorKitTail(text, generated: generated)) }
         guard !dropped.isEmpty || !converted.isEmpty || !found.joins.isEmpty || !found.stops.isEmpty || !found.tables.isEmpty
         else {
             return Model(text: text, breaks: breaks, folded: 0)
@@ -343,6 +344,16 @@ public enum UnreachableLines {
             breaks: ParagraphBreaks(offsets: offsets, hidden: hidden, editor: found.editor),
             folded: dropped.count, drawnBreak: drawnBreak
         )
+    }
+
+    /// The two U+200B-only lines Lark's composer keeps past its last, with the breaks before them, which its editor's model
+    /// lacks: a selection end in them reads back before the closing U+200B above (LIN-2763, measured in LarkSuite 8.4.19).
+    static func editorKitTail(_ text: String, generated: Set<Int>) -> Range<Int> {
+        let units = Array(text.utf16)
+        let line: [UInt16] = [10, 0x200B]
+        guard units.count >= 6, units.suffix(4).elementsEqual(line + line), generated.contains(units.count - 4),
+              generated.contains(units.count - 2) else { return 0..<0 }
+        return (units.count - 4)..<units.count
     }
 
     /// The length of the shortest marker a line could start with, which only the tree confirms and measures.
