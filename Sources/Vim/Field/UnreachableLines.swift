@@ -354,10 +354,10 @@ public enum UnreachableLines {
     }
 
     /// A symbol, a dash or other punctuation, but of ASCII's only `-`, `*` and `+`: the rest, as `(`, `#` or `"`, start typed
-    /// text and code far more often than a list, and each line checked costs reads.
+    /// text and code far more often than a list, and each line checked costs reads. Private use is Slack's icon-font bullets.
     static func isBullet(_ scalar: Unicode.Scalar) -> Bool {
         if scalar.isASCII { return "-*+".unicodeScalars.contains(scalar) }
-        return [.otherSymbol, .mathSymbol, .currencySymbol, .modifierSymbol, .dashPunctuation, .otherPunctuation]
+        return [.otherSymbol, .mathSymbol, .currencySymbol, .modifierSymbol, .dashPunctuation, .otherPunctuation, .privateUse]
             .contains(scalar.properties.generalCategory)
     }
 
