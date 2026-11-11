@@ -191,6 +191,10 @@ public struct Sim {
     /// Lark's editor: a selection end just past the invisible character closing a line, its newline, moves before it (LIN-1975).
     public var pullsBackFromLineEnds = false
 
+    /// Lark 8.4.19's composer: this many U+200B-only lines end the field past its editor's model, so a selection end in them
+    /// reads back before the closing U+200B of the line above them; it pulls back from no other line's end (LIN-2509, LIN-2763).
+    public var trailingLines = 0
+
     /// ProseMirror's ⌃A and ⌃E act from the caret it took in at the last read, not one a key the browser moves left since.
     public var lineKeysFromLastRead = false
 
