@@ -15,17 +15,20 @@ public struct ConfigChoice: Equatable, Sendable {
 
 /// Probed truth minus learned failures and the user's Off; policies then follow their parent mechanisms.
 public enum CapabilityResolver {
-    /// `enclosed` is the probe's other answer: the field names a bigger editable field around itself.
+    /// `enclosed` is the probe's other answer: the field names a bigger editable field around itself. `keysOnly`: the field's
+    /// editor breaks keys after a selection write (`EditorFacts.keysOnly`).
     public static func resolve(
-        probed: CapabilityProfile, enclosed: Bool = false, config: [Capability: ConfigChoice], beliefs: ResolvedBeliefs
+        probed: CapabilityProfile, enclosed: Bool = false, keysOnly: Bool = false, config: [Capability: ConfigChoice],
+        beliefs: ResolvedBeliefs
     ) -> (profile: CapabilityProfile, report: CapabilityReport) {
         var learned = beliefs.broken
         if beliefs.readModel.answer == .untrusted { learned.insert(.readCaret) }
-        return resolve(probed: probed, enclosed: enclosed, config: config, learned: learned)
+        return resolve(probed: probed, enclosed: enclosed, keysOnly: keysOnly, config: config, learned: learned)
     }
 
     public static func resolve(
-        probed: CapabilityProfile, enclosed: Bool = false, config: [Capability: ConfigChoice], learned: Set<Capability>
+        probed: CapabilityProfile, enclosed: Bool = false, keysOnly: Bool = false, config: [Capability: ConfigChoice],
+        learned: Set<Capability>
     ) -> (profile: CapabilityProfile, report: CapabilityReport) {
         var entries: [Capability: CapabilityReport.Entry] = [:]
         // An explicit On overrules evidence as it un-seeds curation.
@@ -35,6 +38,9 @@ public enum CapabilityResolver {
                 entries[capability] = CapabilityReport.Entry(status: .unavailable, source: .user)
             } else if probed.has(capability), learned.contains(capability), choice != .on {
                 entries[capability] = CapabilityReport.Entry(status: .unavailable, source: .learned)
+            } else if probed.has(capability), keysOnly, capability == .writeSelection {
+                entries[capability] = CapabilityReport.Entry(status: choice == .on ? .available : .unavailable,
+                                                             source: choice == .on ? .user : .probed)
             } else {
                 entries[capability] = CapabilityReport.Entry(status: probed.has(capability) ? .available : .unavailable, source: .probed)
             }

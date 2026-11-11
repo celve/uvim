@@ -49,9 +49,18 @@ public enum FieldProber {
             children: Snapshotter.hasParagraphs(element), userPinsOffsets: choices[.readCaret]?.override != nil
         )
         let resolved = CapabilityResolver.resolve(
-            probed: probed.profile, enclosed: probed.enclosing != nil, config: choices, beliefs: beliefs
+            probed: probed.profile, enclosed: probed.enclosing != nil, keysOnly: keysOnly(element, editor: surface.editor),
+            config: choices, beliefs: beliefs
         )
         return (resolved.profile, resolved.report, beliefs, probed.enclosing)
+    }
+
+    /// Two more round trips, in Notion's fields alone: the field's classes and its parent's.
+    private static func keysOnly(_ element: AXUIElement, editor: String?) -> Bool {
+        guard editor == "notion" else { return false }
+        let reads = AX.attributes(["AXDOMClassList", kAXParentAttribute], of: element)
+        let parentClasses = reads.element(1).flatMap { AX.attributes(["AXDOMClassList"], of: $0).strings(0) }
+        return EditorFacts.keysOnly(editor: editor, classes: reads.strings(0) ?? [], parentClasses: parentClasses ?? [])
     }
 
     /// The engage verdict for one element, from a single AX round trip.

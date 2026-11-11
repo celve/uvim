@@ -150,6 +150,7 @@ public extension Surface {
         ("ProseMirror", "prosemirror"),
         ("tiptap", "prosemirror"),
         ("editor-kit-container", "editor-kit"),
+        ("content-editable-leaf-rtl", "notion"),
     ]
 
     static func editor(classes: [String]) -> String? {

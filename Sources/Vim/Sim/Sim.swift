@@ -29,6 +29,11 @@ public struct Sim {
 
     /// The same lie about `AXSelectedTextRange` — what a `writeSelection` demotion leaves.
     public var swallowsSelect = false
+    /// Notion's table cells and code blocks: a selection write reads back as written, then the field's keys do nothing
+    /// (softlash/LIN-2048).
+    public var writesDeadenKeys = false
+    private var keysDead = false
+
     /// The same, for the writes of a landing after `u` alone (LIN-2104).
     public var swallowsLandingSelect = false
     private var landing = false
@@ -611,6 +616,7 @@ extension Sim: StepHost {
         inListGap = nil
         backward = false
         coalescing = false
+        keysDead = writesDeadenKeys
         return nil
     }
 
@@ -627,7 +633,7 @@ extension Sim: StepHost {
 
     mutating func sendKey(_ chord: Chord) {
         presses += 1
-        guard takesKey, !pressUnsupported, !ignoredChords.contains(chord) else { return }
+        guard takesKey, !pressUnsupported, !ignoredChords.contains(chord), !keysDead else { return }
         if undoesAfterWait, [.undo, .redo].contains(chord) {
             heldHistory.append(chord)
         } else if undoesLate, [.undo, .redo].contains(chord) {
