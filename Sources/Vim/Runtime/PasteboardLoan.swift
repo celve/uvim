@@ -18,6 +18,9 @@ final class PasteboardLoan {
     private var stamp = 0
     private var generation = 0
 
+    /// Told after each write the loan makes, so the clipboard sync never mistakes one for a copy from another app.
+    var onWrite: (() -> Void)?
+
     init(_ pasteboard: NSPasteboard) {
         self.pasteboard = pasteboard
     }
@@ -33,6 +36,7 @@ final class PasteboardLoan {
         pasteboard.setString(text, forType: .string)
         pasteboard.setData(Data(), forType: Self.transient)
         stamp = pasteboard.changeCount
+        onWrite?()
         generation += 1
         restore(after: Self.unconfirmedHold)
     }
@@ -53,6 +57,7 @@ final class PasteboardLoan {
             return item
         }
         if !items.isEmpty { pasteboard.writeObjects(items) }
+        onWrite?()
     }
 
     private func restore(after delay: TimeInterval) {

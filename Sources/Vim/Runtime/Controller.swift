@@ -79,6 +79,7 @@ public final class Controller {
             self?.rebind(to: binding, transition: transition)
         }
         tracker.onPointerAction = { [weak self] in self?.pointerActed() }
+        PasteboardLoan.shared.onWrite = { ClipboardSync.shared.acknowledge() }
         // Force the recorder's one store read off the tap callback's first command.
         _ = Diag.recordsText
     }
@@ -273,6 +274,7 @@ public final class Controller {
                 Diag.dropped(tracker.epoch, commandSeq, command: completed.command, reason: "app-key")
                 return false
             }
+            syncClipboard(for: binding)
             var host = Host(controller: self, binding: binding, seq: commandSeq, destination: destination)
             if CommandLoop.command(completed, mode: mode, host: &host) {
                 // Publish even on mid-plan aborts: a .setMode commit may have
@@ -281,6 +283,20 @@ public final class Controller {
             }
             return true
         }
+    }
+
+    /// The fork's clipboard sync, once per command: the executor learns the
+    /// app's clipboard setting, and text copied in another app since the last
+    /// command becomes what an unnamed `p` puts.
+    private func syncClipboard(for binding: FocusTracker.Binding) {
+        let mode = binding.surface.bundleID.map(Prefs.clipboardMode(for:)) ?? Prefs.clipboardMode
+        executor.clipboard = mode
+        // Taken every time, so a copy seen while it could not be adopted is not adopted later over newer registers.
+        guard let copied = ClipboardSync.shared.takeExternalText(),
+              ClipboardRoute.adoptsExternal(mode: mode, unnamed: state.session.registers.unnamed) else { return }
+        executor.commit(
+            .yanked(into: nil, content: .pasteboard, wise: ClipboardRoute.wise(ofExternal: copied)), state: &state
+        )
     }
 
     /// A key whose command uvim drops is refused while a landing after `u` is pending, not typed into the field (LIN-2104).

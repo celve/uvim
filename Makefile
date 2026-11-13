@@ -21,7 +21,7 @@ ifneq ($(and $(SIGN),$(filter dist publish,$(MAKECMDGOALS))),)
 $(error SIGN is for local builds: installs keep their grants only under project.yml's identity)
 endif
 
-.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs test-tap
+.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-clipboard test-beliefs test-prefs test-tap
 
 all: build
 
@@ -32,7 +32,7 @@ VIM_PURE := $(shell find Sources/Vim -name '*.swift' -not -path '*/Runtime/*')
 # listed here one at a time, and only when they are pure enough to link against
 # nothing but the stdlib — Surface.swift holds the rung algebra and precedence
 # walks, which are the part of per-surface config worth pinning.
-CORE_PURE := Sources/Core/Surface.swift Sources/Core/CapabilitySeeds.swift Sources/Core/CapabilityConfig.swift Sources/Core/WebAreaWalk.swift Sources/Core/MarkerText.swift
+CORE_PURE := Sources/Core/Surface.swift Sources/Core/CapabilitySeeds.swift Sources/Core/CapabilityConfig.swift Sources/Core/WebAreaWalk.swift Sources/Core/MarkerText.swift Sources/Core/ClipboardMode.swift
 
 # swiftc compiles each file as its own job, and without -j runs those jobs one at a time.
 JOBS := $(shell sysctl -n hw.ncpu)
@@ -49,6 +49,12 @@ test-pasteboard:
 	@swiftc -o $(DERIVED)/pasteboard-test Sources/Vim/Runtime/PasteboardLoan.swift Tests/PasteboardTests/main.swift
 	@$(DERIVED)/pasteboard-test
 
+# The fork's clipboard sync beside the paste loan, on a private named pasteboard: needs a login session, no grant.
+test-clipboard:
+	@mkdir -p $(DERIVED)
+	@swiftc -o $(DERIVED)/clipboard-test Sources/Vim/Runtime/PasteboardLoan.swift Sources/Vim/Runtime/ClipboardSync.swift Tests/ClipboardSyncTests/main.swift
+	@$(DERIVED)/clipboard-test
+
 # The beliefs file's reads, writes and migration, in a temporary directory and private defaults: no grant.
 test-beliefs:
 	@mkdir -p $(DERIVED)
@@ -58,7 +64,7 @@ test-beliefs:
 # The Normal Mode Key's default and stored choices, with the argument domain as the store: nothing is written, no grant.
 test-prefs:
 	@mkdir -p $(DERIVED)
-	@swiftc -o $(DERIVED)/prefs-test Sources/Core/Prefs.swift Tests/PrefsTests/main.swift
+	@swiftc -o $(DERIVED)/prefs-test Sources/Core/Prefs.swift Sources/Core/ClipboardMode.swift Tests/PrefsTests/main.swift
 	@$(DERIVED)/prefs-test
 
 # When the keyboard tap may be attempted, as a rule apart from the calls: no tap is created, no grant.
