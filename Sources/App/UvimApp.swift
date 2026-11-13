@@ -18,6 +18,10 @@ struct UvimApp: App {
                 Text("Esc").tag(NormalModeKey.escape)
                 Text("⌃[").tag(NormalModeKey.controlBracket)
             }
+            Picker("Clipboard", selection: $model.clipboardMode) {
+                ForEach(ClipboardMode.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            Button("Apps…") { model.showApps() }
             if let front = model.frontApp {
                 Picker("Vim in \(front.name)", selection: Binding(
                     get: { model.frontAppPolicy },
@@ -295,6 +299,18 @@ final class AppModel: ObservableObject {
     @Published var vimEnabled = true {
         didSet { controller.enabled = vimEnabled }
     }
+    @Published var clipboardMode = Prefs.clipboardMode {
+        didSet { Prefs.clipboardMode = clipboardMode }
+    }
+    @Published var appScope = Prefs.appScope {
+        didSet {
+            Prefs.appScope = appScope
+            policiesChanged()
+        }
+    }
+    /// The Apps window's rows.
+    @Published private(set) var apps: [AppRow] = []
+
     @Published var normalModeKey = Prefs.normalModeKey {
         didSet {
             Prefs.normalModeKey = normalModeKey
@@ -309,7 +325,7 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private let controller: Controller
+    let controller: Controller
     private var token: InputHub.Token?
     private var workspaceToken: NSObjectProtocol?
     /// False where macOS may have turned this process down at launch; a handover's own uvim reads true, so none repeats.
@@ -429,6 +445,105 @@ final class AppModel: ObservableObject {
         Prefs.setPolicy(policy, for: frontApp.bundleID)
         frontAppPolicy = policy
         controller.refreshPolicy()
+        reloadApps()
+    }
+
+    // MARK: - Apps window (fork)
+
+    struct AppRow: Identifiable, Equatable {
+        let id: String
+        let name: String
+        let icon: NSImage
+        let installed: Bool
+        let policy: VimPolicy
+        let clipboard: ClipboardMode?
+    }
+
+    struct RunningApp: Identifiable {
+        let id: String
+        let name: String
+    }
+
+    var appPrefixes: [String] { Prefs.disabledPrefixes }
+
+    /// Regular apps running now that have no row yet, for "Add App".
+    var runningApps: [RunningApp] {
+        let listed = Set(apps.map(\.id))
+        let mine = Bundle.main.bundleIdentifier
+        let found = NSWorkspace.shared.runningApplications.compactMap { app -> RunningApp? in
+            guard app.activationPolicy == .regular, let id = app.bundleIdentifier, id != mine,
+                  !listed.contains(id) else { return nil }
+            return RunningApp(id: id, name: app.localizedName ?? id)
+        }
+        return Dictionary(found.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).values
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func showApps() {
+        AppsWindow.shared.show(model: self)
+    }
+
+    func reloadApps() {
+        let workspace = NSWorkspace.shared
+        apps = Prefs.configuredApps().map { id in
+            let url = workspace.urlForApplication(withBundleIdentifier: id)
+            let name = url.map { FileManager.default.displayName(atPath: $0.path) }
+                .map { $0.hasSuffix(".app") ? String($0.dropLast(4)) : $0 } ?? id
+            let icon = url.map { workspace.icon(forFile: $0.path) }
+                ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil) ?? NSImage()
+            return AppRow(
+                id: id, name: name, icon: icon, installed: url != nil,
+                policy: Prefs.policy(for: id), clipboard: Prefs.clipboardOverride(for: id)
+            )
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func setPolicy(_ policy: VimPolicy, for bundleID: String) {
+        Prefs.setPolicy(policy, for: bundleID)
+        policiesChanged()
+    }
+
+    func setClipboard(_ mode: ClipboardMode?, for bundleID: String) {
+        Prefs.setClipboardOverride(mode, for: bundleID)
+        reloadApps()
+    }
+
+    /// A new row starts as the scope makes useful: Off when uvim runs everywhere, Auto when it runs only where allowed.
+    func addApp(_ bundleID: String) {
+        guard !apps.contains(where: { $0.id == bundleID }) else { return }
+        setPolicy(appScope == .everywhere ? .off : .auto, for: bundleID)
+    }
+
+    func chooseApps() {
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let id = Bundle(url: url)?.bundleIdentifier { addApp(id) }
+        }
+    }
+
+    func forgetApp(_ bundleID: String) {
+        Prefs.forget(bundleID: bundleID)
+        policiesChanged()
+    }
+
+    func resetApps() {
+        Prefs.resetApps()
+        Prefs.registerDefaults()
+        policiesChanged()
+    }
+
+    /// Any policy changed: rebind now, and bring the menu's row and the window's rows up to date.
+    private func policiesChanged() {
+        controller.refreshPolicy()
+        frontAppPolicy = frontApp.map { Prefs.policy(for: $0.bundleID) } ?? .auto
+        reloadApps()
     }
 
     /// `rung` of nil is Auto, cleared at every rung.

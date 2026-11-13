@@ -13,6 +13,9 @@ import Core
 public final class Executor {
     public init() {}
 
+    /// The bound app's clipboard setting (fork), set by the controller before each command.
+    var clipboard: ClipboardMode = .off
+
     /// The last run's, which a runtime-authored effect resolves against.
     private var captures: [CaptureSlot: String] = [:]
 
@@ -110,6 +113,13 @@ public final class Executor {
     /// the executor too, so the reducer keeps exactly one caller.
     public func commit(_ effect: VimEffect, state: inout VimState) {
         state = VimReducer.reduce(state, effect, captures: captures)
+        publish(effect, captures: captures)
+    }
+
+    /// Sends a committed yank or delete to the clipboard when the app's setting says it goes there.
+    fileprivate func publish(_ effect: VimEffect, captures: [CaptureSlot: String]) {
+        guard let text = ClipboardRoute.text(for: effect, captures: captures, mode: clipboard) else { return }
+        ClipboardSync.shared.publish(text)
     }
 
     /// The observed values ride every exit, so a timeout costs no extra round trip.
@@ -420,6 +430,7 @@ extension Executor {
 
         mutating func commit(_ effect: VimEffect, captures: [CaptureSlot: String]) {
             state = VimReducer.reduce(state, effect, captures: captures)
+            executor.publish(effect, captures: captures)
         }
 
         func bell() {
