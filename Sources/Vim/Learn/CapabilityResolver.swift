@@ -34,7 +34,12 @@ public enum CapabilityResolver {
         // An explicit On overrules evidence as it un-seeds curation.
         for capability in Capability.allCases where capability.species == .mechanism {
             let choice = config[capability]?.override
-            if probed.has(capability), choice == .off {
+            if Capability.unprobed.contains(capability) {
+                entries[capability] = choice == .off ? CapabilityReport.Entry(status: .unavailable, source: .user)
+                    : choice == .on ? CapabilityReport.Entry(status: .available, source: .user)
+                    : learned.contains(capability) ? CapabilityReport.Entry(status: .unavailable, source: .learned)
+                    : CapabilityReport.Entry(status: .unknown, source: .probed)
+            } else if probed.has(capability), choice == .off {
                 entries[capability] = CapabilityReport.Entry(status: .unavailable, source: .user)
             } else if probed.has(capability), learned.contains(capability), choice != .on {
                 entries[capability] = CapabilityReport.Entry(status: .unavailable, source: .learned)

@@ -277,7 +277,7 @@ func testBlockScopedFields() {
     for capability in Capability.blockScoped {
         precondition(enclosedField.report.entries[capability] == .init(status: .unavailable, source: .probed))
     }
-    precondition(enclosedField.report.traceGrid.contains("WS+p IT+p DC-p WD-p FS-p"))
+    precondition(enclosedField.report.traceGrid.contains("WS+p IT+p TO?p DC-p WD-p FS-p"))
     precondition(physical("j", text: "one", caret: 0, profile: enclosedField.profile).steps == [
         .press(.down, count: 1),
         .commit(.setCursor(nil)),

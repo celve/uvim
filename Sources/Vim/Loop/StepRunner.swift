@@ -6,7 +6,7 @@ struct StepRunner<Host: StepHost> {
     struct Miss {
         let index: Int
         let expectation: Expectation
-        /// A soft settle's, which fails the run only where the ⌫ before it was ignored.
+        /// A soft settle's, which fails the run only where the ⌫ before it was ignored or typing kept the selection.
         let soft: Bool
         /// It ended the run.
         let failed: Bool
@@ -161,7 +161,8 @@ struct StepRunner<Host: StepHost> {
         return (true, nil)
     }
 
-    /// A miss fails the run, but a soft settle's only where the ⌫ before it was ignored: blind keys before it promise nothing.
+    /// A miss fails the run, but a soft settle's only where the ⌫ before it was ignored or the typing before it kept the selection:
+    /// blind keys before it promise nothing else.
     private mutating func settle(
         _ expectation: Expectation, soft: Bool, at index: Int, host: inout Host
     ) -> (passed: Bool, read: Host.Read?) {
@@ -183,9 +184,9 @@ struct StepRunner<Host: StepHost> {
             return (true, read)
         }
         // Only what the expectation asks about is read, as the runtime reads it.
-        let failed = !soft || expectation.ignored(
-            selection: expectation.landing == nil ? nil : read.selection, length: expectation.length == nil ? nil : read.length
-        )
+        let length = expectation.length == nil ? nil : read.length
+        let failed = !soft || expectation.kept(length: length)
+            || expectation.ignored(selection: expectation.landing == nil ? nil : read.selection, length: length)
         if failed, !probedMisfit, let across = read.misfit {
             probedMisfit = true
             if host.generates(across) { misfit = across }

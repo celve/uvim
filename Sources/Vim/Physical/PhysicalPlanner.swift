@@ -66,6 +66,20 @@ public enum PhysicalPlanner {
                   case .settle(let expectation) = plan.steps[index] else { return false }
             return expectation.selectedText != nil
         }
+
+        /// Whether the run died after typing over a selection the field kept, whose typed text ⌘Z takes back.
+        public func abortedAtKeptSelection(_ index: Int?) -> Bool {
+            guard let index, plan.steps.indices.contains(index),
+                  case .softSettle(let expectation) = plan.steps[index] else { return false }
+            return expectation.typedOver != nil
+        }
+    }
+
+    /// ⌘Z, then a wait for the field to read as long as the snapshot did.
+    public static func undoTyping(_ snapshot: FieldSnapshot) -> PhysicalPlan {
+        var context = Context(snapshot: snapshot)
+        context.unknown.insert(.selection)
+        return PhysicalPlan(steps: [.press(.undo, count: 1)] + settle(context, profile: snapshot.capabilities))
     }
 
     /// The plan alone — tests and any caller with no use for the rest.
@@ -292,7 +306,7 @@ private extension PhysicalPlanner {
         case .yankSelection(let register):
             return lowerYank(into: register, context: &context, profile: profile)
         case .replaceSelection(let replacement):
-            return lowerTypeOver(replacement, context: &context, profile: profile)
+            return lowerTypeOver(replacement, replacing: true, context: &context, profile: profile)
         case .transformSelection(let transform):
             return lowerTransform(transform, context: &context, profile: profile)
         case .insertText(let insertion):

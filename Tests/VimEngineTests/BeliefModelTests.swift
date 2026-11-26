@@ -319,8 +319,11 @@ func testBeliefModel() {
         }
         let profile = CapabilityProfile(available: probed)
         let resolved = CapabilityResolver.resolve(probed: profile, config: config, beliefs: resolving(store))
-        precondition(resolved.report.entries == previousTable(probed: profile, config: config, learned: demoted))
-        precondition(resolved.profile.statuses == previousTable(probed: profile, config: config, learned: demoted).mapValues(\.status))
+        // No probe tries an unprobed atom, which `testTypeOver` covers.
+        let probedEntries = resolved.report.entries.filter { !Capability.unprobed.contains($0.key) }
+        let previous = previousTable(probed: profile, config: config, learned: demoted).filter { !Capability.unprobed.contains($0.key) }
+        precondition(probedEntries == previous)
+        precondition(resolved.profile.statuses.filter { !Capability.unprobed.contains($0.key) } == previous.mapValues(\.status))
         let enclosed = CapabilityResolver.resolve(probed: profile, enclosed: true, config: config, beliefs: resolving(store)).report.entries
         for (capability, entry) in resolved.report.entries {
             let read = Capability.blockScoped.contains(capability) && entry == .init(status: .available, source: .probed)

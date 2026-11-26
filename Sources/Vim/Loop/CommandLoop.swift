@@ -198,6 +198,9 @@ extension CommandLoop {
             host.record(completed, logical: logical, planned: planned, from: before, reading: reading, executed: ran.executed)
         }
         guard ran.executed else {
+            if planned.abortedAtKeptSelection(ran.abortedAt) {
+                host.runAside(PhysicalPlanner.undoTyping(snapshot), paragraphs: paragraphs)
+            }
             if planned.abortedAtTextCheck(ran.abortedAt) {
                 // Other text than the plan meant was selected, so the mode it asked for goes too.
                 if let read = host.selectionRead(paragraphs: paragraphs), !read.caret {

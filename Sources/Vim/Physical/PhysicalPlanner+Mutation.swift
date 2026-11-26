@@ -114,17 +114,22 @@ extension PhysicalPlanner {
     /// selection; typed text replaces a selection too.
     static func lowerTypeOver(
         _ replacement: String,
+        replacing: Bool = false,
         context: inout Context,
         profile: CapabilityProfile
     ) -> [PhysicalStep]? {
         if let selection = context.selection, context.retypesStructure(selection) { return nil }
+        // `r` with no character under the cursor rings, as Vim's does, rather than type an insertion.
+        if replacing, context.selection?.isEmpty == true { return nil }
         let action = profile.has(.insertText) ? .replaceSelection(replacement) : blindText(replacement, context: context)
         if let selection = context.selection, let model = context.model {
-            let check = checkSelectedText(model.substring(selection), context: context, profile: profile)
+            let check = selectingByKeys(selection, context: &context, profile: profile)
+                + checkSelectedText(model.substring(selection), context: context, profile: profile)
+            let over = typedOver(selection, context: context, profile: profile)
             context.applyEdit(range: selection, replacement: replacement)
             // Blind (typeText) over-type: soft, so a mismatch does not abort
             // the `setMode(.insert)` behind an `o`/`O`/`i`.
-            let steps = check + [action] + settle(context, profile: profile, hard: profile.has(.insertText))
+            let steps = check + [action] + stamped(settle(context, profile: profile, hard: profile.has(.insertText)), over)
             // Chromium leaves a new empty paragraph out of `AXValue` until it holds text, so later settles stop checking the length.
             if !profile.has(.insertText), context.breaks != nil, replacement.contains("\n") {
                 context.unknown.insert(.length)
@@ -134,6 +139,31 @@ extension PhysicalPlanner {
         context.invalidate()
         // Blind keys may still be queued, and typing or pasting rides the same queue.
         return [context.keysQueued ? blindText(replacement, context: context) : action]
+    }
+
+    /// Where typing kept an AX-written selection, the selection is made again as a person makes one: a caret at its start, then ⇧→.
+    static func selectingByKeys(_ range: Range<Int>, context: inout Context, profile: CapabilityProfile) -> [PhysicalStep] {
+        guard !range.isEmpty, !profile.has(.insertText), profile.has(.writeSelection), profile.denies(.typeOver),
+              let model = context.model else { return [] }
+        context.selection = range.lowerBound..<range.lowerBound
+        var steps = write(range.lowerBound..<range.lowerBound, context: context) + settle(context, profile: profile)
+        steps.append(.press(.selectRight, count: model.graphemes(in: range)))
+        context.selection = range
+        return steps + settle(context, profile: profile)
+    }
+
+    /// The field length typing over `selection` replaces, which a settle after it checks is gone.
+    private static func typedOver(_ selection: Range<Int>, context: Context, profile: CapabilityProfile) -> Int? {
+        profile.has(.insertText) || selection.isEmpty ? nil : context.field(selection).count
+    }
+
+    private static func stamped(_ steps: [PhysicalStep], _ typedOver: Int?) -> [PhysicalStep] {
+        guard let typedOver else { return steps }
+        return steps.map { step in
+            guard case .softSettle(var expectation) = step else { return step }
+            expectation.typedOver = typedOver
+            return .softSettle(expectation)
+        }
     }
 
     /// A typed `\n` makes no paragraph in Chromium's rich text, and ⏎ would send a chat message, so web content pastes it.
@@ -180,11 +210,13 @@ extension PhysicalPlanner {
             }
         }
         let action = profile.has(.insertText) ? .replaceSelection(transformed) : blindText(transformed, context: context)
-        let check = checkSelectedText(original, context: context, profile: profile)
+        let check = selectingByKeys(selection, context: &context, profile: profile)
+            + checkSelectedText(original, context: context, profile: profile)
+        let over = typedOver(selection, context: context, profile: profile)
         context.applyEdit(range: selection, replacement: transformed)
         // Blind (typeText) transform: soft. The poll still lets the following
         // `collapseSelection` land its caret on a settled field.
-        return check + [action] + settle(context, profile: profile, hard: profile.has(.insertText))
+        return check + [action] + stamped(settle(context, profile: profile, hard: profile.has(.insertText)), over)
     }
 
     private static let indentUnit = "    "
@@ -221,11 +253,11 @@ extension PhysicalPlanner {
                 joined += joined.isEmpty || joined.hasSuffix(" ") ? String(stripped) : " " + stripped
             }
         }
-        var steps: [PhysicalStep] = []
-        var settled = false
-        if profile.has(.writeSelection) {
+        var steps = selectingByKeys(range, context: &context, profile: profile)
+        var settled = !steps.isEmpty
+        if !settled, profile.has(.writeSelection) {
             steps += write(range, from: selection.isEmpty ? selection.lowerBound : nil, context: context)
-        } else {
+        } else if !settled {
             switch nativeSelect(.lines(count: count, extent: .interior), range: range,
                                 context: &context, profile: profile) {
             case .steps(let keys):
@@ -246,8 +278,9 @@ extension PhysicalPlanner {
         }
         steps += barrier
         steps.append(profile.has(.insertText) ? .replaceSelection(joined) : .typeText(joined))
+        let over = typedOver(range, context: context, profile: profile)
         context.applyEdit(range: range, replacement: joined)
         // Settle follows the edit; blind (typeText) join is soft.
-        return steps + settle(context, profile: profile, hard: profile.has(.insertText))
+        return steps + stamped(settle(context, profile: profile, hard: profile.has(.insertText)), over)
     }
 }

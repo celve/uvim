@@ -29,6 +29,9 @@ public enum Capability: String, CaseIterable, Equatable, Hashable, Sendable {
     /// `AXSelectedText` (set): exact insertion/replacement.
     case insertText
 
+    /// Typing replaces the AX selection: never probed, so unknown until a typed over-type that kept the selection denies it.
+    case typeOver
+
     /// The standing-cursor *role* of `writeSelection`'s mechanism: may the
     /// Normal-mode block cursor be left drawn as a persistent selection?
     /// Never probed; "available" means *permitted*, resolved by the runtime
@@ -98,7 +101,7 @@ public extension Capability {
         switch self {
         case .drawCursor, .wholeDocument, .fieldIsSession, .nativeMotions:
             return .policy
-        case .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .insertText,
+        case .readText, .readLength, .readCaret, .readSelectedText, .writeSelection, .insertText, .typeOver,
              .lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey, .wordKeys, .paragraphKeys:
             return .mechanism
         }
@@ -108,6 +111,9 @@ public extension Capability {
     static let nativeKeys: Set<Capability> = [
         .lineStartKey, .lineEndKey, .documentStartKey, .documentEndKey, .wordKeys, .paragraphKeys,
     ]
+
+    /// Mechanisms no probe tries, which stay unknown until learned or set.
+    static let unprobed: Set<Capability> = [.typeOver]
 
     /// What a field denies by naming a bigger editable field around itself: one block of that document, moved in by the app's ↓ and ↑.
     static let blockScoped: Set<Capability> = [.drawCursor, .wholeDocument, .fieldIsSession]
@@ -157,6 +163,11 @@ public struct CapabilityProfile: Equatable, Sendable {
 
     public func has(_ capability: Capability) -> Bool {
         statuses[capability] == .available
+    }
+
+    /// Known false, which an unknown capability is not.
+    public func denies(_ capability: Capability) -> Bool {
+        statuses[capability] == .unavailable
     }
 }
 
@@ -217,6 +228,7 @@ extension Capability {
         case .readSelectedText: return "RS"
         case .writeSelection: return "WS"
         case .insertText: return "IT"
+        case .typeOver: return "TO"
         case .drawCursor: return "DC"
         case .wholeDocument: return "WD"
         case .fieldIsSession: return "FS"

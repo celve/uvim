@@ -732,6 +732,7 @@ final class AppModel: ObservableObject {
         case .readSelectedText: return "Read selected text"
         case .writeSelection: return "Set selection (AX)"
         case .insertText: return "Replace text (AX)"
+        case .typeOver: return "Typing replaces the selection"
         case .drawCursor: return "Draw block cursor"
         // Phrased so the row's *denial* is the legible half: "Off by default"
         // then reads as the block-editor fact.

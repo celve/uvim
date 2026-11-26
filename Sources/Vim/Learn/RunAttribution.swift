@@ -62,6 +62,11 @@ public struct RunAttribution: Equatable, Sendable {
             if passed { settled = read }
             pending = nil
             finishing = nil
+        case .softSettle(let expectation) where expectation.typedOver != nil:
+            evidence.append(Evidence(.write(.typeOver), passed ? .supports(nil) : .refutes, why: passed ? .settled : .kept,
+                                     seen: .settle(index)))
+            pending = nil
+            finishing = nil
         default:
             pending = nil
             finishing = nil
