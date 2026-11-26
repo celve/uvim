@@ -64,7 +64,7 @@ struct StepRunner<Host: StepHost> {
             if passed || departure == nil {
                 attribution.record(
                     step, passed: passed, selection: read?.selection, length: read?.length, selectedText: read?.selectedText,
-                    writeError: passed ? nil : writeError, misfit: misfit != nil
+                    writeError: passed ? nil : writeError, misfit: misfit != nil, converged: read?.passed
                 )
             }
             switch step {

@@ -88,13 +88,20 @@ public enum PhysicalPlanner {
 
     /// Deletes the run of `typed`'s length that `now` holds beyond `before`, selected by ⇧→ from a caret written at its start.
     public static func removeInsertion(_ typed: String, from now: FieldSnapshot, leaving before: FieldSnapshot) -> PhysicalPlan? {
-        guard now.capabilities.has(.writeSelection), let old = before.text.map({ Array($0.utf16) }),
-              let new = now.text.map({ Array($0.utf16) }), new.count == old.count + typed.utf16.count else { return nil }
-        var start = 0
-        while start < old.count, old[start] == new[start] { start += 1 }
-        let run = start..<start + typed.utf16.count
-        // Any run whose removal leaves `before` will do, as beside the same letter a typed one sits at either end of the pair.
-        guard new[run.upperBound...].elementsEqual(old[start...]) else { return nil }
+        guard now.capabilities.has(.writeSelection), let oldText = before.text, let newText = now.text else { return nil }
+        let (old, new, length) = (Array(oldText.utf16), Array(newText.utf16), typed.utf16.count)
+        guard new.count == old.count + length else { return nil }
+        var common = 0
+        while common < old.count, old[common] == new[common] { common += 1 }
+        // Any whole-character run whose removal leaves `before` will do; beside the same letter a typed one sits at either end.
+        var boundaries: Set<Int> = [new.count]
+        for index in newText.indices { boundaries.insert(index.utf16Offset(in: newText)) }
+        func leaves(_ start: Int) -> Bool {
+            guard boundaries.contains(start), boundaries.contains(start + length) else { return false }
+            return new[(start + length)...].elementsEqual(old[start...]) && new[..<start].elementsEqual(old[..<start])
+        }
+        guard let start = (0...common).reversed().first(where: leaves) else { return nil }
+        let run = start..<start + length
         let profile = now.capabilities
         var context = Context(snapshot: now)
         guard let model = context.model else { return nil }
@@ -169,8 +176,27 @@ public enum PhysicalPlanner {
             uncover = []
         }
         return Planning(
-            plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand, collapsesToEnd: context.collapsesToEnd
+            plan: PhysicalPlan(steps: judgingTypedOver(uncover + steps)), rejection: nil, operand: context.operand,
+            collapsesToEnd: context.collapsesToEnd
         )
+    }
+
+    /// Marks the settles after typing over a selection an AX write finished, the only ones that judge `typeOver`.
+    static func judgingTypedOver(_ steps: [PhysicalStep]) -> [PhysicalStep] {
+        var written = false
+        var typedOnWrite = false
+        return steps.map { step in
+            switch step {
+            case .setSelection: written = true
+            case .press: written = false
+            case .typeText, .clipboardInsert: typedOnWrite = written
+            case .softSettle(var expectation) where expectation.typedOver != nil:
+                expectation.typedOverWrite = typedOnWrite
+                return .softSettle(expectation)
+            default: break
+            }
+            return step
+        }
     }
 
     /// Marks the first settle after a selection write and the keys `write` added to finish it, which checks that write.
