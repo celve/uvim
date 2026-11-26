@@ -239,6 +239,9 @@ public struct Expectation: Equatable, Sendable {
     /// The selection's length the typing before this settle replaced, which a field that kept it reads on top of `length`.
     public var typedOver: Int?
 
+    /// That selection was an AX write, so the settle judges `typeOver`.
+    public var typedOverWrite = false
+
     /// Runs of field text the model holds as unreachable, either end of which is the same place (LIN-2370).
     public var equivalences: [Equivalence] = []
 

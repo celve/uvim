@@ -82,6 +82,28 @@ public enum PhysicalPlanner {
         return PhysicalPlan(steps: [.press(.undo, count: 1)] + settle(context, profile: snapshot.capabilities))
     }
 
+    /// Deletes the one run of text `now` holds beyond `before`, selected by ⇧→ from a caret written at its start.
+    public static func removeInsertion(from now: FieldSnapshot, leaving before: FieldSnapshot) -> PhysicalPlan? {
+        guard now.capabilities.has(.writeSelection), let old = before.text.map({ Array($0.utf16) }),
+              let new = now.text.map({ Array($0.utf16) }), new.count > old.count else { return nil }
+        var start = 0
+        while start < old.count, old[start] == new[start] { start += 1 }
+        let run = start..<start + new.count - old.count
+        guard new[run.upperBound...].elementsEqual(old[start...]) else { return nil }
+        let profile = now.capabilities
+        var context = Context(snapshot: now)
+        guard let model = context.model else { return nil }
+        var steps = write(start..<start, context: context)
+        context.selection = start..<start
+        steps += settle(context, profile: profile)
+        steps.append(.press(.selectRight, count: model.graphemes(in: run)))
+        context.selection = run
+        steps += settle(context, profile: profile) + checkSelectedText(model.substring(run), context: context, profile: profile)
+        steps.append(.press(.deleteBack, count: 1))
+        context.applyEdit(range: run, replacement: "")
+        return PhysicalPlan(steps: steps + settle(context, profile: profile))
+    }
+
     /// The plan alone — tests and any caller with no use for the rest.
     public static func plan(_ logical: LogicalPlan, snapshot: FieldSnapshot) -> PhysicalPlan {
         planning(logical, snapshot: snapshot).plan

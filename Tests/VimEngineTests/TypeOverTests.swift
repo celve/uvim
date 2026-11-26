@@ -16,6 +16,12 @@ func testTypeOver() {
     let userOn = CapabilityResolver.resolve(probed: typingProfile, config: [.typeOver: ConfigChoice(override: .on)], learned: [.typeOver])
     precondition(userOn.profile.has(.typeOver))
 
+    var typed = Expectation(selection: 13..<13, length: 15)
+    (typed.typedOver, typed.typedOverWrite) = (1, true)
+    var missed = RunAttribution()
+    missed.record(.softSettle(typed), passed: true, selection: 12..<12, length: 14)
+    precondition(missed.evidence.isEmpty, "a soft miss supports nothing")
+
     var field = typingSim("hello world abc", caret: 12)
     precondition(field.profile.statuses[.typeOver] == .unknown)
     field.type("rx")
@@ -28,13 +34,13 @@ func testTypeOver() {
     precondition(keyed.steps.contains(.press(.selectRight, count: 1)))
     field.type("rx")
     precondition(field.text == "hello world xbc" && field.settleFailures == 1)
-    precondition(field.attribution.evidence.contains { $0.question == .write(.typeOver) && $0.outcome == .supports(nil) })
+    precondition(!field.attribution.evidence.contains { $0.question == .write(.typeOver) }, "a selection keys made says nothing of writes")
 
     var together = typingSim("hello world abc", caret: 12)
     together.undoesEditsTogether = true
     together.type("xrb")
-    precondition(together.text == "hello world bbc" && together.settleFailures == 2 && together.profile.denies(.typeOver),
-                 "⇧⌘Z returns the earlier edit an undo step took back with the typing")
+    precondition(together.text == "hello world bc" && together.settleFailures == 2 && together.profile.denies(.typeOver),
+                 "⇧⌘Z returns the earlier edit an undo step took back with the typing, which goes alone")
 
     for (keys, caret, after) in [("~", 0, "Hello world"), ("gUiw", 6, "hello WORLD"), ("J", 0, "hello world")] {
         let text = keys == "J" ? "hello\nworld" : "hello world"
@@ -45,10 +51,32 @@ func testTypeOver() {
         precondition(over.text == after && over.settleFailures == 1, "\(keys): then made by ⇧→")
     }
 
+    var denied = removing([.insertText], from: writeKeys)
+    denied.statuses[.typeOver] = .unavailable
+    let doc = listCodeDoc.map(\.0).joined(separator: "\n")
+    for (index, line) in listCodeDoc.enumerated() where line.0.first?.isLetter == true {
+        var item = listCodeSim(denied, caret: lineStart(of: line.0, in: doc), spans: [])
+        item.type("rx")
+        let expected = listCodeDoc.enumerated().map { $0.offset == index ? "x" + $0.element.0.dropFirst() : $0.element.0 }
+        precondition(item.text == expected.joined(separator: "\n") && item.settleFailures == 0,
+                     "\(line.0): its first letter is selected by ⇧→ from a written caret \(item.text.debugDescription)")
+    }
+
+    for caret in [0, 34, 51, 66, 67, 82] {
+        var host = codeSim(denied, caret: caret)
+        let reference = codeSim(removing([.insertText], from: writeKeys), caret: caret)
+        var replaced = reference
+        replaced.type("rx")
+        host.type("rx")
+        precondition(host.text == replaced.text && host.bells == replaced.bells && host.settleFailures == 0,
+                     "\(caret): ⇧→ over a code span's letter \(host.text.debugDescription) \(host.settleFailures)")
+    }
+
     var plain = Sim(text: "hello world abc", caret: 12, profile: typingProfile)
     plain.learn(with: Sim.Learner(probed: typingProfile))
     plain.type("rx")
     precondition(plain.text == "hello world xbc" && plain.settleFailures == 0 && plain.profile.statuses[.typeOver] == .unknown)
+    precondition(plain.attribution.evidence.contains { $0.question == .write(.typeOver) && $0.outcome == .supports(nil) })
     precondition(!physical("rx", text: plain.text, caret: 12, profile: plain.profile).steps.contains(.press(.selectRight, count: 1)))
 
     var empty = Sim(text: "ab\n\ncd", caret: 3, profile: typingProfile)

@@ -123,9 +123,9 @@ extension PhysicalPlanner {
         if replacing, context.selection?.isEmpty == true { return nil }
         let action = profile.has(.insertText) ? .replaceSelection(replacement) : blindText(replacement, context: context)
         if let selection = context.selection, let model = context.model {
-            let check = selectingByKeys(selection, context: &context, profile: profile)
-                + checkSelectedText(model.substring(selection), context: context, profile: profile)
-            let over = typedOver(selection, context: context, profile: profile)
+            let keyed = selectingByKeys(selection, context: &context, profile: profile)
+            let check = keyed + checkSelectedText(model.substring(selection), context: context, profile: profile)
+            let over = typedOver(selection, keyed: !keyed.isEmpty, context: context, profile: profile)
             context.applyEdit(range: selection, replacement: replacement)
             // Blind (typeText) over-type: soft, so a mismatch does not abort
             // the `setMode(.insert)` behind an `o`/`O`/`i`.
@@ -145,23 +145,28 @@ extension PhysicalPlanner {
     static func selectingByKeys(_ range: Range<Int>, context: inout Context, profile: CapabilityProfile) -> [PhysicalStep] {
         guard !range.isEmpty, !profile.has(.insertText), profile.has(.writeSelection), profile.denies(.typeOver),
               let model = context.model else { return [] }
+        // Planned from the selection the field holds, which a folded line's start writes from.
+        var steps = write(range.lowerBound..<range.lowerBound, context: context)
         context.selection = range.lowerBound..<range.lowerBound
-        var steps = write(range.lowerBound..<range.lowerBound, context: context) + settle(context, profile: profile)
+        steps += settle(context, profile: profile)
         steps.append(.press(.selectRight, count: model.graphemes(in: range)))
         context.selection = range
         return steps + settle(context, profile: profile)
     }
 
-    /// The field length typing over `selection` replaces, which a settle after it checks is gone.
-    private static func typedOver(_ selection: Range<Int>, context: Context, profile: CapabilityProfile) -> Int? {
-        profile.has(.insertText) || selection.isEmpty ? nil : context.field(selection).count
+    /// The field length typing over `selection` replaces, which a settle after it checks is gone, and whether keys selected it.
+    private static func typedOver(
+        _ selection: Range<Int>, keyed: Bool, context: Context, profile: CapabilityProfile
+    ) -> (length: Int, keyed: Bool)? {
+        profile.has(.insertText) || selection.isEmpty ? nil : (context.field(selection).count, keyed || !profile.has(.writeSelection))
     }
 
-    private static func stamped(_ steps: [PhysicalStep], _ typedOver: Int?) -> [PhysicalStep] {
+    private static func stamped(_ steps: [PhysicalStep], _ typedOver: (length: Int, keyed: Bool)?) -> [PhysicalStep] {
         guard let typedOver else { return steps }
         return steps.map { step in
             guard case .softSettle(var expectation) = step else { return step }
-            expectation.typedOver = typedOver
+            expectation.typedOver = typedOver.length
+            expectation.typedOverWrite = !typedOver.keyed
             return .softSettle(expectation)
         }
     }
@@ -210,9 +215,9 @@ extension PhysicalPlanner {
             }
         }
         let action = profile.has(.insertText) ? .replaceSelection(transformed) : blindText(transformed, context: context)
-        let check = selectingByKeys(selection, context: &context, profile: profile)
-            + checkSelectedText(original, context: context, profile: profile)
-        let over = typedOver(selection, context: context, profile: profile)
+        let keyed = selectingByKeys(selection, context: &context, profile: profile)
+        let check = keyed + checkSelectedText(original, context: context, profile: profile)
+        let over = typedOver(selection, keyed: !keyed.isEmpty, context: context, profile: profile)
         context.applyEdit(range: selection, replacement: transformed)
         // Blind (typeText) transform: soft. The poll still lets the following
         // `collapseSelection` land its caret on a settled field.
@@ -254,7 +259,8 @@ extension PhysicalPlanner {
             }
         }
         var steps = selectingByKeys(range, context: &context, profile: profile)
-        var settled = !steps.isEmpty
+        let keyed = !steps.isEmpty
+        var settled = keyed
         if !settled, profile.has(.writeSelection) {
             steps += write(range, from: selection.isEmpty ? selection.lowerBound : nil, context: context)
         } else if !settled {
@@ -278,7 +284,7 @@ extension PhysicalPlanner {
         }
         steps += barrier
         steps.append(profile.has(.insertText) ? .replaceSelection(joined) : .typeText(joined))
-        let over = typedOver(range, context: context, profile: profile)
+        let over = typedOver(range, keyed: keyed, context: context, profile: profile)
         context.applyEdit(range: range, replacement: joined)
         // Settle follows the edit; blind (typeText) join is soft.
         return steps + stamped(settle(context, profile: profile, hard: profile.has(.insertText)), over)

@@ -200,9 +200,11 @@ extension CommandLoop {
         guard ran.executed else {
             if planned.abortedAtKeptSelection(ran.abortedAt) {
                 host.runAside(PhysicalPlanner.undoTyping(snapshot), paragraphs: paragraphs)
-                // An undo step that held earlier edits took them back too, which ⇧⌘Z returns.
-                if let before = reading.value, let after = host.value(), after != before {
-                    host.runAside(PhysicalPlan(steps: [.press(.redo, count: 1)]), paragraphs: paragraphs)
+                // An undo step that held earlier edits took them back too: ⇧⌘Z returns them, and the typed run goes alone.
+                if let before = reading.value, let after = host.value(), after != before,
+                   host.runAside(PhysicalPlan(steps: [.press(.redo, count: 1)]), paragraphs: paragraphs),
+                   let removal = PhysicalPlanner.removeInsertion(from: host.snapshotAside(), leaving: snapshot) {
+                    host.runAside(removal, paragraphs: paragraphs)
                 }
             }
             if planned.abortedAtTextCheck(ran.abortedAt) {
