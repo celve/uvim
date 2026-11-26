@@ -26,6 +26,16 @@ func testTypeOver() {
     var unmoved = RunAttribution()
     unmoved.record(.softSettle(typed), passed: true, selection: 12..<13, length: 15, converged: false)
     precondition(unmoved.evidence.isEmpty, "nor one whose length happens to match")
+    var unmeasured = RunAttribution()
+    var lengthless = Expectation(selection: 13..<13)
+    (lengthless.typedOver, lengthless.typedOverWrite) = (1, true)
+    unmeasured.record(.softSettle(lengthless), passed: true, selection: 13..<13, converged: true)
+    precondition(unmeasured.evidence.isEmpty, "nor one that read no length")
+    let long = String(repeating: "ab", count: 10_000)
+    precondition(PhysicalPlanner.removeInsertion(
+        "a\u{301}", from: FieldSnapshot(capabilities: typingProfile, text: long + "a\u{301}a\u{301}c", selection: 0..<0),
+        leaving: FieldSnapshot(capabilities: typingProfile, text: long + "a\u{301}c", selection: 0..<0)
+    ) != nil, "the run is found past a long common text")
 
     var overOne = Expectation(length: 3)
     overOne.typedOver = 1

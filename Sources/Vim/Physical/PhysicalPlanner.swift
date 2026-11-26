@@ -91,16 +91,18 @@ public enum PhysicalPlanner {
         guard now.capabilities.has(.writeSelection), let oldText = before.text, let newText = now.text else { return nil }
         let (old, new, length) = (Array(oldText.utf16), Array(newText.utf16), typed.utf16.count)
         guard new.count == old.count + length else { return nil }
-        var common = 0
-        while common < old.count, old[common] == new[common] { common += 1 }
-        // Any whole-character run whose removal leaves `before` will do; beside the same letter a typed one sits at either end.
+        var prefix = 0
+        while prefix < old.count, old[prefix] == new[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < old.count, old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+        // Removing any run of `length` starting between these leaves `before`; beside the same letter the typed one is either.
+        let earliest = old.count - suffix
+        guard earliest <= prefix else { return nil }
         var boundaries: Set<Int> = [new.count]
         for index in newText.indices { boundaries.insert(index.utf16Offset(in: newText)) }
-        func leaves(_ start: Int) -> Bool {
-            guard boundaries.contains(start), boundaries.contains(start + length) else { return false }
-            return new[(start + length)...].elementsEqual(old[start...]) && new[..<start].elementsEqual(old[..<start])
-        }
-        guard let start = (0...common).reversed().first(where: leaves) else { return nil }
+        guard let start = (earliest...prefix).reversed().first(where: {
+            boundaries.contains($0) && boundaries.contains($0 + length)
+        }) else { return nil }
         let run = start..<start + length
         let profile = now.capabilities
         var context = Context(snapshot: now)

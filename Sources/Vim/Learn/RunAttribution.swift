@@ -63,10 +63,10 @@ public struct RunAttribution: Equatable, Sendable {
             pending = nil
             finishing = nil
         case .softSettle(let expectation) where expectation.typedOverWrite:
-            // A soft miss passes the run, so only a read that met the settle supports the write.
+            // A soft miss passes the run, so only a read that met a predicted length supports the write.
             if !passed {
                 evidence.append(Evidence(.write(.typeOver), .refutes, why: .kept, seen: .settle(index)))
-            } else if converged ?? (length != nil && length == expectation.length) {
+            } else if let expected = expectation.length, length == expected, converged ?? true {
                 evidence.append(Evidence(.write(.typeOver), .supports(nil), why: .settled, seen: .settle(index)))
             }
             pending = nil
