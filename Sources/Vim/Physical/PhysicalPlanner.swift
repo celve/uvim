@@ -67,11 +67,15 @@ public enum PhysicalPlanner {
             return expectation.selectedText != nil
         }
 
-        /// Whether the run died after typing over a selection the field kept, whose typed text ⌘Z takes back.
-        public func abortedAtKeptSelection(_ index: Int?) -> Bool {
-            guard let index, plan.steps.indices.contains(index),
-                  case .softSettle(let expectation) = plan.steps[index] else { return false }
-            return expectation.typedOver != nil
+        /// What the run typed over a selection the field kept, where that ended it: ⌘Z takes it back.
+        public func keptTyping(at index: Int?) -> String? {
+            guard let index, plan.steps.indices.contains(index), case .softSettle(let expectation) = plan.steps[index],
+                  expectation.typedOver != nil else { return nil }
+            for step in plan.steps[..<index].reversed() {
+                if case .typeText(let text) = step { return text }
+                if case .clipboardInsert(let text?) = step { return text }
+            }
+            return nil
         }
     }
 
@@ -82,13 +86,14 @@ public enum PhysicalPlanner {
         return PhysicalPlan(steps: [.press(.undo, count: 1)] + settle(context, profile: snapshot.capabilities))
     }
 
-    /// Deletes the one run of text `now` holds beyond `before`, selected by ⇧→ from a caret written at its start.
-    public static func removeInsertion(from now: FieldSnapshot, leaving before: FieldSnapshot) -> PhysicalPlan? {
+    /// Deletes the run of `typed`'s length that `now` holds beyond `before`, selected by ⇧→ from a caret written at its start.
+    public static func removeInsertion(_ typed: String, from now: FieldSnapshot, leaving before: FieldSnapshot) -> PhysicalPlan? {
         guard now.capabilities.has(.writeSelection), let old = before.text.map({ Array($0.utf16) }),
-              let new = now.text.map({ Array($0.utf16) }), new.count > old.count else { return nil }
+              let new = now.text.map({ Array($0.utf16) }), new.count == old.count + typed.utf16.count else { return nil }
         var start = 0
         while start < old.count, old[start] == new[start] { start += 1 }
-        let run = start..<start + new.count - old.count
+        let run = start..<start + typed.utf16.count
+        // Any run whose removal leaves `before` will do, as beside the same letter a typed one sits at either end of the pair.
         guard new[run.upperBound...].elementsEqual(old[start...]) else { return nil }
         let profile = now.capabilities
         var context = Context(snapshot: now)
