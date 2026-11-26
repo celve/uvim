@@ -30,6 +30,12 @@ func testTypeOver() {
     precondition(field.text == "hello world xbc" && field.settleFailures == 1)
     precondition(field.attribution.evidence.contains { $0.question == .write(.typeOver) && $0.outcome == .supports(nil) })
 
+    var together = typingSim("hello world abc", caret: 12)
+    together.undoesEditsTogether = true
+    together.type("xrb")
+    precondition(together.text == "hello world bbc" && together.settleFailures == 2 && together.profile.denies(.typeOver),
+                 "⇧⌘Z returns the earlier edit an undo step took back with the typing")
+
     for (keys, caret, after) in [("~", 0, "Hello world"), ("gUiw", 6, "hello WORLD"), ("J", 0, "hello world")] {
         let text = keys == "J" ? "hello\nworld" : "hello world"
         var over = typingSim(text, caret: caret)

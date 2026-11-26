@@ -200,6 +200,10 @@ extension CommandLoop {
         guard ran.executed else {
             if planned.abortedAtKeptSelection(ran.abortedAt) {
                 host.runAside(PhysicalPlanner.undoTyping(snapshot), paragraphs: paragraphs)
+                // An undo step that held earlier edits took them back too, which ⇧⌘Z returns.
+                if let before = reading.value, let after = host.value(), after != before {
+                    host.runAside(PhysicalPlan(steps: [.press(.redo, count: 1)]), paragraphs: paragraphs)
+                }
             }
             if planned.abortedAtTextCheck(ran.abortedAt) {
                 // Other text than the plan meant was selected, so the mode it asked for goes too.

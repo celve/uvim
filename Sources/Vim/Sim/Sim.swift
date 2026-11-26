@@ -105,6 +105,9 @@ public struct Sim {
     /// Hosts group consecutive typed edits for undo until the caret moves some other way.
     var coalescing = false
 
+    /// Every edit joins the newest undo step, as Quill's within a second and an AppKit view's ⌫ then typing.
+    public var undoesEditsTogether = false
+
     /// Chrome's ⌘Z and ⇧⌘Z, as measured: a key sent right behind one runs first, and a read or write waits for it.
     public var undoesLate = false
     var lateHistory: [Chord] = []
