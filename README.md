@@ -390,6 +390,7 @@ The Xcode project is generated from [`project.yml`](project.yml) by XcodeGen and
 | `make test-beliefs` | Run the beliefs file's tests in a temporary directory: no permissions |
 | `make test-prefs` | Run the Normal Mode Key's tests, which store nothing: no permissions |
 | `make test-tap` | Run the tests of when the keyboard tap may be created, which create none: no permissions |
+| `make test-keys` | Run the tests of the tapped keys' text under the current keyboard layout: no permissions |
 | `make release`   | Build Release, copy it to `.release/uvim.app`                        |
 | `make dist`      | `release`, then notarize it and stage its update in `dist/`          |
 | `make publish`   | `release`, then notarize it, stage its update and release it on GitHub |
@@ -456,7 +457,8 @@ uvim/
 │   ├── PasteboardTests/        # `make test-pasteboard`: the paste's loan on a private pasteboard
 │   ├── BeliefsTests/           # `make test-beliefs`: the beliefs file in a temporary directory
 │   ├── PrefsTests/             # `make test-prefs`: the Normal Mode Key's default and stored choices
-│   └── TapStandingTests/       # `make test-tap`: when the keyboard tap may be attempted
+│   ├── TapStandingTests/       # `make test-tap`: when the keyboard tap may be attempted
+│   └── KeyEventTests/          # `make test-keys`: a key's text under its own modifiers
 └── Resources/
     ├── AppIcon.icon/           # App icon: an Icon Composer document, edited in Icon Composer
     └── Assets.xcassets         # Accent color (still empty)

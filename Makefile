@@ -21,7 +21,7 @@ ifneq ($(and $(SIGN),$(filter dist publish,$(MAKECMDGOALS))),)
 $(error SIGN is for local builds: installs keep their grants only under project.yml's identity)
 endif
 
-.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs test-tap
+.PHONY: all gen build run release dist publish clean distclean test test-pasteboard test-beliefs test-prefs test-tap test-keys
 
 all: build
 
@@ -66,6 +66,12 @@ test-tap:
 	@mkdir -p $(DERIVED)
 	@swiftc -o $(DERIVED)/tap-test Sources/Core/TapStanding.swift Tests/TapStandingTests/main.swift
 	@$(DERIVED)/tap-test
+
+# The tap's key text, re-resolved where a poster's modifiers lag a key behind: reads the current layout, assumed U.S.-family.
+test-keys:
+	@mkdir -p $(DERIVED)
+	@swiftc -o $(DERIVED)/keys-test Sources/Core/KeyEvent.swift Sources/Core/Mods.swift Sources/Core/InputSource.swift Tests/KeyEventTests/main.swift
+	@$(DERIVED)/keys-test
 
 gen:
 	xcodegen generate
