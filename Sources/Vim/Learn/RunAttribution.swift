@@ -32,7 +32,7 @@ public struct RunAttribution: Equatable, Sendable {
     public mutating func record(
         _ step: PhysicalStep, passed: Bool = true,
         selection: Range<Int>? = nil, length: Int? = nil, selectedText: String? = nil, writeError: Int32? = nil,
-        misfit: Bool = false
+        misfit: Bool = false, converged: Bool? = nil
     ) {
         defer { index += 1 }
         let previous = settled
@@ -60,6 +60,15 @@ public struct RunAttribution: Equatable, Sendable {
             // A read that went dark fails any plan alike.
             if !passed, selection != nil, let route = expectation.route { missedRoute = route }
             if passed { settled = read }
+            pending = nil
+            finishing = nil
+        case .softSettle(let expectation) where expectation.typedOverWrite:
+            // A soft miss passes the run, so only a read that met a predicted length supports the write.
+            if !passed {
+                evidence.append(Evidence(.write(.typeOver), .refutes, why: .kept, seen: .settle(index)))
+            } else if let expected = expectation.length, length == expected, converged ?? true {
+                evidence.append(Evidence(.write(.typeOver), .supports(nil), why: .settled, seen: .settle(index)))
+            }
             pending = nil
             finishing = nil
         default:

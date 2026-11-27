@@ -32,6 +32,9 @@ public struct Sim {
     /// Notion's table cells and code blocks: a selection write reads back as written, then the field's keys do nothing
     /// (softlash/LIN-2048).
     public var writesDeadenKeys = false
+    /// Slack's composer at times (LIN-3277): typing over a selection an AX write made goes in at its start and leaves it.
+    public var typesBesideWrittenSelection = false
+    private var selectionWritten = false
     private var keysDead = false
 
     /// The same, for the writes of a landing after `u` alone (LIN-2104).
@@ -101,6 +104,9 @@ public struct Sim {
 
     /// Hosts group consecutive typed edits for undo until the caret moves some other way.
     var coalescing = false
+
+    /// Every edit joins the newest undo step, as Quill's within a second and an AppKit view's ⌫ then typing.
+    public var undoesEditsTogether = false
 
     /// Chrome's ⌘Z and ⇧⌘Z, as measured: a key sent right behind one runs first, and a read or write waits for it.
     public var undoesLate = false
@@ -617,6 +623,7 @@ extension Sim: StepHost {
         backward = false
         coalescing = false
         keysDead = writesDeadenKeys
+        selectionWritten = true
         return nil
     }
 
@@ -633,6 +640,7 @@ extension Sim: StepHost {
 
     mutating func sendKey(_ chord: Chord) {
         presses += 1
+        selectionWritten = false
         guard takesKey, !pressUnsupported, !ignoredChords.contains(chord), !keysDead else { return }
         if undoesAfterWait, [.undo, .redo].contains(chord) {
             heldHistory.append(chord)
@@ -665,7 +673,12 @@ extension Sim: StepHost {
 
     mutating func typeText(_ typed: String) {
         landLateHistory()
-        if takesKey { applyReplace(typed) }
+        guard takesKey else { return }
+        guard typesBesideWrittenSelection, selectionWritten, !selection.isEmpty else { return applyReplace(typed) }
+        let kept = selection
+        selection = kept.lowerBound..<kept.lowerBound
+        applyReplace(typed)
+        selection = kept
     }
 
     mutating func cut() {

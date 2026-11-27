@@ -6,7 +6,7 @@ extension Sim {
     }
 
     mutating func noteEdit(at offset: Int, typing: Bool) {
-        if typing, coalescing, let last = undoGroups.indices.last {
+        if typing && coalescing || undoesEditsTogether, let last = undoGroups.indices.last {
             undoGroups[last].at = min(undoGroups[last].at, offset)
         } else {
             undoGroups.append((before: text, at: offset, listLines: listLines, codeSpans: codeSpans))

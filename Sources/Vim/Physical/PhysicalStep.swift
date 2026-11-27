@@ -236,6 +236,12 @@ public struct Expectation: Equatable, Sendable {
     /// The length the field had before that ⌫, where a settle there would have read one.
     public var lengthBefore: Int?
 
+    /// The selection's length the typing before this settle replaced, which a field that kept it reads on top of `length`.
+    public var typedOver: Int?
+
+    /// That selection was an AX write, so the settle judges `typeOver`.
+    public var typedOverWrite = false
+
     /// Runs of field text the model holds as unreachable, either end of which is the same place (LIN-2370).
     public var equivalences: [Equivalence] = []
 
@@ -448,6 +454,12 @@ public struct Expectation: Equatable, Sendable {
     public func ignored(selection observed: Range<Int>?, length observedLength: Int?) -> Bool {
         guard let deletes, !deletes.isEmpty, observed == deletes else { return false }
         return lengthBefore == nil || observedLength == nil || observedLength == lengthBefore
+    }
+
+    /// Whether a settle after typing over `typedOver` reads the field longer by it: the typed text went in beside the selection.
+    public func kept(length observedLength: Int?) -> Bool {
+        guard let typedOver, typedOver > 0, let length, let observedLength else { return false }
+        return observedLength - length >= typedOver
     }
 
     /// Chromium's `AXSelectedText` has a U+FFFC per text-less element, which `AXValue` leaves out.

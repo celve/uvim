@@ -66,6 +66,56 @@ public enum PhysicalPlanner {
                   case .settle(let expectation) = plan.steps[index] else { return false }
             return expectation.selectedText != nil
         }
+
+        /// What the run typed over a selection the field kept, where that ended it: ⌘Z takes it back.
+        public func keptTyping(at index: Int?) -> String? {
+            guard let index, plan.steps.indices.contains(index), case .softSettle(let expectation) = plan.steps[index],
+                  expectation.typedOver != nil else { return nil }
+            for step in plan.steps[..<index].reversed() {
+                if case .typeText(let text) = step { return text }
+                if case .clipboardInsert(let text?) = step { return text }
+            }
+            return nil
+        }
+    }
+
+    /// ⌘Z, then a wait for the field to read as long as the snapshot did.
+    public static func undoTyping(_ snapshot: FieldSnapshot) -> PhysicalPlan {
+        var context = Context(snapshot: snapshot)
+        context.unknown.insert(.selection)
+        return PhysicalPlan(steps: [.press(.undo, count: 1)] + settle(context, profile: snapshot.capabilities))
+    }
+
+    /// Deletes the run of `typed`'s length that `now` holds beyond `before`, selected by ⇧→ from a caret written at its start.
+    public static func removeInsertion(_ typed: String, from now: FieldSnapshot, leaving before: FieldSnapshot) -> PhysicalPlan? {
+        guard now.capabilities.has(.writeSelection), let oldText = before.text, let newText = now.text else { return nil }
+        let (old, new, length) = (Array(oldText.utf16), Array(newText.utf16), typed.utf16.count)
+        guard new.count == old.count + length else { return nil }
+        var prefix = 0
+        while prefix < old.count, old[prefix] == new[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < old.count, old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+        // Removing any run of `length` starting between these leaves `before`; beside the same letter the typed one is either.
+        let earliest = old.count - suffix
+        guard earliest <= prefix else { return nil }
+        var boundaries: Set<Int> = [new.count]
+        for index in newText.indices { boundaries.insert(index.utf16Offset(in: newText)) }
+        guard let start = (earliest...prefix).reversed().first(where: {
+            boundaries.contains($0) && boundaries.contains($0 + length)
+        }) else { return nil }
+        let run = start..<start + length
+        let profile = now.capabilities
+        var context = Context(snapshot: now)
+        guard let model = context.model else { return nil }
+        var steps = write(start..<start, context: context)
+        context.selection = start..<start
+        steps += settle(context, profile: profile)
+        steps.append(.press(.selectRight, count: model.graphemes(in: run)))
+        context.selection = run
+        steps += settle(context, profile: profile) + checkSelectedText(model.substring(run), context: context, profile: profile)
+        steps.append(.press(.deleteBack, count: 1))
+        context.applyEdit(range: run, replacement: "")
+        return PhysicalPlan(steps: steps + settle(context, profile: profile))
     }
 
     /// The plan alone — tests and any caller with no use for the rest.
@@ -128,8 +178,27 @@ public enum PhysicalPlanner {
             uncover = []
         }
         return Planning(
-            plan: PhysicalPlan(steps: uncover + steps), rejection: nil, operand: context.operand, collapsesToEnd: context.collapsesToEnd
+            plan: PhysicalPlan(steps: judgingTypedOver(uncover + steps)), rejection: nil, operand: context.operand,
+            collapsesToEnd: context.collapsesToEnd
         )
+    }
+
+    /// Marks the settles after typing over a selection an AX write finished, the only ones that judge `typeOver`.
+    static func judgingTypedOver(_ steps: [PhysicalStep]) -> [PhysicalStep] {
+        var written = false
+        var typedOnWrite = false
+        return steps.map { step in
+            switch step {
+            case .setSelection: written = true
+            case .press: written = false
+            case .typeText, .clipboardInsert: typedOnWrite = written
+            case .softSettle(var expectation) where expectation.typedOver != nil:
+                expectation.typedOverWrite = typedOnWrite
+                return .softSettle(expectation)
+            default: break
+            }
+            return step
+        }
     }
 
     /// Marks the first settle after a selection write and the keys `write` added to finish it, which checks that write.
@@ -292,7 +361,7 @@ private extension PhysicalPlanner {
         case .yankSelection(let register):
             return lowerYank(into: register, context: &context, profile: profile)
         case .replaceSelection(let replacement):
-            return lowerTypeOver(replacement, context: &context, profile: profile)
+            return lowerTypeOver(replacement, replacing: true, context: &context, profile: profile)
         case .transformSelection(let transform):
             return lowerTransform(transform, context: &context, profile: profile)
         case .insertText(let insertion):

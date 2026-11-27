@@ -23,7 +23,8 @@ public extension ResolvedBeliefs {
                 let model = capability == .readCaret && readModel.answer == .untrusted ? readModel.belief : nil
                 let beliefs = [model].compactMap { $0 } + inForce.filter { $0.capability == capability } + onTrial
                 return beliefs.isEmpty ? nil : Lesson(capability: capability, state: .inForce, beliefs: beliefs)
-            case (.available, .probed) where !overridden.contains(capability) && !onTrial.isEmpty:
+            case (.available, .probed) where !overridden.contains(capability) && !onTrial.isEmpty,
+                 (.unknown, .probed) where !overridden.contains(capability) && !onTrial.isEmpty:
                 return Lesson(capability: capability, state: .reopened, beliefs: onTrial)
             default:
                 return nil

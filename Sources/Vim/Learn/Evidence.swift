@@ -39,6 +39,8 @@ public struct Evidence: Equatable, Sendable {
         case edge
         /// A text write that returned no error left the field as the passing settle before it read it.
         case unchanged
+        /// Typing over a selection left it in the field, the typed text beside it.
+        case kept
         case unmoved
         case leftSelection = "left-selection"
         case leftCaret = "left-caret"

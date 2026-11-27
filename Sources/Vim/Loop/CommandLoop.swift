@@ -198,6 +198,17 @@ extension CommandLoop {
             host.record(completed, logical: logical, planned: planned, from: before, reading: reading, executed: ran.executed)
         }
         guard ran.executed else {
+            if let typed = planned.keptTyping(at: ran.abortedAt) {
+                let kept = host.value()
+                host.runAside(PhysicalPlanner.undoTyping(snapshot), paragraphs: paragraphs)
+                // An undo step that held earlier edits took them back too: ⇧⌘Z returns them, and the typed run goes alone.
+                if let before = reading.value, let after = host.value(), after != before,
+                   host.runAside(PhysicalPlan(steps: [.press(.redo, count: 1)]), paragraphs: paragraphs),
+                   let kept, host.awaitUndo(from: after).shown == kept,
+                   let removal = PhysicalPlanner.removeInsertion(typed, from: host.snapshotAside(), leaving: snapshot) {
+                    host.runAside(removal, paragraphs: paragraphs)
+                }
+            }
             if planned.abortedAtTextCheck(ran.abortedAt) {
                 // Other text than the plan meant was selected, so the mode it asked for goes too.
                 if let read = host.selectionRead(paragraphs: paragraphs), !read.caret {

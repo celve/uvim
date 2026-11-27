@@ -2,9 +2,10 @@
 public struct Strikes: Equatable, Sendable {
     public static let limit = 3
 
-    /// The opt-in app keys (`nativeMotions`) keep the one-miss rule, and so does a text write that changed nothing.
+    /// The opt-in app keys (`nativeMotions`) keep the one-miss rule, and so do a text write that changed nothing and typing that
+    /// kept the selection.
     public static func limit(for capability: Capability, why: Evidence.Why) -> Int {
-        if capability == .wordKeys || capability == .paragraphKeys { return 1 }
+        if capability == .wordKeys || capability == .paragraphKeys || capability == .typeOver { return 1 }
         return capability == .insertText && why == .unchanged ? 1 : limit
     }
 

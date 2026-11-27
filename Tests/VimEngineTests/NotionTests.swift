@@ -36,9 +36,9 @@ func testNotionKeysOnly() {
     let code = notionResolved(classes: notionBlockClasses, parent: notionCodeParent)
     let plain = notionResolved(classes: notionBlockClasses, parent: notionTextParent)
     for report in [cell, code] {
-        precondition(report.traceGrid.contains("WS-p IT-l DC-p WD-p FS-p"), report.traceGrid)
+        precondition(report.traceGrid.contains("WS-p IT-l TO?p DC-p WD-p FS-p"), report.traceGrid)
     }
-    precondition(plain.traceGrid.contains("WS+p IT-l DC-p WD-p FS-p"), plain.traceGrid)
+    precondition(plain.traceGrid.contains("WS+p IT-l TO?p DC-p WD-p FS-p"), plain.traceGrid)
     let userOn = notionResolved(classes: notionCellClasses, parent: [], config: [.writeSelection: ConfigChoice(override: .on)])
     precondition(userOn.entries[.writeSelection] == .init(status: .available, source: .user), "the user's On writes again")
     let userOff = notionResolved(classes: notionBlockClasses, parent: notionTextParent, config: [.writeSelection: ConfigChoice(override: .off)])
