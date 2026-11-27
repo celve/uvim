@@ -158,10 +158,14 @@ extension Sim {
     }
 
     func pulledBack(_ range: Range<Int>) -> Range<Int> {
-        guard pullsBackFromLineEnds else { return range }
+        guard pullsBackFromLineEnds || trailingLines > 0 else { return range }
         let model = TextModel(text)
+        var tail = model.length
+        for _ in 0..<trailingLines where tail > 0 { tail = model.lineStart(of: tail) - 1 }
+        let modelEnd = trailingLines > 0 ? model.lineEnd(of: model.lineStart(of: max(tail, 0))) : model.length
         func pulled(_ offset: Int) -> Int {
-            guard offset > 0, model.lineBreak(of: offset) == offset else { return offset }
+            guard offset <= modelEnd else { return modelEnd }
+            guard pullsBackFromLineEnds, offset > 0, model.lineBreak(of: offset) == offset else { return offset }
             let before = model.advance(offset, byGraphemes: -1)
             return TextModel.isInvisible(Character(model.substring(before..<offset))) ? before : offset
         }

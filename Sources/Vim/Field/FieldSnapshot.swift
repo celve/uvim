@@ -211,7 +211,7 @@ public extension FieldSnapshot {
         if answer == .textContent, capabilities.has(.readCaret), let model = text, let current = breaks, let marked = reads.marked,
            let raw = reads.markerText {
             let found = memo?.document.found ?? UnreachableLines.Found(markers: [], chips: [])
-            let folded = UnreachableLines.fold(text: model, breaks: current, raw: raw, found: found)
+            let folded = UnreachableLines.fold(text: model, breaks: current, raw: raw, found: found, editor: reads.editor)
             if folded.folded > 0 || !folded.breaks.hidden.isEmpty {
                 var read = marked
                 var sides = reads.sides
