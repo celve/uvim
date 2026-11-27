@@ -30,7 +30,16 @@ public struct KeyEvent {
             var length = 0
             var buffer = [UniChar](repeating: 0, count: 4)
             cgEvent.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &buffer)
-            characters = String(utf16CodeUnits: buffer, count: max(0, length))
+            let text = String(utf16CodeUnits: buffer, count: max(0, length))
+            characters = Self.resolvesUnderOwnFlags(text, flags: cgEvent.flags)
+                ? text : InputSource.text(forKey: keyCode, flags: cgEvent.flags) ?? text
         }
+    }
+
+    /// A poster that sends no flagsChanged gets each key's text resolved under the previous key's modifiers, so the key
+    /// after a posted ⌃[ reads ⌃h's U+0008 with no ⌃ in its flags; only a control character without ⌃ is that tell.
+    static func resolvesUnderOwnFlags(_ text: String, flags: CGEventFlags) -> Bool {
+        guard !flags.contains(.maskControl), let scalar = text.unicodeScalars.first else { return true }
+        return scalar.value >= 0x20
     }
 }
